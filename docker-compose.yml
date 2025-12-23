@@ -1,0 +1,137 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: legal_ai_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-legal_ai_news}
+      POSTGRES_USER: ${POSTGRES_USER:-legal_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      POSTGRES_INITDB_ARGS: "-E UTF8 --locale=ru_RU.UTF-8"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init_db.sql:/docker-entrypoint-initdb.d/init_db.sql
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-legal_user}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis Cache/Queue
+  redis:
+    image: redis:7-alpine
+    container_name: legal_ai_redis
+    restart: unless-stopped
+    command: redis-server --requirepass ${REDIS_PASSWORD:-changeme} --appendonly yes
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # Main Application
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: legal_ai_app
+    restart: unless-stopped
+    env_file:
+      - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./app:/app/app
+      - ./templates:/app/templates
+      - ./knowledge_base:/app/knowledge_base
+      - ./media:/app/media
+    ports:
+      - "8000:8000"
+    command: python -m app.main
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Celery Worker
+  celery_worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: legal_ai_celery_worker
+    restart: unless-stopped
+    env_file:
+      - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./app:/app/app
+      - ./templates:/app/templates
+      - ./knowledge_base:/app/knowledge_base
+      - ./media:/app/media
+    command: celery -A app.tasks.celery_tasks worker --loglevel=info
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.tasks.celery_tasks inspect ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Celery Beat (Scheduler)
+  celery_beat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: legal_ai_celery_beat
+    restart: unless-stopped
+    env_file:
+      - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./app:/app/app
+      - ./celerybeat-schedule:/app/celerybeat-schedule
+    command: celery -A app.tasks.celery_tasks beat --loglevel=info
+
+  # Telegram Bot
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: legal_ai_bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./app:/app/app
+      - ./media:/app/media
+    command: python -m app.bot.handlers
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
