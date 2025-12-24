@@ -236,9 +236,14 @@ class MediaFile(Base):
 engine = create_async_engine(
     settings.database_url,
     echo=settings.debug,
-    pool_pre_ping=True,
+    pool_pre_ping=True,  # Проверяет соединение перед использованием
+    pool_recycle=3600,  # Пересоздает соединения каждый час (до timeout PostgreSQL)
     pool_size=10,
     max_overflow=20,
+    connect_args={
+        "server_settings": {"jit": "off"},  # Отключаем JIT для стабильности
+        "command_timeout": 60,  # Таймаут команд 60 секунд
+    }
 )
 
 # Create async session factory
