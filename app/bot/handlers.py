@@ -303,6 +303,99 @@ async def process_edit(message: Message, state: FSMContext, db: AsyncSession):
 
 
 # ====================
+# Обработчики кнопок главного меню
+# ====================
+
+@router.callback_query(F.data == "show_drafts")
+async def callback_show_drafts(callback: CallbackQuery, db: AsyncSession):
+    """Показать драфты через кнопку."""
+    if not await check_admin(callback.from_user.id):
+        await callback.answer("⛔️ Нет прав доступа", show_alert=True)
+        return
+
+    # Получаем драфты в статусе pending_review
+    result = await db.execute(
+        select(PostDraft)
+        .where(PostDraft.status == 'pending_review')
+        .order_by(PostDraft.created_at.desc())
+    )
+    drafts = list(result.scalars().all())
+
+    if not drafts:
+        await callback.message.answer("📭 Нет новых драфтов для модерации.")
+        await callback.answer()
+        return
+
+    await callback.message.answer(f"📝 Найдено {len(drafts)} драфтов. Отправляю...")
+
+    # Отправляем каждый драфт
+    for draft in drafts[:5]:
+        await send_draft_for_review(callback.message.chat.id, draft, db)
+
+    await callback.answer("Драфты отправлены")
+
+
+@router.callback_query(F.data == "run_fetch")
+async def callback_run_fetch(callback: CallbackQuery):
+    """Запустить сбор новостей через кнопку."""
+    if not await check_admin(callback.from_user.id):
+        await callback.answer("⛔️ Нет прав доступа", show_alert=True)
+        return
+
+    await callback.message.answer("🔄 Запускаю сбор новостей...")
+
+    try:
+        from app.tasks.celery_tasks import manual_workflow
+        task = manual_workflow.delay()
+
+        await callback.message.answer(
+            f"✅ Задача запущена!\n"
+            f"ID задачи: <code>{task.id}</code>\n\n"
+            f"Процесс займет 5-10 минут.\n"
+            f"Используйте /drafts чтобы проверить новые драфты.",
+            parse_mode="HTML"
+        )
+        await callback.answer("Сбор запущен")
+    except Exception as e:
+        logger.error("fetch_error", error=str(e))
+        await callback.message.answer(f"❌ Ошибка запуска: {str(e)}")
+        await callback.answer("Ошибка", show_alert=True)
+
+
+@router.callback_query(F.data == "show_stats")
+async def callback_show_stats(callback: CallbackQuery, db: AsyncSession):
+    """Показать статистику через кнопку."""
+    if not await check_admin(callback.from_user.id):
+        await callback.answer("⛔️ Нет прав доступа", show_alert=True)
+        return
+
+    stats_text = await get_statistics(db)
+    await callback.message.answer(stats_text, parse_mode="HTML")
+    await callback.answer()
+
+
+@router.callback_query(F.data == "show_settings")
+async def callback_show_settings(callback: CallbackQuery):
+    """Показать настройки через кнопку."""
+    if not await check_admin(callback.from_user.id):
+        await callback.answer("⛔️ Нет прав доступа", show_alert=True)
+        return
+
+    settings_text = """
+⚙️ <b>Настройки системы</b>
+
+📊 Сбор новостей: автоматически в 09:00 MSK
+🤖 AI модель: GPT-4o-mini
+📝 Макс. драфтов/день: 3
+✅ Требуется модерация: Да
+
+Для изменения настроек используйте переменные окружения в .env файле.
+"""
+    await callback.message.answer(settings_text, parse_mode="HTML")
+    await callback.answer()
+
+
+# ====================
 # Утилитарные функции
 # ====================
 
