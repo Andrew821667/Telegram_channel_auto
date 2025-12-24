@@ -116,7 +116,7 @@ class Settings(BaseSettings):
     # News Fetcher
     fetcher_enabled: bool = Field(default=True)
     fetcher_interval_hours: int = Field(default=24)
-    fetcher_max_articles_per_source: int = Field(default=50)
+    fetcher_max_articles_per_source: int = Field(default=10)  # Сокращено для быстрого тестирования
     fetcher_request_timeout: int = Field(default=30)
     fetcher_max_retries: int = Field(default=3)
     fetcher_retry_delay: int = Field(default=2)

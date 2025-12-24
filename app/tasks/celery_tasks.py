@@ -54,6 +54,7 @@ app.conf.update(
 def run_async(coro):
     """
     Запустить асинхронную корутину в синхронном контексте.
+    Использует существующий event loop или создаёт новый.
 
     Args:
         coro: Корутина для выполнения
@@ -61,7 +62,23 @@ def run_async(coro):
     Returns:
         Результат выполнения
     """
-    return asyncio.run(coro)
+    try:
+        # Пытаемся получить текущий event loop
+        loop = asyncio.get_event_loop()
+        if loop.is_closed():
+            # Если закрыт - создаём новый
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+    except RuntimeError:
+        # Если нет event loop - создаём новый
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        # НЕ закрываем loop - переиспользуем его
+        pass
 
 
 async def notify_admin(message: str):
