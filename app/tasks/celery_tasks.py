@@ -61,8 +61,7 @@ def run_async(coro):
     Returns:
         Результат выполнения
     """
-    loop = asyncio.get_event_loop()
-    return loop.run_until_complete(coro)
+    return asyncio.run(coro)
 
 
 async def notify_admin(message: str):
@@ -284,34 +283,33 @@ def daily_workflow_task():
 
     Запуск: ежедневно в 09:00 MSK
     """
+    from celery import chain
+
     logger.info("daily_workflow_task_started")
 
     try:
-        # Запускаем задачи последовательно
-        result1 = fetch_news_task.delay()
-        result1.get(timeout=600)  # Ждем до 10 минут
+        # Создаем цепочку задач для последовательного выполнения
+        workflow = chain(
+            fetch_news_task.s(),
+            clean_news_task.s(),
+            analyze_articles_task.s(),
+            generate_media_task.s(),
+            send_drafts_to_admin_task.s()
+        )
 
-        result2 = clean_news_task.delay()
-        result2.get(timeout=300)  # Ждем до 5 минут
+        # Запускаем цепочку
+        result = workflow.apply_async()
 
-        result3 = analyze_articles_task.delay()
-        result3.get(timeout=900)  # Ждем до 15 минут
+        logger.info("daily_workflow_task_chain_started", task_id=result.id)
 
-        result4 = generate_media_task.delay()
-        result4.get(timeout=300)  # Ждем до 5 минут
-
-        result5 = send_drafts_to_admin_task.delay()
-        result5.get(timeout=180)  # Ждем до 3 минут
-
-        logger.info("daily_workflow_task_completed")
-
-        # Отправляем финальное уведомление
+        # Отправляем уведомление о запуске
         run_async(notify_admin(
-            "✅ <b>Ежедневный workflow завершен!</b>\n\n"
+            "🔄 <b>Ежедневный workflow запущен!</b>\n\n"
+            "Ожидайте завершения через 10-15 минут.\n"
             "Проверьте новые драфты с помощью /drafts"
         ))
 
-        return "Daily workflow completed successfully"
+        return f"Daily workflow chain started: {result.id}"
 
     except Exception as e:
         logger.error("daily_workflow_task_error", error=str(e))
