@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import AsyncGenerator, Optional, List
 from sqlalchemy import (
     Column, Integer, String, Text, Float, Boolean, TIMESTAMP,
-    BigInteger, ForeignKey, CheckConstraint, Index, ARRAY
+    BigInteger, ForeignKey, CheckConstraint, Index, ARRAY, text
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import (
@@ -292,7 +292,7 @@ async def check_db_connection() -> bool:
     """
     try:
         async with AsyncSessionLocal() as session:
-            await session.execute("SELECT 1")
+            await session.execute(text("SELECT 1"))
             return True
     except Exception:
         return False
