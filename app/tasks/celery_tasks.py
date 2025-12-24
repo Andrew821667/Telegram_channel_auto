@@ -8,6 +8,14 @@ Celery Tasks
 """
 
 import asyncio
+import sys
+
+# КРИТИЧНО: Отключаем uvloop для Celery worker
+# uvloop привязывается к event loop и вызывает "Event loop is closed" при asyncio.run()
+# Устанавливаем стандартную asyncio policy до любых импортов asyncpg
+if 'celery' in sys.argv[0] or 'celery' in ' '.join(sys.argv):
+    asyncio.set_event_loop_policy(asyncio.DefaultEventLoopPolicy())
+
 from datetime import datetime
 from typing import Dict, Any
 
