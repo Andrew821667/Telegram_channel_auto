@@ -99,20 +99,54 @@ def fetch_news_task(self):
         logger.info("fetch_news_task_started")
 
         async def fetch():
-            async with AsyncSessionLocal() as session:
-                stats = await fetch_news(session)
-                return stats
+            # Создаём новый engine внутри asyncio.run() контекста
+            from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+            from app.config import settings
+
+            engine = create_async_engine(
+                settings.database_url,
+                echo=settings.debug,
+                pool_pre_ping=True,
+                pool_recycle=3600,
+            )
+
+            SessionLocal = async_sessionmaker(
+                engine,
+                class_=AsyncSession,
+                expire_on_commit=False,
+            )
+
+            try:
+                async with SessionLocal() as session:
+                    stats = await fetch_news(session)
+                    return stats
+            finally:
+                await engine.dispose()
 
         stats = run_async(fetch())
 
         logger.info("fetch_news_task_completed", stats=stats)
 
         # Логируем в БД
-        run_async(log_to_db(
-            "INFO",
-            f"Fetch task completed: {sum(stats.values())} articles",
-            {"stats": stats}
-        ))
+        async def log():
+            from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+            from app.config import settings
+
+            engine = create_async_engine(settings.database_url, pool_pre_ping=True)
+            SessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+            try:
+                async with SessionLocal() as session:
+                    await log_to_db(
+                        "INFO",
+                        f"Fetch task completed: {sum(stats.values())} articles",
+                        {"stats": stats}
+                    )
+                    await session.commit()
+            finally:
+                await engine.dispose()
+
+        run_async(log())
 
         return f"Fetched {sum(stats.values())} articles from {len(stats)} sources"
 
