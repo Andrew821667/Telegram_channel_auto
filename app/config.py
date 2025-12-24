@@ -123,8 +123,9 @@ class Settings(BaseSettings):
 
     # Google News RSS
     google_news_rss_url: str = Field(default="https://news.google.com/rss/search")
-    google_news_query_ru: str = Field(default="искусственный интеллект AND (право OR суд OR юрист)")
-    google_news_query_en: str = Field(default="artificial intelligence AND (law OR court OR lawyer)")
+    # Расширенные запросы: AI в бизнесе + нативные юридические связи для привлечения клиентов
+    google_news_query_ru: str = Field(default="искусственный интеллект AND (право OR суд OR юрист OR бизнес OR комплаенс OR договор OR автоматизация OR корпоративный OR риски OR управление)")
+    google_news_query_en: str = Field(default="artificial intelligence AND (law OR legal OR court OR lawyer OR business OR compliance OR contract OR automation OR corporate OR risk OR governance OR legaltech)")
     google_news_lang_ru: str = Field(default="ru")
     google_news_lang_en: str = Field(default="en")
     google_news_region: str = Field(default="RU")
