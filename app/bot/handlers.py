@@ -27,6 +27,7 @@ from app.bot.keyboards import (
     get_main_menu_keyboard,
     get_rejection_reasons_keyboard
 )
+from app.bot.middleware import DbSessionMiddleware
 import structlog
 
 logger = structlog.get_logger()
@@ -74,15 +75,10 @@ async def cmd_start(message: Message):
 
 
 @router.message(Command("drafts"))
-async def cmd_drafts(message: Message, db: AsyncSession = None):
+async def cmd_drafts(message: Message, db: AsyncSession):
     """Показать новые драфты для модерации."""
     if not await check_admin(message.from_user.id):
         return
-
-    if db is None:
-        async for session in get_db():
-            db = session
-            break
 
     # Получаем драфты в статусе pending_review
     result = await db.execute(
@@ -104,15 +100,10 @@ async def cmd_drafts(message: Message, db: AsyncSession = None):
 
 
 @router.message(Command("stats"))
-async def cmd_stats(message: Message, db: AsyncSession = None):
+async def cmd_stats(message: Message, db: AsyncSession):
     """Показать статистику."""
     if not await check_admin(message.from_user.id):
         return
-
-    if db is None:
-        async for session in get_db():
-            db = session
-            break
 
     # Собираем статистику
     stats_text = await get_statistics(db)
@@ -132,6 +123,7 @@ async def cmd_help(message: Message):
 /start - Главное меню
 /drafts - Показать новые драфты
 /stats - Статистика системы
+/fetch - Запустить сбор новостей вручную
 /help - Эта справка
 
 <b>Модерация драфтов:</b>
@@ -151,23 +143,43 @@ async def cmd_help(message: Message):
     await message.answer(help_text, parse_mode="HTML")
 
 
+@router.message(Command("fetch"))
+async def cmd_fetch(message: Message):
+    """Запустить сбор новостей вручную."""
+    if not await check_admin(message.from_user.id):
+        return
+
+    await message.answer("🔄 Запускаю сбор новостей...")
+
+    try:
+        # Импортируем и запускаем задачу Celery
+        from app.tasks.celery_tasks import daily_workflow
+        task = daily_workflow.delay()
+
+        await message.answer(
+            f"✅ Задача запущена!\n"
+            f"ID задачи: <code>{task.id}</code>\n\n"
+            f"Процесс займет 5-10 минут.\n"
+            f"Используйте /drafts чтобы проверить новые драфты.",
+            parse_mode="HTML"
+        )
+    except Exception as e:
+        logger.error("fetch_error", error=str(e))
+        await message.answer(f"❌ Ошибка запуска: {str(e)}")
+
+
 # ====================
 # Callback обработчики
 # ====================
 
 @router.callback_query(F.data.startswith("publish:"))
-async def callback_publish(callback: CallbackQuery, db: AsyncSession = None):
+async def callback_publish(callback: CallbackQuery, db: AsyncSession):
     """Обработчик кнопки публикации."""
     if not await check_admin(callback.from_user.id):
         await callback.answer("⛔️ Нет прав доступа", show_alert=True)
         return
 
     draft_id = int(callback.data.split(":")[1])
-
-    if db is None:
-        async for session in get_db():
-            db = session
-            break
 
     # Запрашиваем подтверждение
     await callback.message.edit_reply_markup(
@@ -177,17 +189,12 @@ async def callback_publish(callback: CallbackQuery, db: AsyncSession = None):
 
 
 @router.callback_query(F.data.startswith("confirm_publish:"))
-async def callback_confirm_publish(callback: CallbackQuery, db: AsyncSession = None):
+async def callback_confirm_publish(callback: CallbackQuery, db: AsyncSession):
     """Подтверждение публикации."""
     if not await check_admin(callback.from_user.id):
         return
 
     draft_id = int(callback.data.split(":")[1])
-
-    if db is None:
-        async for session in get_db():
-            db = session
-            break
 
     # Публикуем пост
     success = await publish_draft(draft_id, db, callback.from_user.id)
@@ -221,7 +228,7 @@ async def callback_reject(callback: CallbackQuery):
 
 
 @router.callback_query(F.data.startswith("reject_reason:"))
-async def callback_reject_reason(callback: CallbackQuery, db: AsyncSession = None):
+async def callback_reject_reason(callback: CallbackQuery, db: AsyncSession):
     """Обработка выбора причины отклонения."""
     if not await check_admin(callback.from_user.id):
         return
@@ -229,11 +236,6 @@ async def callback_reject_reason(callback: CallbackQuery, db: AsyncSession = Non
     parts = callback.data.split(":")
     draft_id = int(parts[1])
     reason = parts[2]
-
-    if db is None:
-        async for session in get_db():
-            db = session
-            break
 
     # Отклоняем драфт
     success = await reject_draft(draft_id, reason, db, callback.from_user.id)
@@ -275,15 +277,10 @@ async def cancel_edit(message: Message, state: FSMContext):
 
 
 @router.message(EditDraft.waiting_for_edit)
-async def process_edit(message: Message, state: FSMContext, db: AsyncSession = None):
+async def process_edit(message: Message, state: FSMContext, db: AsyncSession):
     """Обработка отредактированного текста."""
     data = await state.get_data()
     draft_id = data.get("draft_id")
-
-    if db is None:
-        async for session in get_db():
-            db = session
-            break
 
     # Обновляем драфт
     result = await db.execute(
@@ -537,6 +534,11 @@ async def get_statistics(db: AsyncSession) -> str:
 
 async def start_bot():
     """Запустить бота."""
+    # Регистрируем middleware для БД сессий
+    dp.message.middleware(DbSessionMiddleware())
+    dp.callback_query.middleware(DbSessionMiddleware())
+
+    # Регистрируем роутер
     dp.include_router(router)
 
     logger.info("bot_starting")
