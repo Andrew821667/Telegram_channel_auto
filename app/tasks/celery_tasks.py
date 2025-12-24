@@ -128,12 +128,12 @@ def fetch_news_task(self):
                 expire_on_commit=False,
             )
 
-            try:
-                async with SessionLocal() as session:
-                    stats = await fetch_news(session)
-                    return stats
-            finally:
-                await engine.dispose()
+            async with SessionLocal() as session:
+                stats = await fetch_news(session)
+
+            # НЕ вызываем engine.dispose() - asyncio.run() автоматически закроет все ресурсы
+            # Вызов dispose() приводит к RuntimeError: Event loop is closed
+            return stats
 
         stats = run_async(fetch())
 
@@ -180,12 +180,11 @@ def clean_news_task(self):
                 expire_on_commit=False,
             )
 
-            try:
-                async with SessionLocal() as session:
-                    stats = await clean_news(session)
-                    return stats
-            finally:
-                await engine.dispose()
+            async with SessionLocal() as session:
+                stats = await clean_news(session)
+
+            # НЕ вызываем engine.dispose() - asyncio.run() сам закроет ресурсы
+            return stats
 
         stats = run_async(clean())
 
@@ -228,12 +227,11 @@ def analyze_articles_task(self):
                 expire_on_commit=False,
             )
 
-            try:
-                async with SessionLocal() as session:
-                    stats = await process_articles_with_ai(session)
-                    return stats
-            finally:
-                await engine.dispose()
+            async with SessionLocal() as session:
+                stats = await process_articles_with_ai(session)
+
+            # НЕ вызываем engine.dispose() - asyncio.run() сам закроет ресурсы
+            return stats
 
         stats = run_async(analyze())
 
@@ -276,12 +274,11 @@ def generate_media_task(self):
                 expire_on_commit=False,
             )
 
-            try:
-                async with SessionLocal() as session:
-                    count = await create_media_for_drafts(session)
-                    return count
-            finally:
-                await engine.dispose()
+            async with SessionLocal() as session:
+                count = await create_media_for_drafts(session)
+
+            # НЕ вызываем engine.dispose() - asyncio.run() сам закроет ресурсы
+            return count
 
         count = run_async(generate())
 
@@ -323,39 +320,38 @@ def send_drafts_to_admin_task(self):
                 expire_on_commit=False,
             )
 
-            try:
-                async with SessionLocal() as session:
-                    # Получаем драфты в статусе pending_review
-                    result = await session.execute(
-                        select(PostDraft)
-                        .where(PostDraft.status == 'pending_review')
-                        .order_by(PostDraft.created_at.desc())
+            async with SessionLocal() as session:
+                # Получаем драфты в статусе pending_review
+                result = await session.execute(
+                    select(PostDraft)
+                    .where(PostDraft.status == 'pending_review')
+                    .order_by(PostDraft.created_at.desc())
+                )
+                drafts = list(result.scalars().all())
+
+                if not drafts:
+                    await notify_admin("📭 Нет новых драфтов сегодня.")
+                    return 0
+
+                # Отправляем уведомление
+                await notify_admin(
+                    f"📝 <b>Новые драфты готовы к модерации!</b>\n\n"
+                    f"Количество: {len(drafts)}\n"
+                    f"Используйте /drafts для просмотра."
+                )
+
+                # Отправляем каждый драфт
+                for draft in drafts[:5]:  # Ограничиваем 5 за раз
+                    await send_draft_for_review(
+                        settings.telegram_admin_id,
+                        draft,
+                        session
                     )
-                    drafts = list(result.scalars().all())
+                    await asyncio.sleep(1)  # Rate limiting
 
-                    if not drafts:
-                        await notify_admin("📭 Нет новых драфтов сегодня.")
-                        return 0
+                return len(drafts)
 
-                    # Отправляем уведомление
-                    await notify_admin(
-                        f"📝 <b>Новые драфты готовы к модерации!</b>\n\n"
-                        f"Количество: {len(drafts)}\n"
-                        f"Используйте /drafts для просмотра."
-                    )
-
-                    # Отправляем каждый драфт
-                    for draft in drafts[:5]:  # Ограничиваем 5 за раз
-                        await send_draft_for_review(
-                            settings.telegram_admin_id,
-                            draft,
-                            session
-                        )
-                        await asyncio.sleep(1)  # Rate limiting
-
-                    return len(drafts)
-            finally:
-                await engine.dispose()
+            # НЕ вызываем engine.dispose() - asyncio.run() сам закроет ресурсы
 
         count = run_async(send_drafts())
 
