@@ -108,8 +108,7 @@ services:
         condition: service_healthy
     volumes:
       - ./app:/app/app
-      - ./celerybeat-schedule:/app/celerybeat-schedule
-    command: celery -A app.tasks.celery_tasks beat --loglevel=info
+    command: celery -A app.tasks.celery_tasks beat --loglevel=info --schedule=/tmp/celerybeat-schedule
 
   # Telegram Bot
   bot:
