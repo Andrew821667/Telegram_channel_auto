@@ -306,7 +306,8 @@ async def check_db_connection() -> bool:
 async def log_to_db(
     level: str,
     message: str,
-    context: Optional[dict] = None
+    context: Optional[dict] = None,
+    session: Optional[AsyncSession] = None
 ) -> None:
     """
     Log event to database.
@@ -315,12 +316,20 @@ async def log_to_db(
         level: Log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
         message: Log message
         context: Additional context as dictionary
+        session: Optional existing session to use (для Celery tasks)
     """
-    async with AsyncSessionLocal() as session:
-        log_entry = SystemLog(
-            level=level,
-            message=message,
-            context=context or {}
-        )
+    log_entry = SystemLog(
+        level=level,
+        message=message,
+        context=context or {}
+    )
+
+    if session:
+        # Используем переданную сессию (для Celery tasks)
         session.add(log_entry)
-        await session.commit()
+        await session.flush()  # Не делаем commit - это ответственность вызывающего кода
+    else:
+        # Создаём свою сессию (для bot handlers и других мест)
+        async with AsyncSessionLocal() as db_session:
+            db_session.add(log_entry)
+            await db_session.commit()

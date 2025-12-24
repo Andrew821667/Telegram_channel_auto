@@ -412,7 +412,8 @@ class AICore:
         await log_to_db(
             "INFO",
             f"AI processing completed: {stats['drafts_created']} drafts created",
-            stats
+            stats,
+            session=self.db  # Передаём существующую сессию
         )
 
         logger.info("ai_processing_complete", **stats)
