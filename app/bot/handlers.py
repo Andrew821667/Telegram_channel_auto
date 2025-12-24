@@ -153,8 +153,8 @@ async def cmd_fetch(message: Message):
 
     try:
         # Импортируем и запускаем задачу Celery
-        from app.tasks.celery_tasks import daily_workflow
-        task = daily_workflow.delay()
+        from app.tasks.celery_tasks import manual_workflow
+        task = manual_workflow.delay()
 
         await message.answer(
             f"✅ Задача запущена!\n"
