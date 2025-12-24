@@ -113,13 +113,16 @@ def fetch_news_task(self):
         async def fetch():
             # Создаём новый engine внутри asyncio.run() контекста
             from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+            from sqlalchemy.pool import NullPool
             from app.config import settings
 
+            # КРИТИЧНО: Используем NullPool вместо обычного пула
+            # NullPool НЕ кэширует соединения и закрывает их сразу
+            # Это предотвращает RuntimeError: Event loop is closed при garbage collection
             engine = create_async_engine(
                 settings.database_url,
                 echo=settings.debug,
-                pool_pre_ping=True,
-                pool_recycle=3600,
+                poolclass=NullPool,  # Отключаем пул соединений
             )
 
             SessionLocal = async_sessionmaker(
@@ -133,9 +136,7 @@ def fetch_news_task(self):
                     stats = await fetch_news(session)
                 return stats
             finally:
-                # КРИТИЧНО: Закрываем engine ДО выхода из asyncio.run()
-                # Иначе garbage collector попытается закрыть соединения после того
-                # как event loop уже закрыт -> RuntimeError: Event loop is closed
+                # Закрываем engine ДО выхода из asyncio.run()
                 await engine.dispose()
 
         stats = run_async(fetch())
@@ -167,14 +168,13 @@ def clean_news_task(self):
         logger.info("clean_news_task_started")
 
         async def clean():
-            # Создаём новый engine внутри asyncio.run() контекста
             from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+            from sqlalchemy.pool import NullPool
             from app.config import settings
 
             engine = create_async_engine(
                 settings.database_url,
-                pool_pre_ping=True,
-                pool_recycle=3600,
+                poolclass=NullPool,
             )
 
             SessionLocal = async_sessionmaker(
@@ -215,14 +215,13 @@ def analyze_articles_task(self):
         logger.info("analyze_articles_task_started")
 
         async def analyze():
-            # Создаём новый engine внутри asyncio.run() контекста
             from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+            from sqlalchemy.pool import NullPool
             from app.config import settings
 
             engine = create_async_engine(
                 settings.database_url,
-                pool_pre_ping=True,
-                pool_recycle=3600,
+                poolclass=NullPool,
             )
 
             SessionLocal = async_sessionmaker(
@@ -263,14 +262,13 @@ def generate_media_task(self):
         logger.info("generate_media_task_started")
 
         async def generate():
-            # Создаём новый engine внутри asyncio.run() контекста
             from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+            from sqlalchemy.pool import NullPool
             from app.config import settings
 
             engine = create_async_engine(
                 settings.database_url,
-                pool_pre_ping=True,
-                pool_recycle=3600,
+                poolclass=NullPool,
             )
 
             SessionLocal = async_sessionmaker(
@@ -309,15 +307,14 @@ def send_drafts_to_admin_task(self):
         logger.info("send_drafts_to_admin_task_started")
 
         async def send_drafts():
-            # Создаём новый engine внутри asyncio.run() контекста
             from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+            from sqlalchemy.pool import NullPool
             from sqlalchemy import select
             from app.config import settings
 
             engine = create_async_engine(
                 settings.database_url,
-                pool_pre_ping=True,
-                pool_recycle=3600,
+                poolclass=NullPool,
             )
 
             SessionLocal = async_sessionmaker(
