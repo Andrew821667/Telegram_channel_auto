@@ -350,7 +350,7 @@ class NewsFetcher:
             date_str: Строка с датой
 
         Returns:
-            datetime объект или None
+            datetime объект или None (без timezone)
         """
         if not date_str:
             return None
@@ -358,12 +358,16 @@ class NewsFetcher:
         try:
             # feedparser обычно предоставляет parsed время
             from email.utils import parsedate_to_datetime
-            return parsedate_to_datetime(date_str)
+            dt = parsedate_to_datetime(date_str)
+            # Убираем timezone для совместимости с БД
+            return dt.replace(tzinfo=None) if dt else None
         except Exception:
             try:
                 # Fallback на ISO формат
                 from dateutil import parser
-                return parser.parse(date_str)
+                dt = parser.parse(date_str)
+                # Убираем timezone для совместимости с БД
+                return dt.replace(tzinfo=None) if dt else None
             except Exception:
                 logger.warning("date_parse_error", date_str=date_str)
                 return None
