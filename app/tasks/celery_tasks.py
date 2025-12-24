@@ -24,8 +24,6 @@ from celery.schedules import crontab
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-# НЕ импортируем AsyncSessionLocal и log_to_db - они используют глобальный engine
-# который привязан к другому event loop и вызывают RuntimeError: Event loop is closed
 from app.modules.fetcher import fetch_news
 from app.modules.cleaner import clean_news
 from app.modules.ai_core import process_articles_with_ai
