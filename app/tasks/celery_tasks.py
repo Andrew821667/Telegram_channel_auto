@@ -16,7 +16,8 @@ from celery.schedules import crontab
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.models.database import AsyncSessionLocal, log_to_db
+# НЕ импортируем AsyncSessionLocal и log_to_db - они используют глобальный engine
+# который привязан к другому event loop и вызывают RuntimeError: Event loop is closed
 from app.modules.fetcher import fetch_news
 from app.modules.cleaner import clean_news
 from app.modules.ai_core import process_articles_with_ai
@@ -130,26 +131,9 @@ def fetch_news_task(self):
 
         logger.info("fetch_news_task_completed", stats=stats)
 
-        # Логируем в БД
-        async def log():
-            from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
-            from app.config import settings
-
-            engine = create_async_engine(settings.database_url, pool_pre_ping=True)
-            SessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-
-            try:
-                async with SessionLocal() as session:
-                    await log_to_db(
-                        "INFO",
-                        f"Fetch task completed: {sum(stats.values())} articles",
-                        {"stats": stats}
-                    )
-                    await session.commit()
-            finally:
-                await engine.dispose()
-
-        run_async(log())
+        # НЕ используем log_to_db в Celery - она использует глобальный AsyncSessionLocal
+        # который привязан к старому event loop
+        # Вместо этого логируем только в structlog
 
         return f"Fetched {sum(stats.values())} articles from {len(stats)} sources"
 
@@ -172,19 +156,34 @@ def clean_news_task(self):
         logger.info("clean_news_task_started")
 
         async def clean():
-            async with AsyncSessionLocal() as session:
-                stats = await clean_news(session)
-                return stats
+            # Создаём новый engine внутри asyncio.run() контекста
+            from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+            from app.config import settings
+
+            engine = create_async_engine(
+                settings.database_url,
+                pool_pre_ping=True,
+                pool_recycle=3600,
+            )
+
+            SessionLocal = async_sessionmaker(
+                engine,
+                class_=AsyncSession,
+                expire_on_commit=False,
+            )
+
+            try:
+                async with SessionLocal() as session:
+                    stats = await clean_news(session)
+                    return stats
+            finally:
+                await engine.dispose()
 
         stats = run_async(clean())
 
         logger.info("clean_news_task_completed", stats=stats)
 
-        run_async(log_to_db(
-            "INFO",
-            f"Cleaning completed: {stats['filtered']} filtered, {stats['rejected']} rejected",
-            stats
-        ))
+        # НЕ используем log_to_db - она использует глобальный AsyncSessionLocal
 
         return f"Filtered: {stats['filtered']}, Rejected: {stats['rejected']}"
 
@@ -205,19 +204,34 @@ def analyze_articles_task(self):
         logger.info("analyze_articles_task_started")
 
         async def analyze():
-            async with AsyncSessionLocal() as session:
-                stats = await process_articles_with_ai(session)
-                return stats
+            # Создаём новый engine внутри asyncio.run() контекста
+            from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+            from app.config import settings
+
+            engine = create_async_engine(
+                settings.database_url,
+                pool_pre_ping=True,
+                pool_recycle=3600,
+            )
+
+            SessionLocal = async_sessionmaker(
+                engine,
+                class_=AsyncSession,
+                expire_on_commit=False,
+            )
+
+            try:
+                async with SessionLocal() as session:
+                    stats = await process_articles_with_ai(session)
+                    return stats
+            finally:
+                await engine.dispose()
 
         stats = run_async(analyze())
 
         logger.info("analyze_articles_task_completed", stats=stats)
 
-        run_async(log_to_db(
-            "INFO",
-            f"AI analysis completed: {stats['drafts_created']} drafts created",
-            stats
-        ))
+        # НЕ используем log_to_db - она использует глобальный AsyncSessionLocal
 
         return f"Created {stats['drafts_created']} drafts"
 
@@ -238,9 +252,28 @@ def generate_media_task(self):
         logger.info("generate_media_task_started")
 
         async def generate():
-            async with AsyncSessionLocal() as session:
-                count = await create_media_for_drafts(session)
-                return count
+            # Создаём новый engine внутри asyncio.run() контекста
+            from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+            from app.config import settings
+
+            engine = create_async_engine(
+                settings.database_url,
+                pool_pre_ping=True,
+                pool_recycle=3600,
+            )
+
+            SessionLocal = async_sessionmaker(
+                engine,
+                class_=AsyncSession,
+                expire_on_commit=False,
+            )
+
+            try:
+                async with SessionLocal() as session:
+                    count = await create_media_for_drafts(session)
+                    return count
+            finally:
+                await engine.dispose()
 
         count = run_async(generate())
 
@@ -265,37 +298,56 @@ def send_drafts_to_admin_task(self):
         logger.info("send_drafts_to_admin_task_started")
 
         async def send_drafts():
-            async with AsyncSessionLocal() as session:
-                # Получаем драфты в статусе pending_review
-                from sqlalchemy import select
-                result = await session.execute(
-                    select(PostDraft)
-                    .where(PostDraft.status == 'pending_review')
-                    .order_by(PostDraft.created_at.desc())
-                )
-                drafts = list(result.scalars().all())
+            # Создаём новый engine внутри asyncio.run() контекста
+            from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+            from sqlalchemy import select
+            from app.config import settings
 
-                if not drafts:
-                    await notify_admin("📭 Нет новых драфтов сегодня.")
-                    return 0
+            engine = create_async_engine(
+                settings.database_url,
+                pool_pre_ping=True,
+                pool_recycle=3600,
+            )
 
-                # Отправляем уведомление
-                await notify_admin(
-                    f"📝 <b>Новые драфты готовы к модерации!</b>\n\n"
-                    f"Количество: {len(drafts)}\n"
-                    f"Используйте /drafts для просмотра."
-                )
+            SessionLocal = async_sessionmaker(
+                engine,
+                class_=AsyncSession,
+                expire_on_commit=False,
+            )
 
-                # Отправляем каждый драфт
-                for draft in drafts[:5]:  # Ограничиваем 5 за раз
-                    await send_draft_for_review(
-                        settings.telegram_admin_id,
-                        draft,
-                        session
+            try:
+                async with SessionLocal() as session:
+                    # Получаем драфты в статусе pending_review
+                    result = await session.execute(
+                        select(PostDraft)
+                        .where(PostDraft.status == 'pending_review')
+                        .order_by(PostDraft.created_at.desc())
                     )
-                    await asyncio.sleep(1)  # Rate limiting
+                    drafts = list(result.scalars().all())
 
-                return len(drafts)
+                    if not drafts:
+                        await notify_admin("📭 Нет новых драфтов сегодня.")
+                        return 0
+
+                    # Отправляем уведомление
+                    await notify_admin(
+                        f"📝 <b>Новые драфты готовы к модерации!</b>\n\n"
+                        f"Количество: {len(drafts)}\n"
+                        f"Используйте /drafts для просмотра."
+                    )
+
+                    # Отправляем каждый драфт
+                    for draft in drafts[:5]:  # Ограничиваем 5 за раз
+                        await send_draft_for_review(
+                            settings.telegram_admin_id,
+                            draft,
+                            session
+                        )
+                        await asyncio.sleep(1)  # Rate limiting
+
+                    return len(drafts)
+            finally:
+                await engine.dispose()
 
         count = run_async(send_drafts())
 
