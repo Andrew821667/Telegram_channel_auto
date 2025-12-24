@@ -9,7 +9,7 @@ from typing import Optional
 
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.filters import Command, CommandStart
-from aiogram.types import Message, CallbackQuery, FSInputFile
+from aiogram.types import Message, CallbackQuery, FSInputFile, BotCommand
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from sqlalchemy import select
@@ -622,6 +622,23 @@ async def get_statistics(db: AsyncSession) -> str:
 
 
 # ====================
+# Настройка команд бота
+# ====================
+
+async def setup_bot_commands():
+    """Установить меню команд бота (кнопка меню слева внизу)."""
+    commands = [
+        BotCommand(command="start", description="🏠 Главное меню"),
+        BotCommand(command="drafts", description="📝 Новые драфты"),
+        BotCommand(command="fetch", description="🔄 Запустить сбор новостей"),
+        BotCommand(command="stats", description="📊 Статистика системы"),
+        BotCommand(command="help", description="❓ Помощь"),
+    ]
+    await bot.set_my_commands(commands)
+    logger.info("bot_commands_set", count=len(commands))
+
+
+# ====================
 # Запуск бота
 # ====================
 
@@ -638,6 +655,9 @@ async def start_bot():
 
     # Удаляем вебхуки если есть
     await bot.delete_webhook(drop_pending_updates=True)
+
+    # Устанавливаем меню команд
+    await setup_bot_commands()
 
     # Запускаем polling
     await dp.start_polling(bot)
