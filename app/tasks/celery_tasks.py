@@ -44,6 +44,9 @@ app.conf.update(
     task_track_started=True,
     task_time_limit=30 * 60,  # 30 minutes
     task_soft_time_limit=25 * 60,  # 25 minutes
+    # КРИТИЧНО: Принудительная установка threads pool
+    worker_pool='threads',
+    worker_concurrency=1,
 )
 
 
