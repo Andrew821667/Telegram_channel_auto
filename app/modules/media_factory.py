@@ -315,6 +315,102 @@ class MediaFactory:
         self.db = db_session
         self.image_generator = ImageGenerator()
 
+        # Инициализируем OpenAI клиента для DALL-E если включено
+        if settings.dalle_enabled:
+            from openai import AsyncOpenAI
+            self.openai_client = AsyncOpenAI(api_key=settings.openai_api_key)
+        else:
+            self.openai_client = None
+
+    async def generate_dalle_image(
+        self,
+        title: str,
+        content: str
+    ) -> Optional[str]:
+        """
+        Сгенерировать изображение через DALL-E.
+
+        Args:
+            title: Заголовок новости
+            content: Контент новости
+
+        Returns:
+            Путь к сохраненному изображению или None
+        """
+        if not settings.dalle_enabled or not self.openai_client:
+            return None
+
+        try:
+            # Формируем промпт для DALL-E на основе контента
+            # Извлекаем ключевые слова из заголовка и контента
+            prompt_base = f"{title}. {content[:200]}"
+
+            # Создаём тематический промпт для юридической AI тематики
+            dalle_prompt = f"""Professional business illustration for legal tech news article: {title}
+
+Style: Modern, professional, minimalist
+Theme: AI and legal technology, business innovation
+Color scheme: Corporate blues, teals, professional tones
+Mood: Serious, trustworthy, forward-thinking
+Elements: Abstract representation of AI, legal symbols, modern technology
+Avoid: Text, logos, realistic faces, cluttered details
+
+Focus on clean, magazine-quality illustration that conveys innovation in legal technology."""
+
+            logger.info(
+                "generating_dalle_image",
+                title=title[:50],
+                prompt_length=len(dalle_prompt)
+            )
+
+            # Генерируем изображение через DALL-E
+            response = await self.openai_client.images.generate(
+                model=settings.dalle_model,
+                prompt=dalle_prompt,
+                size=settings.dalle_size,
+                quality=settings.dalle_quality,
+                n=1
+            )
+
+            # Получаем URL изображения
+            image_url = response.data[0].url
+
+            # Скачиваем изображение
+            import aiohttp
+            async with aiohttp.ClientSession() as session:
+                async with session.get(image_url) as resp:
+                    if resp.status == 200:
+                        image_data = await resp.read()
+
+                        # Сохраняем изображение
+                        filename = f"dalle_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+                        filepath = self.image_generator.output_dir / filename
+
+                        with open(filepath, 'wb') as f:
+                            f.write(image_data)
+
+                        logger.info(
+                            "dalle_image_generated",
+                            filepath=str(filepath),
+                            url=image_url
+                        )
+
+                        return str(filepath)
+                    else:
+                        logger.error(
+                            "dalle_image_download_failed",
+                            status=resp.status
+                        )
+                        return None
+
+        except Exception as e:
+            logger.error(
+                "dalle_generation_error",
+                error=str(e),
+                title=title[:50]
+            )
+            return None
+
     async def create_cover_for_draft(
         self,
         draft: PostDraft
@@ -329,11 +425,33 @@ class MediaFactory:
             Путь к созданному изображению или None
         """
         try:
-            # Генерируем обложку
-            cover_path = self.image_generator.generate_cover(
-                title=draft.title,
-                confidence=draft.confidence_score or 0.5
-            )
+            cover_path = None
+
+            # Пытаемся сгенерировать через DALL-E если включено
+            if settings.dalle_enabled:
+                cover_path = await self.generate_dalle_image(
+                    title=draft.title,
+                    content=draft.content
+                )
+
+                if cover_path:
+                    logger.info(
+                        "dalle_cover_created",
+                        draft_id=draft.id,
+                        cover_path=cover_path
+                    )
+
+            # Fallback на обычную графическую обложку если DALL-E не сработал
+            if not cover_path:
+                cover_path = self.image_generator.generate_cover(
+                    title=draft.title,
+                    confidence=draft.confidence_score or 0.5
+                )
+                logger.info(
+                    "fallback_cover_created",
+                    draft_id=draft.id,
+                    cover_path=cover_path
+                )
 
             # Сохраняем путь в драфте
             draft.image_path = cover_path
