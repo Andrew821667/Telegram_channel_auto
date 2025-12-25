@@ -28,7 +28,9 @@ from app.modules.fetcher import fetch_news
 from app.modules.cleaner import clean_news
 from app.modules.ai_core import process_articles_with_ai
 from app.modules.media_factory import create_media_for_drafts
-from app.bot.handlers import bot, send_draft_for_review
+# НЕ импортируем bot и send_draft_for_review здесь!
+# Bot() создаёт aiohttp клиент который привязывается к event loop
+# Импортируем их внутри async функций где они нужны
 from app.models.database import PostDraft
 
 import structlog
@@ -85,7 +87,10 @@ async def notify_admin(message: str):
         message: Текст уведомления
     """
     try:
-        await bot.send_message(
+        # Импортируем get_bot ЗДЕСЬ чтобы избежать создания aiohttp клиента при импорте модуля
+        from app.bot.handlers import get_bot
+
+        await get_bot().send_message(
             chat_id=settings.telegram_admin_id,
             text=message,
             parse_mode="HTML"
@@ -309,6 +314,8 @@ def send_drafts_to_admin_task(self):
             from sqlalchemy.pool import NullPool
             from sqlalchemy import select
             from app.config import settings
+            # Импортируем send_draft_for_review ЗДЕСЬ чтобы избежать создания Bot() при импорте модуля
+            from app.bot.handlers import send_draft_for_review
 
             engine = create_async_engine(
                 settings.database_url,
