@@ -78,6 +78,7 @@ services:
     environment:
       - CELERYD_POOL=threads
       - CELERYD_CONCURRENCY=1
+      - PYTHONDONTWRITEBYTECODE=1
     depends_on:
       postgres:
         condition: service_healthy
@@ -104,6 +105,8 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    environment:
+      - PYTHONDONTWRITEBYTECODE=1
     depends_on:
       postgres:
         condition: service_healthy
@@ -122,6 +125,8 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    environment:
+      - PYTHONDONTWRITEBYTECODE=1
     depends_on:
       postgres:
         condition: service_healthy
