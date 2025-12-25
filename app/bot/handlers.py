@@ -828,18 +828,22 @@ async def publish_draft(draft_id: int, db: AsyncSession, admin_id: int) -> bool:
 
         # Публикуем в канал
         if draft.image_path:
+            # Telegram ограничивает caption до 1024 символов
+            caption = final_text[:1024] if len(final_text) > 1024 else final_text
             photo = FSInputFile(draft.image_path)
             message = await get_bot().send_photo(
                 chat_id=settings.telegram_channel_id,
                 photo=photo,
-                caption=final_text,
+                caption=caption,
                 parse_mode="HTML",
                 reply_markup=get_reader_keyboard(article.url) if article else None
             )
         else:
+            # Telegram ограничивает text до 4096 символов
+            text = final_text[:4096] if len(final_text) > 4096 else final_text
             message = await get_bot().send_message(
                 chat_id=settings.telegram_channel_id,
-                text=final_text,
+                text=text,
                 parse_mode="HTML",
                 reply_markup=get_reader_keyboard(article.url) if article else None
             )

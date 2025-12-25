@@ -16,7 +16,7 @@ import sys
 if 'celery' in sys.argv[0] or 'celery' in ' '.join(sys.argv):
     asyncio.set_event_loop_policy(asyncio.DefaultEventLoopPolicy())
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, Any
 
 from celery import Celery
@@ -312,10 +312,15 @@ def send_drafts_to_admin_task():
 
             try:
                 async with SessionLocal() as session:
-                    # Получаем драфты в статусе pending_review
+                    # Получаем драфты в статусе pending_review, созданные за последние 24 часа
+                    # Это предотвращает отправку старых непросмотренных драфтов
+                    cutoff_time = datetime.utcnow() - timedelta(hours=24)
                     result = await session.execute(
                         select(PostDraft)
-                        .where(PostDraft.status == 'pending_review')
+                        .where(
+                            PostDraft.status == 'pending_review',
+                            PostDraft.created_at >= cutoff_time
+                        )
                         .order_by(PostDraft.created_at.desc())
                     )
                     drafts = list(result.scalars().all())
