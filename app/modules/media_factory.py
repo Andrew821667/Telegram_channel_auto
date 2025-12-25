@@ -56,15 +56,31 @@ class ImageGenerator:
         # Создаем директорию для медиа если не существует
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
-        # Загружаем шрифты (используем дефолтные, можно заменить на кастомные)
-        try:
-            # Попытка загрузить системные шрифты
-            self.font_title = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", settings.media_font_size_title)
-            self.font_date = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", settings.media_font_size_date)
-            self.font_watermark = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 20)
-        except Exception as e:
-            logger.warning("failed_to_load_fonts", error=str(e))
-            # Fallback на дефолтный шрифт
+        # Загружаем шрифты с поддержкой кириллицы
+        font_paths = [
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+            "/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf",
+            "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+        ]
+
+        font_loaded = False
+        for font_path in font_paths:
+            try:
+                if os.path.exists(font_path):
+                    self.font_title = ImageFont.truetype(font_path, settings.media_font_size_title)
+                    self.font_date = ImageFont.truetype(font_path.replace("-Bold", ""), settings.media_font_size_date)
+                    self.font_watermark = ImageFont.truetype(font_path.replace("-Bold", ""), 20)
+                    logger.info("fonts_loaded_successfully", font_path=font_path)
+                    font_loaded = True
+                    break
+            except Exception as e:
+                logger.debug("font_load_attempt_failed", font_path=font_path, error=str(e))
+                continue
+
+        if not font_loaded:
+            logger.error("no_fonts_found", message="Fallback to default - cyrillic may not work!")
+            # ВАЖНО: load_default() не поддерживает кириллицу!
+            # Используем минимальный PIL шрифт
             self.font_title = ImageFont.load_default()
             self.font_date = ImageFont.load_default()
             self.font_watermark = ImageFont.load_default()
