@@ -394,12 +394,14 @@ def daily_workflow_task():
 
     try:
         # Создаем цепочку задач для последовательного выполнения
+        # Используем .si() (immutable signature) вместо .s() потому что
+        # задачи не принимают результат предыдущей задачи как аргумент
         workflow = chain(
-            fetch_news_task.s(),
-            clean_news_task.s(),
-            analyze_articles_task.s(),
-            generate_media_task.s(),
-            send_drafts_to_admin_task.s()
+            fetch_news_task.si(),
+            clean_news_task.si(),
+            analyze_articles_task.si(),
+            generate_media_task.si(),
+            send_drafts_to_admin_task.si()
         )
 
         # Запускаем цепочку
