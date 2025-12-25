@@ -203,31 +203,48 @@ class ImageGenerator:
         Returns:
             Путь к сохраненному изображению
         """
-        # Выбираем шаблон
-        if template is None or template not in COLOR_SCHEMES:
-            template = self._select_template(title, confidence)
-
-        colors = COLOR_SCHEMES[template]
-
         logger.info(
             "generating_cover",
-            template=template,
             title=title[:50]
         )
 
-        # Создаем изображение
-        img = Image.new('RGB', (self.width, self.height), colors['background'])
+        # Пытаемся загрузить базовое изображение
+        use_template = False
+        try:
+            if os.path.exists(settings.media_template_image_path):
+                img = Image.open(settings.media_template_image_path)
+                # Изменяем размер если нужно
+                if img.size != (self.width, self.height):
+                    img = img.resize((self.width, self.height), Image.Resampling.LANCZOS)
+                logger.info("base_template_loaded", path=settings.media_template_image_path)
+                use_template = True
+            else:
+                raise FileNotFoundError("Template image not found")
+        except Exception as e:
+            # Fallback: создаем простой градиентный фон
+            logger.warning("base_template_load_failed", error=str(e), fallback="gradient")
+
+            # Выбираем цветовую схему
+            if template is None or template not in COLOR_SCHEMES:
+                template = self._select_template(title, confidence)
+            colors = COLOR_SCHEMES[template]
+
+            # Создаем изображение с градиентом
+            img = Image.new('RGB', (self.width, self.height), colors['background'])
+            draw_gradient = ImageDraw.Draw(img)
+
+            for y in range(self.height):
+                ratio = y / self.height
+                r = int(colors['background'][0] * (1 - ratio) + colors['accent'][0] * ratio)
+                g = int(colors['background'][1] * (1 - ratio) + colors['accent'][1] * ratio)
+                b = int(colors['background'][2] * (1 - ratio) + colors['accent'][2] * ratio)
+                draw_gradient.line([(0, y), (self.width, y)], fill=(r, g, b))
+
+        # Создаем объект для рисования
         draw = ImageDraw.Draw(img)
 
-        # Добавляем градиент (простой эффект)
-        for y in range(self.height):
-            # Линейный градиент от background к accent
-            ratio = y / self.height
-            r = int(colors['background'][0] * (1 - ratio) + colors['accent'][0] * ratio)
-            g = int(colors['background'][1] * (1 - ratio) + colors['accent'][1] * ratio)
-            b = int(colors['background'][2] * (1 - ratio) + colors['accent'][2] * ratio)
-
-            draw.line([(0, y), (self.width, y)], fill=(r, g, b))
+        # Цвет текста (белый для базового шаблона, из схемы для градиента)
+        text_color = (255, 255, 255) if use_template else colors['text']
 
         # Переносим заголовок
         padding = 50
@@ -257,7 +274,7 @@ class ImageGenerator:
                 (x, current_y),
                 line,
                 self.font_title,
-                colors['text']
+                text_color
             )
 
             current_y += line_height
@@ -267,11 +284,12 @@ class ImageGenerator:
         bbox = self.font_date.getbbox(date_text)
         date_width = bbox[2] - bbox[0]
 
-        draw.text(
+        self._draw_text_with_shadow(
+            draw,
             (self.width - date_width - 30, 30),
             date_text,
-            font=self.font_date,
-            fill=colors['text']
+            self.font_date,
+            text_color
         )
 
         # Добавляем водяной знак (если включен)
@@ -280,15 +298,20 @@ class ImageGenerator:
             bbox = self.font_watermark.getbbox(watermark_text)
             wm_width = bbox[2] - bbox[0]
 
-            draw.text(
+            # Цвет водяного знака (светло-серый для шаблона, accent для градиента)
+            wm_color = (200, 200, 200) if use_template else colors['accent']
+
+            self._draw_text_with_shadow(
+                draw,
                 (self.width - wm_width - 30, self.height - 50),
                 watermark_text,
-                font=self.font_watermark,
-                fill=colors['accent']
+                self.font_watermark,
+                wm_color
             )
 
         # Сохраняем изображение
-        filename = f"cover_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{template}.png"
+        cover_type = "template" if use_template else template
+        filename = f"cover_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{cover_type}.png"
         filepath = self.output_dir / filename
 
         img.save(filepath, 'PNG', quality=95)
