@@ -225,7 +225,7 @@ async def callback_confirm_publish(callback: CallbackQuery, db: AsyncSession):
 
 
 @router.callback_query(F.data.startswith("reject:"))
-async def callback_reject(callback: CallbackQuery):
+async def callback_reject(callback: CallbackQuery, db: AsyncSession):
     """Обработчик кнопки отклонения."""
     if not await check_admin(callback.from_user.id):
         await callback.answer("⛔️ Нет прав доступа", show_alert=True)
@@ -263,7 +263,7 @@ async def callback_reject_reason(callback: CallbackQuery, db: AsyncSession):
 
 
 @router.callback_query(F.data.startswith("edit:"))
-async def callback_edit(callback: CallbackQuery, state: FSMContext):
+async def callback_edit(callback: CallbackQuery, state: FSMContext, db: AsyncSession):
     """Обработчик кнопки редактирования."""
     if not await check_admin(callback.from_user.id):
         await callback.answer("⛔️ Нет прав доступа", show_alert=True)
@@ -271,13 +271,35 @@ async def callback_edit(callback: CallbackQuery, state: FSMContext):
 
     draft_id = int(callback.data.split(":")[1])
 
-    await state.update_data(draft_id=draft_id)
+    # Получаем текущий драфт
+    result = await db.execute(
+        select(PostDraft).where(PostDraft.id == draft_id)
+    )
+    draft = result.scalar_one_or_none()
+
+    if not draft:
+        await callback.answer("❌ Драфт не найден", show_alert=True)
+        return
+
+    # Сохраняем в state
+    await state.update_data(
+        draft_id=draft_id,
+        original_content=draft.content,
+        article_id=draft.article_id
+    )
     await state.set_state(EditDraft.waiting_for_edit)
 
     await callback.message.answer(
-        "✏️ Отправьте новый текст для поста.\n"
-        "Используйте Markdown разметку.\n\n"
-        "Отправьте /cancel для отмены."
+        f"<b>📝 Текущий драфт:</b>\n\n{draft.content}\n\n"
+        f"━━━━━━━━━━━━━━━━\n\n"
+        f"✏️ <b>Опишите, что нужно изменить:</b>\n"
+        f"Например:\n"
+        f"• Сделай тон более деловым\n"
+        f"• Убери упоминание о конкретной компании\n"
+        f"• Добавь больше юридического контекста\n"
+        f"• Сделай короче, без потери смысла\n\n"
+        f"Отправьте /cancel для отмены.",
+        parse_mode="HTML"
     )
     await callback.answer()
 
@@ -291,9 +313,101 @@ async def cancel_edit(message: Message, state: FSMContext):
 
 @router.message(EditDraft.waiting_for_edit)
 async def process_edit(message: Message, state: FSMContext, db: AsyncSession):
-    """Обработка отредактированного текста."""
+    """Обработка инструкций по редактированию через LLM."""
     data = await state.get_data()
     draft_id = data.get("draft_id")
+    original_content = data.get("original_content")
+    article_id = data.get("article_id")
+    edit_instructions = message.text
+
+    await message.answer("⏳ Генерирую новый вариант...")
+
+    try:
+        # Получаем оригинальную статью
+        result = await db.execute(
+            select(RawArticle).where(RawArticle.id == article_id)
+        )
+        article = result.scalar_one_or_none()
+
+        # Вызываем LLM для редактирования
+        from openai import AsyncOpenAI
+        from app.config import settings
+
+        client = AsyncOpenAI(api_key=settings.openai_api_key)
+
+        prompt = f"""Ты редактор контента для Telegram канала о AI в юриспруденции.
+
+ИСХОДНЫЙ ПОСТ:
+{original_content}
+
+ОРИГИНАЛЬНАЯ СТАТЬЯ:
+{article.content if article else 'Не доступна'}
+
+ИНСТРУКЦИИ ПО РЕДАКТИРОВАНИЮ:
+{edit_instructions}
+
+Создай новую версию поста с учётом инструкций. Сохрани структуру с заголовком, основным текстом и хештегами. Формат тот же что в исходном посте."""
+
+        response = await client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "Ты профессиональный редактор контента для Telegram канала."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.7,
+            max_tokens=800
+        )
+
+        new_content = response.choices[0].message.content.strip()
+
+        # Сохраняем новую версию в state
+        await state.update_data(new_content=new_content)
+
+        # Показываем новый вариант с кнопками
+        from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="✅ Опубликовать",
+                    callback_data=f"publish_edited:{draft_id}"
+                ),
+                InlineKeyboardButton(
+                    text="✏️ Редактировать дальше",
+                    callback_data=f"continue_edit:{draft_id}"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="❌ Отменить",
+                    callback_data=f"cancel_edit:{draft_id}"
+                )
+            ]
+        ])
+
+        await message.answer(
+            f"<b>📝 Новый вариант:</b>\n\n{new_content}",
+            reply_markup=keyboard,
+            parse_mode="HTML"
+        )
+
+    except Exception as e:
+        logger.error("edit_generation_error", error=str(e))
+        await message.answer(
+            f"❌ Ошибка при генерации: {str(e)}\n\n"
+            f"Попробуйте еще раз или отправьте /cancel"
+        )
+
+
+@router.callback_query(F.data.startswith("publish_edited:"))
+async def callback_publish_edited(callback: CallbackQuery, state: FSMContext, db: AsyncSession):
+    """Опубликовать отредактированную версию."""
+    if not await check_admin(callback.from_user.id):
+        return
+
+    draft_id = int(callback.data.split(":")[1])
+    data = await state.get_data()
+    new_content = data.get("new_content")
 
     # Обновляем драфт
     result = await db.execute(
@@ -301,18 +415,61 @@ async def process_edit(message: Message, state: FSMContext, db: AsyncSession):
     )
     draft = result.scalar_one_or_none()
 
-    if draft:
-        draft.content = message.text
+    if draft and new_content:
+        draft.content = new_content
         draft.status = 'edited'
         await db.commit()
 
-        await message.answer(f"✅ Драфт #{draft_id} обновлен!")
-        # Отправляем обновленный драфт на проверку
-        await send_draft_for_review(message.chat.id, draft, db)
+        # Публикуем
+        success = await publish_draft(draft_id, db, callback.from_user.id)
+
+        if success:
+            await callback.message.edit_text(
+                f"✅ Отредактированный драфт #{draft_id} успешно опубликован!"
+            )
+            await callback.answer("Опубликовано!")
+        else:
+            await callback.message.edit_text(
+                f"❌ Ошибка при публикации драфта #{draft_id}"
+            )
+            await callback.answer("Ошибка!", show_alert=True)
     else:
-        await message.answer(f"❌ Драфт #{draft_id} не найден")
+        await callback.answer("❌ Ошибка: драфт не найден", show_alert=True)
 
     await state.clear()
+
+
+@router.callback_query(F.data.startswith("continue_edit:"))
+async def callback_continue_edit(callback: CallbackQuery, state: FSMContext, db: AsyncSession):
+    """Продолжить редактирование."""
+    if not await check_admin(callback.from_user.id):
+        return
+
+    draft_id = int(callback.data.split(":")[1])
+    data = await state.get_data()
+    new_content = data.get("new_content")
+
+    # Обновляем original_content на новую версию для следующей итерации
+    await state.update_data(original_content=new_content)
+
+    await callback.message.edit_text(
+        f"<b>📝 Текущая версия:</b>\n\n{new_content}\n\n"
+        f"━━━━━━━━━━━━━━━━\n\n"
+        f"✏️ <b>Опишите дополнительные изменения:</b>",
+        parse_mode="HTML"
+    )
+    await callback.answer("Опишите дополнительные изменения")
+
+
+@router.callback_query(F.data.startswith("cancel_edit:"))
+async def callback_cancel_edit(callback: CallbackQuery, state: FSMContext):
+    """Отменить редактирование."""
+    if not await check_admin(callback.from_user.id):
+        return
+
+    await state.clear()
+    await callback.message.edit_text("❌ Редактирование отменено.")
+    await callback.answer("Отменено")
 
 
 # ====================
