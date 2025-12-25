@@ -8,6 +8,14 @@ Celery Tasks
 """
 
 import asyncio
+import sys
+
+# КРИТИЧНО: Отключаем uvloop для Celery worker
+# uvloop привязывается к event loop и вызывает "Event loop is closed" при asyncio.run()
+# Устанавливаем стандартную asyncio policy до любых импортов asyncpg
+if 'celery' in sys.argv[0] or 'celery' in ' '.join(sys.argv):
+    asyncio.set_event_loop_policy(asyncio.DefaultEventLoopPolicy())
+
 from datetime import datetime
 from typing import Dict, Any
 
@@ -16,12 +24,13 @@ from celery.schedules import crontab
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.models.database import AsyncSessionLocal, log_to_db
 from app.modules.fetcher import fetch_news
 from app.modules.cleaner import clean_news
 from app.modules.ai_core import process_articles_with_ai
 from app.modules.media_factory import create_media_for_drafts
-from app.bot.handlers import bot, send_draft_for_review
+# НЕ импортируем bot и send_draft_for_review здесь!
+# Bot() создаёт aiohttp клиент который привязывается к event loop
+# Импортируем их внутри async функций где они нужны
 from app.models.database import PostDraft
 
 import structlog
@@ -44,6 +53,9 @@ app.conf.update(
     task_track_started=True,
     task_time_limit=30 * 60,  # 30 minutes
     task_soft_time_limit=25 * 60,  # 25 minutes
+    # КРИТИЧНО: Принудительная установка threads pool
+    worker_pool='threads',
+    worker_concurrency=1,
 )
 
 
@@ -54,6 +66,7 @@ app.conf.update(
 def run_async(coro):
     """
     Запустить асинхронную корутину в синхронном контексте.
+    Использует asyncio.run() для чистого выполнения (Python 3.11+).
 
     Args:
         coro: Корутина для выполнения
@@ -61,6 +74,8 @@ def run_async(coro):
     Returns:
         Результат выполнения
     """
+    # asyncio.run() автоматически создаёт новый event loop,
+    # выполняет корутину и ПРАВИЛЬНО закрывает все ресурсы
     return asyncio.run(coro)
 
 
@@ -72,7 +87,10 @@ async def notify_admin(message: str):
         message: Текст уведомления
     """
     try:
-        await bot.send_message(
+        # Импортируем get_bot ЗДЕСЬ чтобы избежать создания aiohttp клиента при импорте модуля
+        from app.bot.handlers import get_bot
+
+        await get_bot().send_message(
             chat_id=settings.telegram_admin_id,
             text=message,
             parse_mode="HTML"
@@ -85,137 +103,178 @@ async def notify_admin(message: str):
 # Задачи
 # ====================
 
-@app.task(bind=True, max_retries=3)
-def fetch_news_task(self):
+@app.task(max_retries=3, autoretry_for=(Exception,), retry_backoff=60, retry_backoff_max=600)
+def fetch_news_task():
     """
     Задача сбора новостей из всех источников.
 
     Запуск: ежедневно в 09:00 MSK
     """
-    try:
-        logger.info("fetch_news_task_started")
+    logger.info("fetch_news_task_started")
 
-        async def fetch():
-            async with AsyncSessionLocal() as session:
+    async def fetch():
+        # Создаём новый engine внутри asyncio.run() контекста
+        from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+        from sqlalchemy.pool import NullPool
+        from app.config import settings
+
+        # КРИТИЧНО: Используем NullPool вместо обычного пула
+        # NullPool НЕ кэширует соединения и закрывает их сразу
+        # Это предотвращает RuntimeError: Event loop is closed при garbage collection
+        engine = create_async_engine(
+            settings.database_url,
+            echo=settings.debug,
+            poolclass=NullPool,  # Отключаем пул соединений
+        )
+
+        SessionLocal = async_sessionmaker(
+            engine,
+            class_=AsyncSession,
+            expire_on_commit=False,
+        )
+
+        try:
+            async with SessionLocal() as session:
                 stats = await fetch_news(session)
-                return stats
+            return stats
+        finally:
+            # Закрываем engine ДО выхода из asyncio.run()
+            await engine.dispose()
 
-        stats = run_async(fetch())
+    stats = run_async(fetch())
 
-        logger.info("fetch_news_task_completed", stats=stats)
+    logger.info("fetch_news_task_completed", stats=stats)
 
-        # Логируем в БД
-        run_async(log_to_db(
-            "INFO",
-            f"Fetch task completed: {sum(stats.values())} articles",
-            {"stats": stats}
-        ))
+    # НЕ используем log_to_db в Celery - она использует глобальный AsyncSessionLocal
+    # который привязан к старому event loop
+    # Вместо этого логируем только в structlog
 
-        return f"Fetched {sum(stats.values())} articles from {len(stats)} sources"
-
-    except Exception as exc:
-        logger.error("fetch_news_task_error", error=str(exc))
-
-        # Retry с экспоненциальной задержкой
-        countdown = 60 * (2 ** self.request.retries)
-        raise self.retry(exc=exc, countdown=countdown)
+    return f"Fetched {sum(stats.values())} articles from {len(stats)} sources"
 
 
-@app.task(bind=True, max_retries=3)
-def clean_news_task(self):
+@app.task(max_retries=3, autoretry_for=(Exception,), retry_backoff=60, retry_backoff_max=600)
+def clean_news_task():
     """
     Задача фильтрации и дедупликации новостей.
 
     Запуск: ежедневно в 09:10 MSK (через 10 минут после fetch)
     """
-    try:
-        logger.info("clean_news_task_started")
+    logger.info("clean_news_task_started")
 
-        async def clean():
-            async with AsyncSessionLocal() as session:
+    async def clean():
+        from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+        from sqlalchemy.pool import NullPool
+        from app.config import settings
+
+        engine = create_async_engine(
+            settings.database_url,
+            poolclass=NullPool,
+        )
+
+        SessionLocal = async_sessionmaker(
+            engine,
+            class_=AsyncSession,
+            expire_on_commit=False,
+        )
+
+        try:
+            async with SessionLocal() as session:
                 stats = await clean_news(session)
-                return stats
+            return stats
+        finally:
+            await engine.dispose()
 
-        stats = run_async(clean())
+    stats = run_async(clean())
 
-        logger.info("clean_news_task_completed", stats=stats)
+    logger.info("clean_news_task_completed", stats=stats)
 
-        run_async(log_to_db(
-            "INFO",
-            f"Cleaning completed: {stats['filtered']} filtered, {stats['rejected']} rejected",
-            stats
-        ))
+    # НЕ используем log_to_db - она использует глобальный AsyncSessionLocal
 
-        return f"Filtered: {stats['filtered']}, Rejected: {stats['rejected']}"
-
-    except Exception as exc:
-        logger.error("clean_news_task_error", error=str(exc))
-        countdown = 60 * (2 ** self.request.retries)
-        raise self.retry(exc=exc, countdown=countdown)
+    return f"Filtered: {stats['filtered']}, Rejected: {stats['rejected']}"
 
 
-@app.task(bind=True, max_retries=3)
-def analyze_articles_task(self):
+@app.task(max_retries=3, autoretry_for=(Exception,), retry_backoff=60, retry_backoff_max=600)
+def analyze_articles_task():
     """
     Задача AI анализа и генерации драфтов.
 
     Запуск: ежедневно в 09:15 MSK (через 15 минут после fetch)
     """
-    try:
-        logger.info("analyze_articles_task_started")
+    logger.info("analyze_articles_task_started")
 
-        async def analyze():
-            async with AsyncSessionLocal() as session:
+    async def analyze():
+        from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+        from sqlalchemy.pool import NullPool
+        from app.config import settings
+
+        engine = create_async_engine(
+            settings.database_url,
+            poolclass=NullPool,
+        )
+
+        SessionLocal = async_sessionmaker(
+            engine,
+            class_=AsyncSession,
+            expire_on_commit=False,
+        )
+
+        try:
+            async with SessionLocal() as session:
                 stats = await process_articles_with_ai(session)
-                return stats
+            return stats
+        finally:
+            await engine.dispose()
 
-        stats = run_async(analyze())
+    stats = run_async(analyze())
 
-        logger.info("analyze_articles_task_completed", stats=stats)
+    logger.info("analyze_articles_task_completed", stats=stats)
 
-        run_async(log_to_db(
-            "INFO",
-            f"AI analysis completed: {stats['drafts_created']} drafts created",
-            stats
-        ))
+    # НЕ используем log_to_db - она использует глобальный AsyncSessionLocal
 
-        return f"Created {stats['drafts_created']} drafts"
-
-    except Exception as exc:
-        logger.error("analyze_articles_task_error", error=str(exc))
-        countdown = 60 * (2 ** self.request.retries)
-        raise self.retry(exc=exc, countdown=countdown)
+    return f"Created {stats['drafts_created']} drafts"
 
 
-@app.task(bind=True, max_retries=3)
-def generate_media_task(self):
+@app.task(max_retries=3, autoretry_for=(Exception,), retry_backoff=60, retry_backoff_max=600)
+def generate_media_task():
     """
     Задача генерации медиа (обложек) для драфтов.
 
     Запуск: ежедневно в 09:20 MSK (через 20 минут после fetch)
     """
-    try:
-        logger.info("generate_media_task_started")
+    logger.info("generate_media_task_started")
 
-        async def generate():
-            async with AsyncSessionLocal() as session:
+    async def generate():
+        from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+        from sqlalchemy.pool import NullPool
+        from app.config import settings
+
+        engine = create_async_engine(
+            settings.database_url,
+            poolclass=NullPool,
+        )
+
+        SessionLocal = async_sessionmaker(
+            engine,
+            class_=AsyncSession,
+            expire_on_commit=False,
+        )
+
+        try:
+            async with SessionLocal() as session:
                 count = await create_media_for_drafts(session)
-                return count
+            return count
+        finally:
+            await engine.dispose()
 
-        count = run_async(generate())
+    count = run_async(generate())
 
-        logger.info("generate_media_task_completed", count=count)
+    logger.info("generate_media_task_completed", count=count)
 
-        return f"Generated {count} covers"
-
-    except Exception as exc:
-        logger.error("generate_media_task_error", error=str(exc))
-        countdown = 60 * (2 ** self.request.retries)
-        raise self.retry(exc=exc, countdown=countdown)
+    return f"Generated {count} covers"
 
 
-@app.task(bind=True)
-def send_drafts_to_admin_task(self):
+@app.task()
+def send_drafts_to_admin_task():
     """
     Задача отправки драфтов администратору на модерацию.
 
@@ -225,37 +284,57 @@ def send_drafts_to_admin_task(self):
         logger.info("send_drafts_to_admin_task_started")
 
         async def send_drafts():
-            async with AsyncSessionLocal() as session:
-                # Получаем драфты в статусе pending_review
-                from sqlalchemy import select
-                result = await session.execute(
-                    select(PostDraft)
-                    .where(PostDraft.status == 'pending_review')
-                    .order_by(PostDraft.created_at.desc())
-                )
-                drafts = list(result.scalars().all())
+            from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+            from sqlalchemy.pool import NullPool
+            from sqlalchemy import select
+            from app.config import settings
+            # Импортируем send_draft_for_review ЗДЕСЬ чтобы избежать создания Bot() при импорте модуля
+            from app.bot.handlers import send_draft_for_review
 
-                if not drafts:
-                    await notify_admin("📭 Нет новых драфтов сегодня.")
-                    return 0
+            engine = create_async_engine(
+                settings.database_url,
+                poolclass=NullPool,
+            )
 
-                # Отправляем уведомление
-                await notify_admin(
-                    f"📝 <b>Новые драфты готовы к модерации!</b>\n\n"
-                    f"Количество: {len(drafts)}\n"
-                    f"Используйте /drafts для просмотра."
-                )
+            SessionLocal = async_sessionmaker(
+                engine,
+                class_=AsyncSession,
+                expire_on_commit=False,
+            )
 
-                # Отправляем каждый драфт
-                for draft in drafts[:5]:  # Ограничиваем 5 за раз
-                    await send_draft_for_review(
-                        settings.telegram_admin_id,
-                        draft,
-                        session
+            try:
+                async with SessionLocal() as session:
+                    # Получаем драфты в статусе pending_review
+                    result = await session.execute(
+                        select(PostDraft)
+                        .where(PostDraft.status == 'pending_review')
+                        .order_by(PostDraft.created_at.desc())
                     )
-                    await asyncio.sleep(1)  # Rate limiting
+                    drafts = list(result.scalars().all())
 
-                return len(drafts)
+                    if not drafts:
+                        await notify_admin("📭 Нет новых драфтов сегодня.")
+                        return 0
+
+                    # Отправляем уведомление
+                    await notify_admin(
+                        f"📝 <b>Новые драфты готовы к модерации!</b>\n\n"
+                        f"Количество: {len(drafts)}\n"
+                        f"Используйте /drafts для просмотра."
+                    )
+
+                    # Отправляем каждый драфт
+                    for draft in drafts[:5]:  # Ограничиваем 5 за раз
+                        await send_draft_for_review(
+                            settings.telegram_admin_id,
+                            draft,
+                            session
+                        )
+                        await asyncio.sleep(1)  # Rate limiting
+
+                    return len(drafts)
+            finally:
+                await engine.dispose()
 
         count = run_async(send_drafts())
 
@@ -289,12 +368,14 @@ def daily_workflow_task():
 
     try:
         # Создаем цепочку задач для последовательного выполнения
+        # Используем .si() (immutable signature) вместо .s() потому что
+        # задачи не принимают результат предыдущей задачи как аргумент
         workflow = chain(
-            fetch_news_task.s(),
-            clean_news_task.s(),
-            analyze_articles_task.s(),
-            generate_media_task.s(),
-            send_drafts_to_admin_task.s()
+            fetch_news_task.si(),
+            clean_news_task.si(),
+            analyze_articles_task.si(),
+            generate_media_task.si(),
+            send_drafts_to_admin_task.si()
         )
 
         # Запускаем цепочку

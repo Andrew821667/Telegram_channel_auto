@@ -3,8 +3,53 @@ Telegram Bot Keyboards
 Клавиатуры для модерации и управления ботом.
 """
 
+from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
+
+
+def add_utm_params(
+    url: str,
+    source: str = "telegram",
+    medium: str = "social",
+    campaign: str = "legal_ai_news"
+) -> str:
+    """
+    Добавить UTM-метки к URL для отслеживания трафика.
+
+    Args:
+        url: Исходный URL
+        source: UTM source (по умолчанию: telegram)
+        medium: UTM medium (по умолчанию: social)
+        campaign: UTM campaign (по умолчанию: legal_ai_news)
+
+    Returns:
+        URL с добавленными UTM-метками
+    """
+    try:
+        parsed = urlparse(url)
+        query_params = parse_qs(parsed.query)
+
+        # Добавляем UTM-метки
+        query_params['utm_source'] = [source]
+        query_params['utm_medium'] = [medium]
+        query_params['utm_campaign'] = [campaign]
+
+        # Формируем новый query string
+        new_query = urlencode(query_params, doseq=True)
+
+        # Собираем URL обратно
+        return urlunparse((
+            parsed.scheme,
+            parsed.netloc,
+            parsed.path,
+            parsed.params,
+            new_query,
+            parsed.fragment
+        ))
+    except Exception:
+        # Если не удалось распарсить - возвращаем оригинал
+        return url
 
 
 def get_draft_review_keyboard(draft_id: int) -> InlineKeyboardMarkup:
@@ -72,22 +117,43 @@ def get_confirm_keyboard(action: str, draft_id: int) -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-def get_reader_keyboard(source_url: str) -> InlineKeyboardMarkup:
+def get_reader_keyboard(
+    source_url: str,
+    channel_username: str = "legal_ai_pro"
+) -> InlineKeyboardMarkup:
     """
     Клавиатура для читателей в опубликованном посте.
 
     Args:
         source_url: URL источника новости
+        channel_username: Username канала для кнопки "Поделиться"
 
     Returns:
-        InlineKeyboardMarkup с кнопками для читателей
+        InlineKeyboardMarkup с интерактивными кнопками
     """
     builder = InlineKeyboardBuilder()
 
+    # Добавляем UTM-метки к ссылке на источник
+    tracked_url = add_utm_params(
+        source_url,
+        source="telegram",
+        medium="legal_ai_channel",
+        campaign="ai_news_post"
+    )
+
+    # Кнопка "Читать полностью" с UTM-метками
     builder.row(
         InlineKeyboardButton(
             text="📖 Читать полностью",
-            url=source_url
+            url=tracked_url
+        )
+    )
+
+    # Кнопка "Поделиться" (открывает диалог выбора чата)
+    builder.row(
+        InlineKeyboardButton(
+            text="📤 Поделиться",
+            url=f"https://t.me/share/url?url=https://t.me/{channel_username}"
         )
     )
 

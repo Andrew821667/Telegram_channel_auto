@@ -233,13 +233,15 @@ class MediaFile(Base):
 # ====================
 
 # Create async engine
+# КРИТИЧНО: Используем NullPool для совместимости с Celery worker
+# NullPool не кэширует соединения и закрывает их сразу после использования
+# Это предотвращает RuntimeError: Event loop is closed при garbage collection
+from sqlalchemy.pool import NullPool
+
 engine = create_async_engine(
     settings.database_url,
     echo=settings.debug,
-    pool_pre_ping=True,  # Проверяет соединение перед использованием
-    pool_recycle=3600,  # Пересоздает соединения каждый час (до timeout PostgreSQL)
-    pool_size=10,
-    max_overflow=20,
+    poolclass=NullPool,  # Используем NullPool вместо обычного пула
     connect_args={
         "server_settings": {"jit": "off"},  # Отключаем JIT для стабильности
         "command_timeout": 60,  # Таймаут команд 60 секунд
@@ -306,7 +308,8 @@ async def check_db_connection() -> bool:
 async def log_to_db(
     level: str,
     message: str,
-    context: Optional[dict] = None
+    context: Optional[dict] = None,
+    session: Optional[AsyncSession] = None
 ) -> None:
     """
     Log event to database.
@@ -315,12 +318,20 @@ async def log_to_db(
         level: Log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
         message: Log message
         context: Additional context as dictionary
+        session: Optional existing session to use (для Celery tasks)
     """
-    async with AsyncSessionLocal() as session:
-        log_entry = SystemLog(
-            level=level,
-            message=message,
-            context=context or {}
-        )
+    log_entry = SystemLog(
+        level=level,
+        message=message,
+        context=context or {}
+    )
+
+    if session:
+        # Используем переданную сессию (для Celery tasks)
         session.add(log_entry)
-        await session.commit()
+        await session.flush()  # Не делаем commit - это ответственность вызывающего кода
+    else:
+        # Создаём свою сессию (для bot handlers и других мест)
+        async with AsyncSessionLocal() as db_session:
+            db_session.add(log_entry)
+            await db_session.commit()
