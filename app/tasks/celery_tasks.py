@@ -16,7 +16,7 @@ import sys
 if 'celery' in sys.argv[0] or 'celery' in ' '.join(sys.argv):
     asyncio.set_event_loop_policy(asyncio.DefaultEventLoopPolicy())
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, Any
 
 from celery import Celery
@@ -79,18 +79,21 @@ def run_async(coro):
     return asyncio.run(coro)
 
 
-async def notify_admin(message: str):
+async def notify_admin(message: str, bot=None):
     """
     Отправить уведомление администратору.
 
     Args:
         message: Текст уведомления
+        bot: Опциональный экземпляр Bot (для использования в Celery tasks)
     """
     try:
-        # Импортируем get_bot ЗДЕСЬ чтобы избежать создания aiohttp клиента при импорте модуля
-        from app.bot.handlers import get_bot
+        if bot is None:
+            # Импортируем get_bot ЗДЕСЬ чтобы избежать создания aiohttp клиента при импорте модуля
+            from app.bot.handlers import get_bot
+            bot = get_bot()
 
-        await get_bot().send_message(
+        await bot.send_message(
             chat_id=settings.telegram_admin_id,
             text=message,
             parse_mode="HTML"
@@ -288,8 +291,13 @@ def send_drafts_to_admin_task():
             from sqlalchemy.pool import NullPool
             from sqlalchemy import select
             from app.config import settings
+            from aiogram import Bot
             # Импортируем send_draft_for_review ЗДЕСЬ чтобы избежать создания Bot() при импорте модуля
             from app.bot.handlers import send_draft_for_review
+
+            # Создаём Bot ВНУТРИ asyncio.run() контекста
+            # чтобы aiohttp клиент привязался к правильному event loop
+            bot = Bot(token=settings.telegram_bot_token)
 
             engine = create_async_engine(
                 settings.database_url,
@@ -304,36 +312,49 @@ def send_drafts_to_admin_task():
 
             try:
                 async with SessionLocal() as session:
-                    # Получаем драфты в статусе pending_review
+                    # Получаем драфты в статусе pending_review, созданные СЕГОДНЯ
+                    # Фильтруем по началу текущего дня (00:00 UTC), чтобы отправлялись только свежие драфты
+                    from datetime import date
+                    today_start = datetime.combine(date.today(), datetime.min.time())  # 00:00 UTC сегодня
+
                     result = await session.execute(
                         select(PostDraft)
-                        .where(PostDraft.status == 'pending_review')
+                        .where(
+                            PostDraft.status == 'pending_review',
+                            PostDraft.created_at >= today_start
+                        )
                         .order_by(PostDraft.created_at.desc())
                     )
                     drafts = list(result.scalars().all())
 
                     if not drafts:
-                        await notify_admin("📭 Нет новых драфтов сегодня.")
+                        await notify_admin("📭 Нет новых драфтов сегодня.", bot=bot)
                         return 0
 
                     # Отправляем уведомление
                     await notify_admin(
                         f"📝 <b>Новые драфты готовы к модерации!</b>\n\n"
                         f"Количество: {len(drafts)}\n"
-                        f"Используйте /drafts для просмотра."
+                        f"Используйте /drafts для просмотра.",
+                        bot=bot
                     )
 
-                    # Отправляем каждый драфт
-                    for draft in drafts[:5]:  # Ограничиваем 5 за раз
+                    # Отправляем каждый драфт (ограничиваем настройкой publisher_max_posts_per_day)
+                    max_drafts = min(len(drafts), settings.publisher_max_posts_per_day)
+                    for index, draft in enumerate(drafts[:max_drafts], start=1):
                         await send_draft_for_review(
                             settings.telegram_admin_id,
                             draft,
-                            session
+                            session,
+                            bot=bot,
+                            draft_number=index  # Порядковый номер за день
                         )
                         await asyncio.sleep(1)  # Rate limiting
 
-                    return len(drafts)
+                    return max_drafts
             finally:
+                # Закрываем Bot сессию перед закрытием engine
+                await bot.session.close()
                 await engine.dispose()
 
         count = run_async(send_drafts())
@@ -384,21 +405,39 @@ def daily_workflow_task():
         logger.info("daily_workflow_task_chain_started", task_id=result.id)
 
         # Отправляем уведомление о запуске
-        run_async(notify_admin(
-            "🔄 <b>Ежедневный workflow запущен!</b>\n\n"
-            "Ожидайте завершения через 10-15 минут.\n"
-            "Проверьте новые драфты с помощью /drafts"
-        ))
+        async def send_notification():
+            from aiogram import Bot
+            bot = Bot(token=settings.telegram_bot_token)
+            try:
+                await notify_admin(
+                    "🔄 <b>Ежедневный workflow запущен!</b>\n\n"
+                    "Ожидайте завершения через 10-15 минут.\n"
+                    "Проверьте новые драфты с помощью /drafts",
+                    bot=bot
+                )
+            finally:
+                await bot.session.close()
+
+        run_async(send_notification())
 
         return f"Daily workflow chain started: {result.id}"
 
     except Exception as e:
         logger.error("daily_workflow_task_error", error=str(e))
 
-        run_async(notify_admin(
-            f"❌ <b>Ошибка в ежедневном workflow!</b>\n\n"
-            f"Ошибка: {str(e)}"
-        ))
+        async def send_error_notification():
+            from aiogram import Bot
+            bot = Bot(token=settings.telegram_bot_token)
+            try:
+                await notify_admin(
+                    f"❌ <b>Ошибка в ежедневном workflow!</b>\n\n"
+                    f"Ошибка: {str(e)}",
+                    bot=bot
+                )
+            finally:
+                await bot.session.close()
+
+        run_async(send_error_notification())
 
         raise
 
@@ -408,33 +447,29 @@ def daily_workflow_task():
 # ====================
 
 app.conf.beat_schedule = {
-    # Ежедневный workflow в 09:00 MSK
-    'daily-workflow': {
+    # БУДНИЕ ДНИ (Понедельник-Пятница): 3 генерации в день
+    # Утренняя генерация: 09:00 MSK
+    'weekday-morning-workflow': {
         'task': 'daily_workflow_task',
-        'schedule': crontab(hour=9, minute=0),  # 09:00 MSK
+        'schedule': crontab(hour=9, minute=0, day_of_week='1-5'),  # Пн-Пт 09:00
+    },
+    # Дневная генерация: 13:00 MSK
+    'weekday-afternoon-workflow': {
+        'task': 'daily_workflow_task',
+        'schedule': crontab(hour=13, minute=0, day_of_week='1-5'),  # Пн-Пт 13:00
+    },
+    # Вечерняя генерация: 17:00 MSK
+    'weekday-evening-workflow': {
+        'task': 'daily_workflow_task',
+        'schedule': crontab(hour=17, minute=0, day_of_week='1-5'),  # Пн-Пт 17:00
     },
 
-    # Альтернативно: запуск отдельных задач по расписанию
-    # 'fetch-news-daily': {
-    #     'task': 'app.tasks.celery_tasks.fetch_news_task',
-    #     'schedule': crontab(hour=9, minute=0),
-    # },
-    # 'clean-news-daily': {
-    #     'task': 'app.tasks.celery_tasks.clean_news_task',
-    #     'schedule': crontab(hour=9, minute=10),
-    # },
-    # 'analyze-articles-daily': {
-    #     'task': 'app.tasks.celery_tasks.analyze_articles_task',
-    #     'schedule': crontab(hour=9, minute=15),
-    # },
-    # 'generate-media-daily': {
-    #     'task': 'app.tasks.celery_tasks.generate_media_task',
-    #     'schedule': crontab(hour=9, minute=20),
-    # },
-    # 'send-drafts-daily': {
-    #     'task': 'app.tasks.celery_tasks.send_drafts_to_admin_task',
-    #     'schedule': crontab(hour=9, minute=25),
-    # },
+    # ВЫХОДНЫЕ (Суббота-Воскресенье): 1 итоговая генерация
+    # Утренняя генерация: 10:00 MSK
+    'weekend-workflow': {
+        'task': 'daily_workflow_task',
+        'schedule': crontab(hour=10, minute=0, day_of_week='0,6'),  # Сб-Вс 10:00
+    },
 }
 
 

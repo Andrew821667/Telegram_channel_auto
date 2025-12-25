@@ -93,10 +93,16 @@ async def cmd_drafts(message: Message, db: AsyncSession):
     if not await check_admin(message.from_user.id):
         return
 
-    # Получаем драфты в статусе pending_review
+    # Получаем драфты в статусе pending_review, созданные СЕГОДНЯ
+    from datetime import date
+    today_start = datetime.combine(date.today(), datetime.min.time())
+
     result = await db.execute(
         select(PostDraft)
-        .where(PostDraft.status == 'pending_review')
+        .where(
+            PostDraft.status == 'pending_review',
+            PostDraft.created_at >= today_start
+        )
         .order_by(PostDraft.created_at.desc())
     )
     drafts = list(result.scalars().all())
@@ -107,9 +113,10 @@ async def cmd_drafts(message: Message, db: AsyncSession):
 
     await message.answer(f"📝 Найдено {len(drafts)} драфтов. Отправляю...")
 
-    # Отправляем каждый драфт
-    for draft in drafts[:5]:  # Ограничиваем 5 драфтами за раз
-        await send_draft_for_review(message.chat.id, draft, db)
+    # Отправляем каждый драфт (ограничиваем настройкой publisher_max_posts_per_day)
+    max_drafts = min(len(drafts), settings.publisher_max_posts_per_day)
+    for index, draft in enumerate(drafts[:max_drafts], start=1):
+        await send_draft_for_review(message.chat.id, draft, db, draft_number=index)
 
 
 @router.message(Command("stats"))
@@ -213,19 +220,30 @@ async def callback_confirm_publish(callback: CallbackQuery, db: AsyncSession):
     success = await publish_draft(draft_id, db, callback.from_user.id)
 
     if success:
-        await callback.message.edit_text(
-            f"✅ Драфт #{draft_id} успешно опубликован!"
-        )
+        # Проверяем тип сообщения (photo или text)
+        if callback.message.photo:
+            await callback.message.edit_caption(
+                caption=f"✅ Драфт #{draft_id} успешно опубликован!"
+            )
+        else:
+            await callback.message.edit_text(
+                f"✅ Драфт #{draft_id} успешно опубликован!"
+            )
         await callback.answer("Опубликовано!")
     else:
-        await callback.message.edit_text(
-            f"❌ Ошибка при публикации драфта #{draft_id}"
-        )
+        if callback.message.photo:
+            await callback.message.edit_caption(
+                caption=f"❌ Ошибка при публикации драфта #{draft_id}"
+            )
+        else:
+            await callback.message.edit_text(
+                f"❌ Ошибка при публикации драфта #{draft_id}"
+            )
         await callback.answer("Ошибка!", show_alert=True)
 
 
 @router.callback_query(F.data.startswith("reject:"))
-async def callback_reject(callback: CallbackQuery):
+async def callback_reject(callback: CallbackQuery, db: AsyncSession):
     """Обработчик кнопки отклонения."""
     if not await check_admin(callback.from_user.id):
         await callback.answer("⛔️ Нет прав доступа", show_alert=True)
@@ -254,16 +272,22 @@ async def callback_reject_reason(callback: CallbackQuery, db: AsyncSession):
     success = await reject_draft(draft_id, reason, db, callback.from_user.id)
 
     if success:
-        await callback.message.edit_text(
-            f"❌ Драфт #{draft_id} отклонен\nПричина: {reason}"
-        )
+        # Проверяем тип сообщения (photo или text)
+        if callback.message.photo:
+            await callback.message.edit_caption(
+                caption=f"❌ Драфт #{draft_id} отклонен\nПричина: {reason}"
+            )
+        else:
+            await callback.message.edit_text(
+                f"❌ Драфт #{draft_id} отклонен\nПричина: {reason}"
+            )
         await callback.answer("Отклонено")
     else:
         await callback.answer("Ошибка!", show_alert=True)
 
 
 @router.callback_query(F.data.startswith("edit:"))
-async def callback_edit(callback: CallbackQuery, state: FSMContext):
+async def callback_edit(callback: CallbackQuery, state: FSMContext, db: AsyncSession):
     """Обработчик кнопки редактирования."""
     if not await check_admin(callback.from_user.id):
         await callback.answer("⛔️ Нет прав доступа", show_alert=True)
@@ -271,13 +295,35 @@ async def callback_edit(callback: CallbackQuery, state: FSMContext):
 
     draft_id = int(callback.data.split(":")[1])
 
-    await state.update_data(draft_id=draft_id)
+    # Получаем текущий драфт
+    result = await db.execute(
+        select(PostDraft).where(PostDraft.id == draft_id)
+    )
+    draft = result.scalar_one_or_none()
+
+    if not draft:
+        await callback.answer("❌ Драфт не найден", show_alert=True)
+        return
+
+    # Сохраняем в state
+    await state.update_data(
+        draft_id=draft_id,
+        original_content=draft.content,
+        article_id=draft.article_id
+    )
     await state.set_state(EditDraft.waiting_for_edit)
 
     await callback.message.answer(
-        "✏️ Отправьте новый текст для поста.\n"
-        "Используйте Markdown разметку.\n\n"
-        "Отправьте /cancel для отмены."
+        f"<b>📝 Текущий драфт:</b>\n\n{draft.content}\n\n"
+        f"━━━━━━━━━━━━━━━━\n\n"
+        f"✏️ <b>Опишите, что нужно изменить:</b>\n"
+        f"Например:\n"
+        f"• Сделай тон более деловым\n"
+        f"• Убери упоминание о конкретной компании\n"
+        f"• Добавь больше юридического контекста\n"
+        f"• Сделай короче, без потери смысла\n\n"
+        f"Отправьте /cancel для отмены.",
+        parse_mode="HTML"
     )
     await callback.answer()
 
@@ -289,11 +335,223 @@ async def cancel_edit(message: Message, state: FSMContext):
     await message.answer("❌ Редактирование отменено.")
 
 
-@router.message(EditDraft.waiting_for_edit)
-async def process_edit(message: Message, state: FSMContext, db: AsyncSession):
-    """Обработка отредактированного текста."""
+@router.message(EditDraft.waiting_for_edit, F.voice)
+async def process_voice_edit(message: Message, state: FSMContext, db: AsyncSession):
+    """Обработка голосовых инструкций по редактированию."""
+    await message.answer("🎤 Обрабатываю голосовое сообщение...")
+
+    try:
+        # Скачиваем голосовое сообщение
+        voice_file = await get_bot().get_file(message.voice.file_id)
+        voice_path = f"/tmp/voice_{message.voice.file_id}.ogg"
+        await get_bot().download_file(voice_file.file_path, voice_path)
+
+        # Транскрибируем через Whisper API
+        from openai import AsyncOpenAI
+        from app.config import settings
+
+        client = AsyncOpenAI(api_key=settings.openai_api_key)
+
+        with open(voice_path, "rb") as audio_file:
+            transcript = await client.audio.transcriptions.create(
+                model="whisper-1",
+                file=audio_file,
+                language="ru"
+            )
+
+        edit_instructions = transcript.text
+
+        await message.answer(
+            f"✅ <b>Распознал:</b>\n<i>{edit_instructions}</i>\n\n⏳ Генерирую новый вариант...",
+            parse_mode="HTML"
+        )
+
+        # Удаляем временный файл
+        import os
+        if os.path.exists(voice_path):
+            os.remove(voice_path)
+
+    except Exception as e:
+        logger.error("voice_transcription_error", error=str(e))
+        await message.answer(
+            f"❌ Ошибка при распознавании голоса: {str(e)}\n\nПопробуйте отправить текстом"
+        )
+        return
+
+    # Далее та же логика редактирования
     data = await state.get_data()
     draft_id = data.get("draft_id")
+    original_content = data.get("original_content")
+    article_id = data.get("article_id")
+
+    try:
+        # Получаем оригинальную статью
+        result = await db.execute(
+            select(RawArticle).where(RawArticle.id == article_id)
+        )
+        article = result.scalar_one_or_none()
+
+        # Вызываем LLM для редактирования
+        prompt = f"""Ты редактор контента для Telegram канала о AI в юриспруденции.
+
+ИСХОДНЫЙ ПОСТ:
+{original_content}
+
+ОРИГИНАЛЬНАЯ СТАТЬЯ:
+{article.content if article else 'Не доступна'}
+
+ИНСТРУКЦИИ ПО РЕДАКТИРОВАНИЮ:
+{edit_instructions}
+
+Создай новую версию поста с учётом инструкций. Сохрани структуру с заголовком, основным текстом и хештегами. Формат тот же что в исходном посте."""
+
+        response = await client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "Ты профессиональный редактор контента для Telegram канала."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.7,
+            max_tokens=800
+        )
+
+        new_content = response.choices[0].message.content.strip()
+
+        # Сохраняем новую версию в state
+        await state.update_data(new_content=new_content)
+
+        # Показываем новый вариант с кнопками
+        from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="✅ Опубликовать",
+                    callback_data=f"publish_edited:{draft_id}"
+                ),
+                InlineKeyboardButton(
+                    text="✏️ Редактировать дальше",
+                    callback_data=f"continue_edit:{draft_id}"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="❌ Отменить",
+                    callback_data=f"cancel_edit:{draft_id}"
+                )
+            ]
+        ])
+
+        await message.answer(
+            f"<b>📝 Новый вариант:</b>\n\n{new_content}",
+            reply_markup=keyboard,
+            parse_mode="HTML"
+        )
+
+    except Exception as e:
+        logger.error("voice_edit_generation_error", error=str(e))
+        await message.answer(
+            f"❌ Ошибка при генерации: {str(e)}\n\nПопробуйте еще раз или отправьте /cancel"
+        )
+
+
+@router.message(EditDraft.waiting_for_edit)
+async def process_edit(message: Message, state: FSMContext, db: AsyncSession):
+    """Обработка текстовых инструкций по редактированию через LLM."""
+    data = await state.get_data()
+    draft_id = data.get("draft_id")
+    original_content = data.get("original_content")
+    article_id = data.get("article_id")
+    edit_instructions = message.text
+
+    await message.answer("⏳ Генерирую новый вариант...")
+
+    try:
+        # Получаем оригинальную статью
+        result = await db.execute(
+            select(RawArticle).where(RawArticle.id == article_id)
+        )
+        article = result.scalar_one_or_none()
+
+        # Вызываем LLM для редактирования
+        from openai import AsyncOpenAI
+        from app.config import settings
+
+        client = AsyncOpenAI(api_key=settings.openai_api_key)
+
+        prompt = f"""Ты редактор контента для Telegram канала о AI в юриспруденции.
+
+ИСХОДНЫЙ ПОСТ:
+{original_content}
+
+ОРИГИНАЛЬНАЯ СТАТЬЯ:
+{article.content if article else 'Не доступна'}
+
+ИНСТРУКЦИИ ПО РЕДАКТИРОВАНИЮ:
+{edit_instructions}
+
+Создай новую версию поста с учётом инструкций. Сохрани структуру с заголовком, основным текстом и хештегами. Формат тот же что в исходном посте."""
+
+        response = await client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "Ты профессиональный редактор контента для Telegram канала."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.7,
+            max_tokens=800
+        )
+
+        new_content = response.choices[0].message.content.strip()
+
+        # Сохраняем новую версию в state
+        await state.update_data(new_content=new_content)
+
+        # Показываем новый вариант с кнопками
+        from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="✅ Опубликовать",
+                    callback_data=f"publish_edited:{draft_id}"
+                ),
+                InlineKeyboardButton(
+                    text="✏️ Редактировать дальше",
+                    callback_data=f"continue_edit:{draft_id}"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="❌ Отменить",
+                    callback_data=f"cancel_edit:{draft_id}"
+                )
+            ]
+        ])
+
+        await message.answer(
+            f"<b>📝 Новый вариант:</b>\n\n{new_content}",
+            reply_markup=keyboard,
+            parse_mode="HTML"
+        )
+
+    except Exception as e:
+        logger.error("edit_generation_error", error=str(e))
+        await message.answer(
+            f"❌ Ошибка при генерации: {str(e)}\n\n"
+            f"Попробуйте еще раз или отправьте /cancel"
+        )
+
+
+@router.callback_query(F.data.startswith("publish_edited:"))
+async def callback_publish_edited(callback: CallbackQuery, state: FSMContext, db: AsyncSession):
+    """Опубликовать отредактированную версию."""
+    if not await check_admin(callback.from_user.id):
+        return
+
+    draft_id = int(callback.data.split(":")[1])
+    data = await state.get_data()
+    new_content = data.get("new_content")
 
     # Обновляем драфт
     result = await db.execute(
@@ -301,18 +559,82 @@ async def process_edit(message: Message, state: FSMContext, db: AsyncSession):
     )
     draft = result.scalar_one_or_none()
 
-    if draft:
-        draft.content = message.text
+    if draft and new_content:
+        draft.content = new_content
         draft.status = 'edited'
         await db.commit()
 
-        await message.answer(f"✅ Драфт #{draft_id} обновлен!")
-        # Отправляем обновленный драфт на проверку
-        await send_draft_for_review(message.chat.id, draft, db)
+        # Публикуем
+        success = await publish_draft(draft_id, db, callback.from_user.id)
+
+        if success:
+            # Проверяем тип сообщения (photo или text)
+            if callback.message.photo:
+                await callback.message.edit_caption(
+                    caption=f"✅ Отредактированный драфт #{draft_id} успешно опубликован!"
+                )
+            else:
+                await callback.message.edit_text(
+                    f"✅ Отредактированный драфт #{draft_id} успешно опубликован!"
+                )
+            await callback.answer("Опубликовано!")
+        else:
+            if callback.message.photo:
+                await callback.message.edit_caption(
+                    caption=f"❌ Ошибка при публикации драфта #{draft_id}"
+                )
+            else:
+                await callback.message.edit_text(
+                    f"❌ Ошибка при публикации драфта #{draft_id}"
+                )
+            await callback.answer("Ошибка!", show_alert=True)
     else:
-        await message.answer(f"❌ Драфт #{draft_id} не найден")
+        await callback.answer("❌ Ошибка: драфт не найден", show_alert=True)
 
     await state.clear()
+
+
+@router.callback_query(F.data.startswith("continue_edit:"))
+async def callback_continue_edit(callback: CallbackQuery, state: FSMContext, db: AsyncSession):
+    """Продолжить редактирование."""
+    if not await check_admin(callback.from_user.id):
+        return
+
+    draft_id = int(callback.data.split(":")[1])
+    data = await state.get_data()
+    new_content = data.get("new_content")
+
+    # Обновляем original_content на новую версию для следующей итерации
+    await state.update_data(original_content=new_content)
+
+    text = (f"<b>📝 Текущая версия:</b>\n\n{new_content}\n\n"
+            f"━━━━━━━━━━━━━━━━\n\n"
+            f"✏️ <b>Опишите дополнительные изменения:</b>")
+
+    # Проверяем тип сообщения (photo или text)
+    if callback.message.photo:
+        await callback.message.edit_caption(caption=text, parse_mode="HTML")
+    else:
+        await callback.message.edit_text(text, parse_mode="HTML")
+
+    await callback.answer("Опишите дополнительные изменения")
+
+
+@router.callback_query(F.data.startswith("cancel_edit:"))
+async def callback_cancel_edit(callback: CallbackQuery, state: FSMContext):
+    """Отменить редактирование."""
+    if not await check_admin(callback.from_user.id):
+        return
+
+    await state.clear()
+
+    # Проверяем тип сообщения (photo или text)
+    if callback.message.photo:
+        await callback.message.edit_caption(caption="❌ Редактирование отменено.")
+    else:
+        await callback.message.edit_text("❌ Редактирование отменено.")
+
+    await callback.answer("Отменено")
 
 
 # ====================
@@ -326,10 +648,16 @@ async def callback_show_drafts(callback: CallbackQuery, db: AsyncSession):
         await callback.answer("⛔️ Нет прав доступа", show_alert=True)
         return
 
-    # Получаем драфты в статусе pending_review
+    # Получаем драфты в статусе pending_review, созданные СЕГОДНЯ
+    from datetime import date
+    today_start = datetime.combine(date.today(), datetime.min.time())
+
     result = await db.execute(
         select(PostDraft)
-        .where(PostDraft.status == 'pending_review')
+        .where(
+            PostDraft.status == 'pending_review',
+            PostDraft.created_at >= today_start
+        )
         .order_by(PostDraft.created_at.desc())
     )
     drafts = list(result.scalars().all())
@@ -341,9 +669,10 @@ async def callback_show_drafts(callback: CallbackQuery, db: AsyncSession):
 
     await callback.message.answer(f"📝 Найдено {len(drafts)} драфтов. Отправляю...")
 
-    # Отправляем каждый драфт
-    for draft in drafts[:5]:
-        await send_draft_for_review(callback.message.chat.id, draft, db)
+    # Отправляем каждый драфт (ограничиваем настройкой publisher_max_posts_per_day)
+    max_drafts = min(len(drafts), settings.publisher_max_posts_per_day)
+    for index, draft in enumerate(drafts[:max_drafts], start=1):
+        await send_draft_for_review(callback.message.chat.id, draft, db, draft_number=index)
 
     await callback.answer("Драфты отправлены")
 
@@ -412,7 +741,7 @@ async def callback_show_settings(callback: CallbackQuery):
 # Утилитарные функции
 # ====================
 
-async def send_draft_for_review(chat_id: int, draft: PostDraft, db: AsyncSession):
+async def send_draft_for_review(chat_id: int, draft: PostDraft, db: AsyncSession, bot=None, draft_number: int = None):
     """
     Отправить драфт администратору на модерацию.
 
@@ -420,17 +749,25 @@ async def send_draft_for_review(chat_id: int, draft: PostDraft, db: AsyncSession
         chat_id: ID чата для отправки
         draft: Драфт поста
         db: Сессия БД
+        bot: Опциональный экземпляр Bot (для использования в Celery tasks)
+        draft_number: Порядковый номер драфта за день (если None, используется draft.id)
     """
     try:
+        if bot is None:
+            bot = get_bot()
+
         # Получаем информацию об оригинальной статье
         result = await db.execute(
             select(RawArticle).where(RawArticle.id == draft.article_id)
         )
         article = result.scalar_one_or_none()
 
+        # Используем порядковый номер или ID
+        display_number = draft_number if draft_number is not None else draft.id
+
         # Формируем сообщение
         preview_text = f"""
-🆕 <b>Новый драфт #{draft.id}</b>
+🆕 <b>Новый драфт #{display_number}</b>
 
 {draft.content}
 
@@ -443,7 +780,7 @@ async def send_draft_for_review(chat_id: int, draft: PostDraft, db: AsyncSession
         # Отправляем с изображением если есть
         if draft.image_path:
             photo = FSInputFile(draft.image_path)
-            await get_bot().send_photo(
+            await bot.send_photo(
                 chat_id=chat_id,
                 photo=photo,
                 caption=preview_text[:1024],  # Telegram limit
@@ -451,7 +788,7 @@ async def send_draft_for_review(chat_id: int, draft: PostDraft, db: AsyncSession
                 parse_mode="HTML"
             )
         else:
-            await get_bot().send_message(
+            await bot.send_message(
                 chat_id=chat_id,
                 text=preview_text,
                 reply_markup=get_draft_review_keyboard(draft.id),
@@ -509,18 +846,22 @@ async def publish_draft(draft_id: int, db: AsyncSession, admin_id: int) -> bool:
 
         # Публикуем в канал
         if draft.image_path:
+            # Telegram ограничивает caption до 1024 символов
+            caption = final_text[:1024] if len(final_text) > 1024 else final_text
             photo = FSInputFile(draft.image_path)
             message = await get_bot().send_photo(
                 chat_id=settings.telegram_channel_id,
                 photo=photo,
-                caption=final_text,
+                caption=caption,
                 parse_mode="HTML",
                 reply_markup=get_reader_keyboard(article.url) if article else None
             )
         else:
+            # Telegram ограничивает text до 4096 символов
+            text = final_text[:4096] if len(final_text) > 4096 else final_text
             message = await get_bot().send_message(
                 chat_id=settings.telegram_channel_id,
-                text=final_text,
+                text=text,
                 parse_mode="HTML",
                 reply_markup=get_reader_keyboard(article.url) if article else None
             )

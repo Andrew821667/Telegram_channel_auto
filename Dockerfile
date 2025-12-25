@@ -8,6 +8,10 @@ RUN apt-get update && apt-get install -y \
     gcc \
     postgresql-client \
     curl \
+    fonts-dejavu-core \
+    fonts-dejavu-extra \
+    fontconfig \
+    && fc-cache -f -v \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first for better caching
