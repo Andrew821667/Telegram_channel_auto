@@ -171,6 +171,7 @@ class Settings(BaseSettings):
     # Media Factory
     media_templates_dir: str = Field(default="/app/templates")
     media_output_dir: str = Field(default="/app/media")
+    media_template_image_path: str = Field(default="/app/templates/base_template.jpg")
     media_image_width: int = Field(default=1200)
     media_image_height: int = Field(default=630)
     media_font_size_title: int = Field(default=48)
