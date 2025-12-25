@@ -213,14 +213,25 @@ async def callback_confirm_publish(callback: CallbackQuery, db: AsyncSession):
     success = await publish_draft(draft_id, db, callback.from_user.id)
 
     if success:
-        await callback.message.edit_text(
-            f"✅ Драфт #{draft_id} успешно опубликован!"
-        )
+        # Проверяем тип сообщения (photo или text)
+        if callback.message.photo:
+            await callback.message.edit_caption(
+                caption=f"✅ Драфт #{draft_id} успешно опубликован!"
+            )
+        else:
+            await callback.message.edit_text(
+                f"✅ Драфт #{draft_id} успешно опубликован!"
+            )
         await callback.answer("Опубликовано!")
     else:
-        await callback.message.edit_text(
-            f"❌ Ошибка при публикации драфта #{draft_id}"
-        )
+        if callback.message.photo:
+            await callback.message.edit_caption(
+                caption=f"❌ Ошибка при публикации драфта #{draft_id}"
+            )
+        else:
+            await callback.message.edit_text(
+                f"❌ Ошибка при публикации драфта #{draft_id}"
+            )
         await callback.answer("Ошибка!", show_alert=True)
 
 
@@ -254,9 +265,15 @@ async def callback_reject_reason(callback: CallbackQuery, db: AsyncSession):
     success = await reject_draft(draft_id, reason, db, callback.from_user.id)
 
     if success:
-        await callback.message.edit_text(
-            f"❌ Драфт #{draft_id} отклонен\nПричина: {reason}"
-        )
+        # Проверяем тип сообщения (photo или text)
+        if callback.message.photo:
+            await callback.message.edit_caption(
+                caption=f"❌ Драфт #{draft_id} отклонен\nПричина: {reason}"
+            )
+        else:
+            await callback.message.edit_text(
+                f"❌ Драфт #{draft_id} отклонен\nПричина: {reason}"
+            )
         await callback.answer("Отклонено")
     else:
         await callback.answer("Ошибка!", show_alert=True)
@@ -544,14 +561,25 @@ async def callback_publish_edited(callback: CallbackQuery, state: FSMContext, db
         success = await publish_draft(draft_id, db, callback.from_user.id)
 
         if success:
-            await callback.message.edit_text(
-                f"✅ Отредактированный драфт #{draft_id} успешно опубликован!"
-            )
+            # Проверяем тип сообщения (photo или text)
+            if callback.message.photo:
+                await callback.message.edit_caption(
+                    caption=f"✅ Отредактированный драфт #{draft_id} успешно опубликован!"
+                )
+            else:
+                await callback.message.edit_text(
+                    f"✅ Отредактированный драфт #{draft_id} успешно опубликован!"
+                )
             await callback.answer("Опубликовано!")
         else:
-            await callback.message.edit_text(
-                f"❌ Ошибка при публикации драфта #{draft_id}"
-            )
+            if callback.message.photo:
+                await callback.message.edit_caption(
+                    caption=f"❌ Ошибка при публикации драфта #{draft_id}"
+                )
+            else:
+                await callback.message.edit_text(
+                    f"❌ Ошибка при публикации драфта #{draft_id}"
+                )
             await callback.answer("Ошибка!", show_alert=True)
     else:
         await callback.answer("❌ Ошибка: драфт не найден", show_alert=True)
@@ -572,12 +600,16 @@ async def callback_continue_edit(callback: CallbackQuery, state: FSMContext, db:
     # Обновляем original_content на новую версию для следующей итерации
     await state.update_data(original_content=new_content)
 
-    await callback.message.edit_text(
-        f"<b>📝 Текущая версия:</b>\n\n{new_content}\n\n"
-        f"━━━━━━━━━━━━━━━━\n\n"
-        f"✏️ <b>Опишите дополнительные изменения:</b>",
-        parse_mode="HTML"
-    )
+    text = (f"<b>📝 Текущая версия:</b>\n\n{new_content}\n\n"
+            f"━━━━━━━━━━━━━━━━\n\n"
+            f"✏️ <b>Опишите дополнительные изменения:</b>")
+
+    # Проверяем тип сообщения (photo или text)
+    if callback.message.photo:
+        await callback.message.edit_caption(caption=text, parse_mode="HTML")
+    else:
+        await callback.message.edit_text(text, parse_mode="HTML")
+
     await callback.answer("Опишите дополнительные изменения")
 
 
@@ -588,7 +620,13 @@ async def callback_cancel_edit(callback: CallbackQuery, state: FSMContext):
         return
 
     await state.clear()
-    await callback.message.edit_text("❌ Редактирование отменено.")
+
+    # Проверяем тип сообщения (photo или text)
+    if callback.message.photo:
+        await callback.message.edit_caption(caption="❌ Редактирование отменено.")
+    else:
+        await callback.message.edit_text("❌ Редактирование отменено.")
+
     await callback.answer("Отменено")
 
 
