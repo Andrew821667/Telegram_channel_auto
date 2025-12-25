@@ -447,33 +447,29 @@ def daily_workflow_task():
 # ====================
 
 app.conf.beat_schedule = {
-    # Ежедневный workflow в 09:00 MSK
-    'daily-workflow': {
+    # БУДНИЕ ДНИ (Понедельник-Пятница): 3 генерации в день
+    # Утренняя генерация: 09:00 MSK
+    'weekday-morning-workflow': {
         'task': 'daily_workflow_task',
-        'schedule': crontab(hour=9, minute=0),  # 09:00 MSK
+        'schedule': crontab(hour=9, minute=0, day_of_week='1-5'),  # Пн-Пт 09:00
+    },
+    # Дневная генерация: 13:00 MSK
+    'weekday-afternoon-workflow': {
+        'task': 'daily_workflow_task',
+        'schedule': crontab(hour=13, minute=0, day_of_week='1-5'),  # Пн-Пт 13:00
+    },
+    # Вечерняя генерация: 17:00 MSK
+    'weekday-evening-workflow': {
+        'task': 'daily_workflow_task',
+        'schedule': crontab(hour=17, minute=0, day_of_week='1-5'),  # Пн-Пт 17:00
     },
 
-    # Альтернативно: запуск отдельных задач по расписанию
-    # 'fetch-news-daily': {
-    #     'task': 'app.tasks.celery_tasks.fetch_news_task',
-    #     'schedule': crontab(hour=9, minute=0),
-    # },
-    # 'clean-news-daily': {
-    #     'task': 'app.tasks.celery_tasks.clean_news_task',
-    #     'schedule': crontab(hour=9, minute=10),
-    # },
-    # 'analyze-articles-daily': {
-    #     'task': 'app.tasks.celery_tasks.analyze_articles_task',
-    #     'schedule': crontab(hour=9, minute=15),
-    # },
-    # 'generate-media-daily': {
-    #     'task': 'app.tasks.celery_tasks.generate_media_task',
-    #     'schedule': crontab(hour=9, minute=20),
-    # },
-    # 'send-drafts-daily': {
-    #     'task': 'app.tasks.celery_tasks.send_drafts_to_admin_task',
-    #     'schedule': crontab(hour=9, minute=25),
-    # },
+    # ВЫХОДНЫЕ (Суббота-Воскресенье): 1 итоговая генерация
+    # Утренняя генерация: 10:00 MSK
+    'weekend-workflow': {
+        'task': 'daily_workflow_task',
+        'schedule': crontab(hour=10, minute=0, day_of_week='0,6'),  # Сб-Вс 10:00
+    },
 }
 
 
