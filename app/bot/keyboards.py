@@ -119,7 +119,8 @@ def get_confirm_keyboard(action: str, draft_id: int) -> InlineKeyboardMarkup:
 
 def get_reader_keyboard(
     source_url: str,
-    channel_username: str = "legal_ai_pro"
+    channel_username: str = "legal_ai_pro",
+    post_id: int = None
 ) -> InlineKeyboardMarkup:
     """
     Клавиатура для читателей в опубликованном посте.
@@ -127,6 +128,7 @@ def get_reader_keyboard(
     Args:
         source_url: URL источника новости
         channel_username: Username канала для кнопки "Поделиться"
+        post_id: ID поста для кнопки мнения (опционально)
 
     Returns:
         InlineKeyboardMarkup с интерактивными кнопками
@@ -156,6 +158,15 @@ def get_reader_keyboard(
             url=f"https://t.me/share/url?url=https://t.me/{channel_username}"
         )
     )
+
+    # Кнопка "Ваше мнение" для сбора feedback (если указан post_id)
+    if post_id:
+        builder.row(
+            InlineKeyboardButton(
+                text="📊 Ваше мнение",
+                callback_data=f"opinion:{post_id}"
+            )
+        )
 
     return builder.as_markup()
 
@@ -189,6 +200,40 @@ def get_main_menu_keyboard() -> InlineKeyboardMarkup:
         InlineKeyboardButton(
             text="⚙️ Настройки",
             callback_data="show_settings"
+        )
+    )
+
+    return builder.as_markup()
+
+
+def get_opinion_keyboard(post_id: int) -> InlineKeyboardMarkup:
+    """
+    Клавиатура для сбора мнения читателей о посте.
+
+    Args:
+        post_id: ID драфта/поста
+
+    Returns:
+        InlineKeyboardMarkup с вариантами мнения
+    """
+    builder = InlineKeyboardBuilder()
+
+    builder.row(
+        InlineKeyboardButton(
+            text="👍 Полезно",
+            callback_data=f"react:{post_id}:useful"
+        )
+    )
+    builder.row(
+        InlineKeyboardButton(
+            text="🔥 Важно",
+            callback_data=f"react:{post_id}:important"
+        )
+    )
+    builder.row(
+        InlineKeyboardButton(
+            text="🤔 Спорно",
+            callback_data=f"react:{post_id}:controversial"
         )
     )
 

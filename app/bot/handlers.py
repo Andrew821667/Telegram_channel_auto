@@ -25,7 +25,8 @@ from app.bot.keyboards import (
     get_confirm_keyboard,
     get_reader_keyboard,
     get_main_menu_keyboard,
-    get_rejection_reasons_keyboard
+    get_rejection_reasons_keyboard,
+    get_opinion_keyboard
 )
 from app.bot.middleware import DbSessionMiddleware
 import structlog
@@ -832,17 +833,13 @@ async def publish_draft(draft_id: int, db: AsyncSession, admin_id: int) -> bool:
         # Формируем финальный текст с интерактивными элементами
         final_text = draft.content
 
-        # Добавляем разделитель и дополнительные элементы
+        # Добавляем разделитель и источник
         if article:
             final_text += f"\n\n━━━━━━━━━━━━━━━━"
 
-            # Реакции-подсказки для вовлечения читателей
-            final_text += f"\n\n💡 <b>Ваше мнение:</b>"
-            final_text += f"\n👍 — полезно  |  🔥 — важно  |  🤔 — спорно"
-
             # Источник с attribution
             source_name = article.source_name if article.source_name else "Источник"
-            final_text += f"\n\n📰 {source_name}"
+            final_text += f"\n📰 {source_name}"
 
         # Публикуем в канал
         if draft.image_path:
@@ -854,7 +851,10 @@ async def publish_draft(draft_id: int, db: AsyncSession, admin_id: int) -> bool:
                 photo=photo,
                 caption=caption,
                 parse_mode="HTML",
-                reply_markup=get_reader_keyboard(article.url) if article else None
+                reply_markup=get_reader_keyboard(
+                    article.url,
+                    post_id=draft.id
+                ) if article else None
             )
         else:
             # Telegram ограничивает text до 4096 символов
@@ -863,7 +863,10 @@ async def publish_draft(draft_id: int, db: AsyncSession, admin_id: int) -> bool:
                 chat_id=settings.telegram_channel_id,
                 text=text,
                 parse_mode="HTML",
-                reply_markup=get_reader_keyboard(article.url) if article else None
+                reply_markup=get_reader_keyboard(
+                    article.url,
+                    post_id=draft.id
+                ) if article else None
             )
 
         # Сохраняем публикацию в БД
@@ -950,6 +953,95 @@ async def reject_draft(
     except Exception as e:
         logger.error("reject_error", draft_id=draft_id, error=str(e))
         return False
+
+
+@router.callback_query(F.data.startswith("opinion:"))
+async def callback_opinion(callback: CallbackQuery, db: AsyncSession):
+    """
+    Показать клавиатуру для выбора мнения о посте.
+    """
+    try:
+        # Извлекаем post_id из callback_data
+        post_id = int(callback.data.split(":")[1])
+
+        # Показываем опции для выражения мнения
+        await callback.answer()
+        await callback.message.answer(
+            "📊 Выберите ваше мнение о посте:",
+            reply_markup=get_opinion_keyboard(post_id)
+        )
+
+    except Exception as e:
+        logger.error("opinion_callback_error", error=str(e))
+        await callback.answer("❌ Произошла ошибка", show_alert=True)
+
+
+@router.callback_query(F.data.startswith("react:"))
+async def callback_react(callback: CallbackQuery, db: AsyncSession):
+    """
+    Обработать реакцию пользователя на пост.
+    """
+    try:
+        # Извлекаем данные из callback_data: react:post_id:reaction_type
+        parts = callback.data.split(":")
+        post_id = int(parts[1])
+        reaction_type = parts[2]  # useful, important, controversial
+
+        # Получаем публикацию
+        result = await db.execute(
+            select(Publication)
+            .join(PostDraft)
+            .where(PostDraft.id == post_id)
+        )
+        publication = result.scalar_one_or_none()
+
+        if not publication:
+            await callback.answer("❌ Публикация не найдена", show_alert=True)
+            return
+
+        # Получаем текущие реакции
+        reactions = publication.reactions or {}
+
+        # Увеличиваем счетчик для выбранной реакции
+        reactions[reaction_type] = reactions.get(reaction_type, 0) + 1
+
+        # Сохраняем обновленные реакции
+        publication.reactions = reactions
+        await db.commit()
+
+        # Формируем ответное сообщение
+        reaction_emoji = {
+            "useful": "👍",
+            "important": "🔥",
+            "controversial": "🤔"
+        }
+        reaction_text = {
+            "useful": "Полезно",
+            "important": "Важно",
+            "controversial": "Спорно"
+        }
+
+        emoji = reaction_emoji.get(reaction_type, "👍")
+        text = reaction_text.get(reaction_type, "")
+
+        await callback.answer(f"{emoji} Спасибо за ваше мнение: {text}!", show_alert=True)
+
+        # Удаляем сообщение с кнопками
+        try:
+            await callback.message.delete()
+        except Exception:
+            pass  # Игнорируем ошибки удаления
+
+        logger.info(
+            "user_reaction_recorded",
+            post_id=post_id,
+            reaction_type=reaction_type,
+            user_id=callback.from_user.id
+        )
+
+    except Exception as e:
+        logger.error("react_callback_error", error=str(e))
+        await callback.answer("❌ Произошла ошибка", show_alert=True)
 
 
 async def get_statistics(db: AsyncSession) -> str:
