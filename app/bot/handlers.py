@@ -93,10 +93,16 @@ async def cmd_drafts(message: Message, db: AsyncSession):
     if not await check_admin(message.from_user.id):
         return
 
-    # Получаем драфты в статусе pending_review
+    # Получаем драфты в статусе pending_review, созданные СЕГОДНЯ
+    from datetime import date
+    today_start = datetime.combine(date.today(), datetime.min.time())
+
     result = await db.execute(
         select(PostDraft)
-        .where(PostDraft.status == 'pending_review')
+        .where(
+            PostDraft.status == 'pending_review',
+            PostDraft.created_at >= today_start
+        )
         .order_by(PostDraft.created_at.desc())
     )
     drafts = list(result.scalars().all())
@@ -107,9 +113,10 @@ async def cmd_drafts(message: Message, db: AsyncSession):
 
     await message.answer(f"📝 Найдено {len(drafts)} драфтов. Отправляю...")
 
-    # Отправляем каждый драфт
-    for draft in drafts[:5]:  # Ограничиваем 5 драфтами за раз
-        await send_draft_for_review(message.chat.id, draft, db)
+    # Отправляем каждый драфт (ограничиваем настройкой publisher_max_posts_per_day)
+    max_drafts = min(len(drafts), settings.publisher_max_posts_per_day)
+    for index, draft in enumerate(drafts[:max_drafts], start=1):
+        await send_draft_for_review(message.chat.id, draft, db, draft_number=index)
 
 
 @router.message(Command("stats"))
@@ -641,10 +648,16 @@ async def callback_show_drafts(callback: CallbackQuery, db: AsyncSession):
         await callback.answer("⛔️ Нет прав доступа", show_alert=True)
         return
 
-    # Получаем драфты в статусе pending_review
+    # Получаем драфты в статусе pending_review, созданные СЕГОДНЯ
+    from datetime import date
+    today_start = datetime.combine(date.today(), datetime.min.time())
+
     result = await db.execute(
         select(PostDraft)
-        .where(PostDraft.status == 'pending_review')
+        .where(
+            PostDraft.status == 'pending_review',
+            PostDraft.created_at >= today_start
+        )
         .order_by(PostDraft.created_at.desc())
     )
     drafts = list(result.scalars().all())
@@ -656,9 +669,10 @@ async def callback_show_drafts(callback: CallbackQuery, db: AsyncSession):
 
     await callback.message.answer(f"📝 Найдено {len(drafts)} драфтов. Отправляю...")
 
-    # Отправляем каждый драфт
-    for draft in drafts[:5]:
-        await send_draft_for_review(callback.message.chat.id, draft, db)
+    # Отправляем каждый драфт (ограничиваем настройкой publisher_max_posts_per_day)
+    max_drafts = min(len(drafts), settings.publisher_max_posts_per_day)
+    for index, draft in enumerate(drafts[:max_drafts], start=1):
+        await send_draft_for_review(callback.message.chat.id, draft, db, draft_number=index)
 
     await callback.answer("Драфты отправлены")
 
@@ -727,7 +741,7 @@ async def callback_show_settings(callback: CallbackQuery):
 # Утилитарные функции
 # ====================
 
-async def send_draft_for_review(chat_id: int, draft: PostDraft, db: AsyncSession, bot=None):
+async def send_draft_for_review(chat_id: int, draft: PostDraft, db: AsyncSession, bot=None, draft_number: int = None):
     """
     Отправить драфт администратору на модерацию.
 
@@ -736,6 +750,7 @@ async def send_draft_for_review(chat_id: int, draft: PostDraft, db: AsyncSession
         draft: Драфт поста
         db: Сессия БД
         bot: Опциональный экземпляр Bot (для использования в Celery tasks)
+        draft_number: Порядковый номер драфта за день (если None, используется draft.id)
     """
     try:
         if bot is None:
@@ -747,9 +762,12 @@ async def send_draft_for_review(chat_id: int, draft: PostDraft, db: AsyncSession
         )
         article = result.scalar_one_or_none()
 
+        # Используем порядковый номер или ID
+        display_number = draft_number if draft_number is not None else draft.id
+
         # Формируем сообщение
         preview_text = f"""
-🆕 <b>Новый драфт #{draft.id}</b>
+🆕 <b>Новый драфт #{display_number}</b>
 
 {draft.content}
 

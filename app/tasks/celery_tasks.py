@@ -312,14 +312,16 @@ def send_drafts_to_admin_task():
 
             try:
                 async with SessionLocal() as session:
-                    # Получаем драфты в статусе pending_review, созданные за последние 24 часа
-                    # Это предотвращает отправку старых непросмотренных драфтов
-                    cutoff_time = datetime.utcnow() - timedelta(hours=24)
+                    # Получаем драфты в статусе pending_review, созданные СЕГОДНЯ
+                    # Фильтруем по началу текущего дня (00:00 UTC), чтобы отправлялись только свежие драфты
+                    from datetime import date
+                    today_start = datetime.combine(date.today(), datetime.min.time())  # 00:00 UTC сегодня
+
                     result = await session.execute(
                         select(PostDraft)
                         .where(
                             PostDraft.status == 'pending_review',
-                            PostDraft.created_at >= cutoff_time
+                            PostDraft.created_at >= today_start
                         )
                         .order_by(PostDraft.created_at.desc())
                     )
@@ -337,17 +339,19 @@ def send_drafts_to_admin_task():
                         bot=bot
                     )
 
-                    # Отправляем каждый драфт
-                    for draft in drafts[:5]:  # Ограничиваем 5 за раз
+                    # Отправляем каждый драфт (ограничиваем настройкой publisher_max_posts_per_day)
+                    max_drafts = min(len(drafts), settings.publisher_max_posts_per_day)
+                    for index, draft in enumerate(drafts[:max_drafts], start=1):
                         await send_draft_for_review(
                             settings.telegram_admin_id,
                             draft,
                             session,
-                            bot=bot
+                            bot=bot,
+                            draft_number=index  # Порядковый номер за день
                         )
                         await asyncio.sleep(1)  # Rate limiting
 
-                    return len(drafts)
+                    return max_drafts
             finally:
                 # Закрываем Bot сессию перед закрытием engine
                 await bot.session.close()
