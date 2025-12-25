@@ -412,7 +412,7 @@ async def callback_show_settings(callback: CallbackQuery):
 # Утилитарные функции
 # ====================
 
-async def send_draft_for_review(chat_id: int, draft: PostDraft, db: AsyncSession):
+async def send_draft_for_review(chat_id: int, draft: PostDraft, db: AsyncSession, bot=None):
     """
     Отправить драфт администратору на модерацию.
 
@@ -420,8 +420,12 @@ async def send_draft_for_review(chat_id: int, draft: PostDraft, db: AsyncSession
         chat_id: ID чата для отправки
         draft: Драфт поста
         db: Сессия БД
+        bot: Опциональный экземпляр Bot (для использования в Celery tasks)
     """
     try:
+        if bot is None:
+            bot = get_bot()
+
         # Получаем информацию об оригинальной статье
         result = await db.execute(
             select(RawArticle).where(RawArticle.id == draft.article_id)
@@ -443,7 +447,7 @@ async def send_draft_for_review(chat_id: int, draft: PostDraft, db: AsyncSession
         # Отправляем с изображением если есть
         if draft.image_path:
             photo = FSInputFile(draft.image_path)
-            await get_bot().send_photo(
+            await bot.send_photo(
                 chat_id=chat_id,
                 photo=photo,
                 caption=preview_text[:1024],  # Telegram limit
@@ -451,7 +455,7 @@ async def send_draft_for_review(chat_id: int, draft: PostDraft, db: AsyncSession
                 parse_mode="HTML"
             )
         else:
-            await get_bot().send_message(
+            await bot.send_message(
                 chat_id=chat_id,
                 text=preview_text,
                 reply_markup=get_draft_review_keyboard(draft.id),

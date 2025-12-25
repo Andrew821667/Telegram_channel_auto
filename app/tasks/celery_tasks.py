@@ -79,18 +79,21 @@ def run_async(coro):
     return asyncio.run(coro)
 
 
-async def notify_admin(message: str):
+async def notify_admin(message: str, bot=None):
     """
     Отправить уведомление администратору.
 
     Args:
         message: Текст уведомления
+        bot: Опциональный экземпляр Bot (для использования в Celery tasks)
     """
     try:
-        # Импортируем get_bot ЗДЕСЬ чтобы избежать создания aiohttp клиента при импорте модуля
-        from app.bot.handlers import get_bot
+        if bot is None:
+            # Импортируем get_bot ЗДЕСЬ чтобы избежать создания aiohttp клиента при импорте модуля
+            from app.bot.handlers import get_bot
+            bot = get_bot()
 
-        await get_bot().send_message(
+        await bot.send_message(
             chat_id=settings.telegram_admin_id,
             text=message,
             parse_mode="HTML"
@@ -288,8 +291,13 @@ def send_drafts_to_admin_task():
             from sqlalchemy.pool import NullPool
             from sqlalchemy import select
             from app.config import settings
+            from aiogram import Bot
             # Импортируем send_draft_for_review ЗДЕСЬ чтобы избежать создания Bot() при импорте модуля
             from app.bot.handlers import send_draft_for_review
+
+            # Создаём Bot ВНУТРИ asyncio.run() контекста
+            # чтобы aiohttp клиент привязался к правильному event loop
+            bot = Bot(token=settings.telegram_bot_token)
 
             engine = create_async_engine(
                 settings.database_url,
@@ -313,14 +321,15 @@ def send_drafts_to_admin_task():
                     drafts = list(result.scalars().all())
 
                     if not drafts:
-                        await notify_admin("📭 Нет новых драфтов сегодня.")
+                        await notify_admin("📭 Нет новых драфтов сегодня.", bot=bot)
                         return 0
 
                     # Отправляем уведомление
                     await notify_admin(
                         f"📝 <b>Новые драфты готовы к модерации!</b>\n\n"
                         f"Количество: {len(drafts)}\n"
-                        f"Используйте /drafts для просмотра."
+                        f"Используйте /drafts для просмотра.",
+                        bot=bot
                     )
 
                     # Отправляем каждый драфт
@@ -328,12 +337,15 @@ def send_drafts_to_admin_task():
                         await send_draft_for_review(
                             settings.telegram_admin_id,
                             draft,
-                            session
+                            session,
+                            bot=bot
                         )
                         await asyncio.sleep(1)  # Rate limiting
 
                     return len(drafts)
             finally:
+                # Закрываем Bot сессию перед закрытием engine
+                await bot.session.close()
                 await engine.dispose()
 
         count = run_async(send_drafts())
@@ -384,21 +396,39 @@ def daily_workflow_task():
         logger.info("daily_workflow_task_chain_started", task_id=result.id)
 
         # Отправляем уведомление о запуске
-        run_async(notify_admin(
-            "🔄 <b>Ежедневный workflow запущен!</b>\n\n"
-            "Ожидайте завершения через 10-15 минут.\n"
-            "Проверьте новые драфты с помощью /drafts"
-        ))
+        async def send_notification():
+            from aiogram import Bot
+            bot = Bot(token=settings.telegram_bot_token)
+            try:
+                await notify_admin(
+                    "🔄 <b>Ежедневный workflow запущен!</b>\n\n"
+                    "Ожидайте завершения через 10-15 минут.\n"
+                    "Проверьте новые драфты с помощью /drafts",
+                    bot=bot
+                )
+            finally:
+                await bot.session.close()
+
+        run_async(send_notification())
 
         return f"Daily workflow chain started: {result.id}"
 
     except Exception as e:
         logger.error("daily_workflow_task_error", error=str(e))
 
-        run_async(notify_admin(
-            f"❌ <b>Ошибка в ежедневном workflow!</b>\n\n"
-            f"Ошибка: {str(e)}"
-        ))
+        async def send_error_notification():
+            from aiogram import Bot
+            bot = Bot(token=settings.telegram_bot_token)
+            try:
+                await notify_admin(
+                    f"❌ <b>Ошибка в ежедневном workflow!</b>\n\n"
+                    f"Ошибка: {str(e)}",
+                    bot=bot
+                )
+            finally:
+                await bot.session.close()
+
+        run_async(send_error_notification())
 
         raise
 
