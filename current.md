@@ -374,6 +374,34 @@ _Пока нет_
   - Commit: "feat: Добавлены интерактивные элементы в посты канала"
 - 📋 Запланировано внедрение отслеживания метрик (Phase 2)
 
+### 2025-12-25 (Сессия 6 - 🎯 CHECKPOINT 1: Исправление Celery Chain)
+**Критическая проблема:** TypeError в Celery chain - "clean_news_task() takes 1 positional argument but 2 were given"
+
+**Решение:**
+- ✅ Убран `bind=True` у всех задач в chain (fetch_news_task, clean_news_task, analyze_articles_task, generate_media_task, send_drafts_to_admin_task)
+- ✅ Заменён ручной retry на `autoretry_for=(Exception,), retry_backoff=60, retry_backoff_max=600`
+- ✅ Изменён `.s()` на `.si()` в daily_workflow_task для immutable signatures
+- ✅ Добавлен `PYTHONDONTWRITEBYTECODE=1` во все контейнеры для предотвращения кэширования .pyc файлов
+- ✅ Исправлена ленивая инициализация Bot() для устранения "Event loop is closed"
+- ✅ Глобальный engine теперь использует NullPool для предотвращения Event loop is closed
+
+**Коммиты:**
+- `3175cea` - fix: Глобальный engine теперь использует NullPool
+- `60763ed` - fix: Ленивая инициализация Bot()
+- `f9b406b` - fix: Использование .si() вместо .s() в task chain
+- `15385f1` - fix: Убрал bind=True у всех задач в chain
+- `214c247` - fix: Добавил PYTHONDONTWRITEBYTECODE=1
+
+**Результат:**
+✅ Весь workflow chain выполняется успешно:
+- fetch_news_task → completed
+- clean_news_task → completed
+- analyze_articles_task → completed
+- generate_media_task → completed
+- send_drafts_to_admin_task → completed
+
+⚠️ **Известная проблема:** "Event loop is closed" в send_drafts_to_admin_task при отправке Telegram сообщений (следующая задача)
+
 ---
 
 ## 🔗 Полезные ссылки

@@ -323,7 +323,8 @@ class NewsCleaner:
         await log_to_db(
             "INFO",
             f"Cleaning completed: {stats['filtered']} filtered, {stats['rejected']} rejected",
-            stats
+            stats,
+            session=self.db  # Передаём существующую сессию
         )
 
         logger.info("cleaning_complete", **stats)

@@ -129,7 +129,8 @@ class NewsFetcher:
                     await log_to_db(
                         "ERROR",
                         f"Failed to fetch URL after {max_retries} attempts",
-                        {"url": url, "error": str(e)}
+                        {"url": url, "error": str(e)},
+                        session=self.db  # Передаём существующую сессию
                     )
                     return None
 
@@ -475,7 +476,8 @@ class NewsFetcher:
         await log_to_db(
             "INFO",
             f"Fetch completed: {total_articles} articles from {len(stats)} sources",
-            {"stats": stats}
+            {"stats": stats},
+            session=self.db  # Передаём существующую сессию
         )
 
         logger.info(

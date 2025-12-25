@@ -32,10 +32,23 @@ import structlog
 
 logger = structlog.get_logger()
 
-# Инициализация бота
-bot = Bot(token=settings.telegram_bot_token)
+# Глобальные переменные (Bot создается лениво чтобы избежать создания aiohttp клиента при импорте)
+_bot: Optional[Bot] = None
 dp = Dispatcher()
 router = Router()
+
+
+def get_bot() -> Bot:
+    """
+    Получить экземпляр бота (ленивая инициализация).
+
+    Bot создается только при первом вызове, чтобы избежать создания aiohttp клиента
+    при импорте модуля (важно для Celery worker).
+    """
+    global _bot
+    if _bot is None:
+        _bot = Bot(token=settings.telegram_bot_token)
+    return _bot
 
 
 # FSM States для редактирования
@@ -430,7 +443,7 @@ async def send_draft_for_review(chat_id: int, draft: PostDraft, db: AsyncSession
         # Отправляем с изображением если есть
         if draft.image_path:
             photo = FSInputFile(draft.image_path)
-            await bot.send_photo(
+            await get_bot().send_photo(
                 chat_id=chat_id,
                 photo=photo,
                 caption=preview_text[:1024],  # Telegram limit
@@ -438,7 +451,7 @@ async def send_draft_for_review(chat_id: int, draft: PostDraft, db: AsyncSession
                 parse_mode="HTML"
             )
         else:
-            await bot.send_message(
+            await get_bot().send_message(
                 chat_id=chat_id,
                 text=preview_text,
                 reply_markup=get_draft_review_keyboard(draft.id),
@@ -497,7 +510,7 @@ async def publish_draft(draft_id: int, db: AsyncSession, admin_id: int) -> bool:
         # Публикуем в канал
         if draft.image_path:
             photo = FSInputFile(draft.image_path)
-            message = await bot.send_photo(
+            message = await get_bot().send_photo(
                 chat_id=settings.telegram_channel_id,
                 photo=photo,
                 caption=final_text,
@@ -505,7 +518,7 @@ async def publish_draft(draft_id: int, db: AsyncSession, admin_id: int) -> bool:
                 reply_markup=get_reader_keyboard(article.url) if article else None
             )
         else:
-            message = await bot.send_message(
+            message = await get_bot().send_message(
                 chat_id=settings.telegram_channel_id,
                 text=final_text,
                 parse_mode="HTML",
@@ -643,7 +656,7 @@ async def setup_bot_commands():
         BotCommand(command="stats", description="📊 Статистика системы"),
         BotCommand(command="help", description="❓ Помощь"),
     ]
-    await bot.set_my_commands(commands)
+    await get_bot().set_my_commands(commands)
     logger.info("bot_commands_set", count=len(commands))
 
 
@@ -663,13 +676,13 @@ async def start_bot():
     logger.info("bot_starting")
 
     # Удаляем вебхуки если есть
-    await bot.delete_webhook(drop_pending_updates=True)
+    await get_bot().delete_webhook(drop_pending_updates=True)
 
     # Устанавливаем меню команд
     await setup_bot_commands()
 
     # Запускаем polling
-    await dp.start_polling(bot)
+    await dp.start_polling(get_bot())
 
 
 if __name__ == "__main__":

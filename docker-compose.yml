@@ -75,6 +75,10 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    environment:
+      - CELERYD_POOL=threads
+      - CELERYD_CONCURRENCY=1
+      - PYTHONDONTWRITEBYTECODE=1
     depends_on:
       postgres:
         condition: service_healthy
@@ -85,7 +89,7 @@ services:
       - ./templates:/app/templates
       - ./knowledge_base:/app/knowledge_base
       - ./media:/app/media
-    command: celery -A app.tasks.celery_tasks worker --loglevel=info --pool=solo
+    command: celery -A app.tasks.celery_tasks worker --loglevel=info --pool=threads --concurrency=1
     healthcheck:
       test: ["CMD-SHELL", "celery -A app.tasks.celery_tasks inspect ping"]
       interval: 30s
@@ -101,6 +105,8 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    environment:
+      - PYTHONDONTWRITEBYTECODE=1
     depends_on:
       postgres:
         condition: service_healthy
@@ -119,6 +125,8 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    environment:
+      - PYTHONDONTWRITEBYTECODE=1
     depends_on:
       postgres:
         condition: service_healthy
