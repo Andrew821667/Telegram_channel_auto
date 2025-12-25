@@ -311,9 +311,129 @@ async def cancel_edit(message: Message, state: FSMContext):
     await message.answer("❌ Редактирование отменено.")
 
 
+@router.message(EditDraft.waiting_for_edit, F.voice)
+async def process_voice_edit(message: Message, state: FSMContext, db: AsyncSession):
+    """Обработка голосовых инструкций по редактированию."""
+    await message.answer("🎤 Обрабатываю голосовое сообщение...")
+
+    try:
+        # Скачиваем голосовое сообщение
+        voice_file = await get_bot().get_file(message.voice.file_id)
+        voice_path = f"/tmp/voice_{message.voice.file_id}.ogg"
+        await get_bot().download_file(voice_file.file_path, voice_path)
+
+        # Транскрибируем через Whisper API
+        from openai import AsyncOpenAI
+        from app.config import settings
+
+        client = AsyncOpenAI(api_key=settings.openai_api_key)
+
+        with open(voice_path, "rb") as audio_file:
+            transcript = await client.audio.transcriptions.create(
+                model="whisper-1",
+                file=audio_file,
+                language="ru"
+            )
+
+        edit_instructions = transcript.text
+
+        await message.answer(
+            f"✅ <b>Распознал:</b>\n<i>{edit_instructions}</i>\n\n⏳ Генерирую новый вариант...",
+            parse_mode="HTML"
+        )
+
+        # Удаляем временный файл
+        import os
+        if os.path.exists(voice_path):
+            os.remove(voice_path)
+
+    except Exception as e:
+        logger.error("voice_transcription_error", error=str(e))
+        await message.answer(
+            f"❌ Ошибка при распознавании голоса: {str(e)}\n\nПопробуйте отправить текстом"
+        )
+        return
+
+    # Далее та же логика редактирования
+    data = await state.get_data()
+    draft_id = data.get("draft_id")
+    original_content = data.get("original_content")
+    article_id = data.get("article_id")
+
+    try:
+        # Получаем оригинальную статью
+        result = await db.execute(
+            select(RawArticle).where(RawArticle.id == article_id)
+        )
+        article = result.scalar_one_or_none()
+
+        # Вызываем LLM для редактирования
+        prompt = f"""Ты редактор контента для Telegram канала о AI в юриспруденции.
+
+ИСХОДНЫЙ ПОСТ:
+{original_content}
+
+ОРИГИНАЛЬНАЯ СТАТЬЯ:
+{article.content if article else 'Не доступна'}
+
+ИНСТРУКЦИИ ПО РЕДАКТИРОВАНИЮ:
+{edit_instructions}
+
+Создай новую версию поста с учётом инструкций. Сохрани структуру с заголовком, основным текстом и хештегами. Формат тот же что в исходном посте."""
+
+        response = await client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "Ты профессиональный редактор контента для Telegram канала."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.7,
+            max_tokens=800
+        )
+
+        new_content = response.choices[0].message.content.strip()
+
+        # Сохраняем новую версию в state
+        await state.update_data(new_content=new_content)
+
+        # Показываем новый вариант с кнопками
+        from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="✅ Опубликовать",
+                    callback_data=f"publish_edited:{draft_id}"
+                ),
+                InlineKeyboardButton(
+                    text="✏️ Редактировать дальше",
+                    callback_data=f"continue_edit:{draft_id}"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="❌ Отменить",
+                    callback_data=f"cancel_edit:{draft_id}"
+                )
+            ]
+        ])
+
+        await message.answer(
+            f"<b>📝 Новый вариант:</b>\n\n{new_content}",
+            reply_markup=keyboard,
+            parse_mode="HTML"
+        )
+
+    except Exception as e:
+        logger.error("voice_edit_generation_error", error=str(e))
+        await message.answer(
+            f"❌ Ошибка при генерации: {str(e)}\n\nПопробуйте еще раз или отправьте /cancel"
+        )
+
+
 @router.message(EditDraft.waiting_for_edit)
 async def process_edit(message: Message, state: FSMContext, db: AsyncSession):
-    """Обработка инструкций по редактированию через LLM."""
+    """Обработка текстовых инструкций по редактированию через LLM."""
     data = await state.get_data()
     draft_id = data.get("draft_id")
     original_content = data.get("original_content")
