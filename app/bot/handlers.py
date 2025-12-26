@@ -1088,6 +1088,17 @@ async def publish_draft(draft_id: int, db: AsyncSession, admin_id: int) -> bool:
 
         # Если есть изображение - убираем заголовок из текста (он уже на картинке)
         if draft.image_path and draft.title:
+            # Сначала ищем маркеры международных новостей
+            intl_markers = ["🌍 Международные новости:\n\n", "🌎 За рубежом:\n\n", "🌏 В мире:\n\n",
+                           "🌐 Новости из-за рубежа:\n\n", "🗺️ Зарубежный опыт:\n\n"]
+
+            intl_prefix = ""
+            for marker in intl_markers:
+                if final_text.startswith(marker):
+                    intl_prefix = marker
+                    final_text = final_text[len(marker):]  # Временно убираем маркер
+                    break
+
             # Убираем заголовок (обычно в начале в тегах <b>...</b>)
             title_patterns = [
                 f"<b>{draft.title}</b>\n\n",
@@ -1100,6 +1111,10 @@ async def publish_draft(draft_id: int, db: AsyncSession, admin_id: int) -> bool:
                     logger.info("publish_draft_title_pattern_matched", draft_id=draft_id, pattern=pattern[:50])
                     final_text = final_text[len(pattern):]
                     break
+
+            # Возвращаем маркер международных новостей если был
+            final_text = intl_prefix + final_text
+
             logger.info("publish_draft_after_title_removal", draft_id=draft_id, content_start=final_text[:100])
 
         # Добавляем разделитель и источник
@@ -1167,15 +1182,16 @@ async def publish_draft(draft_id: int, db: AsyncSession, admin_id: int) -> bool:
         await db.commit()
         await db.refresh(publication)
 
-        # Запускаем векторизацию в фоновой задаче (не блокирует UI)
-        if settings.qdrant_enabled:
-            asyncio.create_task(
-                _vectorize_publication_background(
-                    pub_id=publication.id,
-                    content=draft.content,
-                    draft_id=draft.id
-                )
-            )
+        # ВРЕМЕННО ОТКЛЮЧЕНО: Векторизация блокирует UI
+        # TODO: Перенести в Celery task
+        # if settings.qdrant_enabled:
+        #     asyncio.create_task(
+        #         _vectorize_publication_background(
+        #             pub_id=publication.id,
+        #             content=draft.content,
+        #             draft_id=draft.id
+        #         )
+        #     )
 
         logger.info(
             "draft_published",
