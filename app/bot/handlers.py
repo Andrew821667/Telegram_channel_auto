@@ -681,6 +681,9 @@ async def process_edit(message: Message, state: FSMContext, db: AsyncSession):
 @router.callback_query(F.data.startswith("publish_edited:"))
 async def callback_publish_edited(callback: CallbackQuery, state: FSMContext, db: AsyncSession):
     """Опубликовать отредактированную версию."""
+    # ВАЖНО: отвечаем сразу, чтобы кнопка не зависала
+    await callback.answer("Публикую...")
+
     if not await check_admin(callback.from_user.id):
         return
 
@@ -702,27 +705,35 @@ async def callback_publish_edited(callback: CallbackQuery, state: FSMContext, db
         # Публикуем
         success = await publish_draft(draft_id, db, callback.from_user.id)
 
-        if success:
-            # Проверяем тип сообщения (photo или text)
-            if callback.message.photo:
-                await callback.message.edit_caption(
-                    caption=f"✅ Отредактированный драфт #{draft_id} успешно опубликован!"
-                )
+        try:
+            if success:
+                # Проверяем тип сообщения (photo или text)
+                if callback.message.photo:
+                    await callback.message.edit_caption(
+                        caption=f"✅ Отредактированный драфт #{draft_id} успешно опубликован!",
+                        reply_markup=None
+                    )
+                else:
+                    await callback.message.edit_text(
+                        text=f"✅ Отредактированный драфт #{draft_id} успешно опубликован!",
+                        reply_markup=None
+                    )
             else:
-                await callback.message.edit_text(
-                    f"✅ Отредактированный драфт #{draft_id} успешно опубликован!"
-                )
-            await callback.answer("Опубликовано!")
-        else:
-            if callback.message.photo:
-                await callback.message.edit_caption(
-                    caption=f"❌ Ошибка при публикации драфта #{draft_id}"
-                )
-            else:
-                await callback.message.edit_text(
-                    f"❌ Ошибка при публикации драфта #{draft_id}"
-                )
-            await callback.answer("Ошибка!", show_alert=True)
+                if callback.message.photo:
+                    await callback.message.edit_caption(
+                        caption=f"❌ Ошибка при публикации драфта #{draft_id}",
+                        reply_markup=None
+                    )
+                else:
+                    await callback.message.edit_text(
+                        text=f"❌ Ошибка при публикации драфта #{draft_id}",
+                        reply_markup=None
+                    )
+        except Exception as e:
+            logger.error("callback_publish_edited_error", error=str(e), draft_id=draft_id)
+            # Fallback - отправляем новое сообщение если редактирование не удалось
+            status_msg = f"✅ Отредактированный драфт #{draft_id} успешно опубликован!" if success else f"❌ Ошибка при публикации драфта #{draft_id}"
+            await callback.message.answer(status_msg)
     else:
         await callback.answer("❌ Ошибка: драфт не найден", show_alert=True)
 
