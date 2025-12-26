@@ -26,7 +26,8 @@ from app.bot.keyboards import (
     get_reader_keyboard,
     get_main_menu_keyboard,
     get_rejection_reasons_keyboard,
-    get_opinion_keyboard
+    get_opinion_keyboard,
+    get_edit_mode_keyboard
 )
 from app.bot.middleware import DbSessionMiddleware
 import structlog
@@ -54,7 +55,8 @@ def get_bot() -> Bot:
 
 # FSM States для редактирования
 class EditDraft(StatesGroup):
-    waiting_for_edit = State()
+    waiting_for_manual_edit = State()
+    waiting_for_llm_edit = State()
 
 
 # ====================
@@ -288,10 +290,50 @@ async def callback_reject_reason(callback: CallbackQuery, db: AsyncSession):
 
 
 @router.callback_query(F.data.startswith("edit:"))
-async def callback_edit(callback: CallbackQuery, state: FSMContext, db: AsyncSession):
-    """Обработчик кнопки редактирования."""
+async def callback_edit(callback: CallbackQuery):
+    """Обработчик кнопки редактирования - показывает выбор способа."""
+    await callback.answer()
+
     if not await check_admin(callback.from_user.id):
-        await callback.answer("⛔️ Нет прав доступа", show_alert=True)
+        await callback.message.answer("⛔️ Нет прав доступа")
+        return
+
+    draft_id = int(callback.data.split(":")[1])
+
+    await callback.message.answer(
+        "✏️ Выберите способ редактирования драфта:",
+        reply_markup=get_edit_mode_keyboard(draft_id)
+    )
+
+
+@router.callback_query(F.data.startswith("edit_manual:"))
+async def callback_edit_manual(callback: CallbackQuery, state: FSMContext):
+    """Обработчик ручного редактирования."""
+    await callback.answer()
+
+    if not await check_admin(callback.from_user.id):
+        await callback.message.answer("⛔️ Нет прав доступа")
+        return
+
+    draft_id = int(callback.data.split(":")[1])
+
+    await state.update_data(draft_id=draft_id)
+    await state.set_state(EditDraft.waiting_for_manual_edit)
+
+    await callback.message.answer(
+        "✍️ Отправьте новый текст для поста.\n"
+        "Используйте HTML разметку.\n\n"
+        "Отправьте /cancel для отмены."
+    )
+
+
+@router.callback_query(F.data.startswith("edit_llm:"))
+async def callback_edit_llm(callback: CallbackQuery, state: FSMContext, db: AsyncSession):
+    """Обработчик AI-редактирования."""
+    await callback.answer()
+
+    if not await check_admin(callback.from_user.id):
+        await callback.message.answer("⛔️ Нет прав доступа")
         return
 
     draft_id = int(callback.data.split(":")[1])
@@ -312,12 +354,12 @@ async def callback_edit(callback: CallbackQuery, state: FSMContext, db: AsyncSes
         original_content=draft.content,
         article_id=draft.article_id
     )
-    await state.set_state(EditDraft.waiting_for_edit)
+    await state.set_state(EditDraft.waiting_for_llm_edit)
 
     await callback.message.answer(
         f"<b>📝 Текущий драфт:</b>\n\n{draft.content}\n\n"
         f"━━━━━━━━━━━━━━━━\n\n"
-        f"✏️ <b>Опишите, что нужно изменить:</b>\n"
+        f"🤖 <b>Опишите, что нужно изменить:</b>\n"
         f"Например:\n"
         f"• Сделай тон более деловым\n"
         f"• Убери упоминание о конкретной компании\n"
@@ -326,17 +368,47 @@ async def callback_edit(callback: CallbackQuery, state: FSMContext, db: AsyncSes
         f"Отправьте /cancel для отмены.",
         parse_mode="HTML"
     )
-    await callback.answer()
 
 
-@router.message(EditDraft.waiting_for_edit, Command("cancel"))
+@router.message(EditDraft.waiting_for_manual_edit, Command("cancel"))
+@router.message(EditDraft.waiting_for_llm_edit, Command("cancel"))
 async def cancel_edit(message: Message, state: FSMContext):
     """Отмена редактирования."""
     await state.clear()
     await message.answer("❌ Редактирование отменено.")
 
 
-@router.message(EditDraft.waiting_for_edit, F.voice)
+@router.message(EditDraft.waiting_for_manual_edit)
+async def process_manual_edit(message: Message, state: FSMContext, db: AsyncSession):
+    """Обработка вручную отредактированного текста."""
+    data = await state.get_data()
+    draft_id = data.get("draft_id")
+
+    # Получаем драфт
+    result = await db.execute(
+        select(PostDraft).where(PostDraft.id == draft_id)
+    )
+    draft = result.scalar_one_or_none()
+
+    if not draft:
+        await message.answer(f"❌ Драфт #{draft_id} не найден")
+        await state.clear()
+        return
+
+    # Обновляем драфт новым текстом
+    draft.content = message.text
+    draft.status = 'edited'
+    await db.commit()
+
+    await message.answer(f"✅ Драфт #{draft_id} обновлен!")
+
+    # Отправляем обновленный драфт на проверку
+    await send_draft_for_review(message.chat.id, draft, db)
+
+    await state.clear()
+
+
+@router.message(EditDraft.waiting_for_llm_edit, F.voice)
 async def process_voice_edit(message: Message, state: FSMContext, db: AsyncSession):
     """Обработка голосовых инструкций по редактированию."""
     await message.answer("🎤 Обрабатываю голосовое сообщение...")
@@ -456,7 +528,7 @@ async def process_voice_edit(message: Message, state: FSMContext, db: AsyncSessi
         )
 
 
-@router.message(EditDraft.waiting_for_edit)
+@router.message(EditDraft.waiting_for_llm_edit)
 async def process_edit(message: Message, state: FSMContext, db: AsyncSession):
     """Обработка текстовых инструкций по редактированию через LLM."""
     data = await state.get_data()
@@ -636,6 +708,31 @@ async def callback_cancel_edit(callback: CallbackQuery, state: FSMContext):
         await callback.message.edit_text("❌ Редактирование отменено.")
 
     await callback.answer("Отменено")
+
+
+@router.callback_query(F.data.startswith("back_to_draft:"))
+async def callback_back_to_draft(callback: CallbackQuery, db: AsyncSession):
+    """Обработчик кнопки 'Назад' - возвращает к драфту."""
+    await callback.answer()
+
+    if not await check_admin(callback.from_user.id):
+        await callback.message.answer("⛔️ Нет прав доступа")
+        return
+
+    draft_id = int(callback.data.split(":")[1])
+
+    # Получаем драфт
+    result = await db.execute(
+        select(PostDraft).where(PostDraft.id == draft_id)
+    )
+    draft = result.scalar_one_or_none()
+
+    if not draft:
+        await callback.message.answer(f"❌ Драфт #{draft_id} не найден")
+        return
+
+    # Отправляем драфт заново
+    await send_draft_for_review(callback.message.chat.id, draft, db)
 
 
 # ====================
