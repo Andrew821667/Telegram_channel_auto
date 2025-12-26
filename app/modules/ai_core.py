@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.models.database import RawArticle, PostDraft, LegalKnowledge, log_to_db
 from app.modules.llm_provider import get_llm_provider
+from app.modules.vector_search import get_vector_search
 import structlog
 
 logger = structlog.get_logger()
@@ -324,7 +325,31 @@ class AICore:
                         relevance=top_context['relevance']
                     )
 
-            # 2. Формируем промпт для генерации поста
+            # 2. Получаем RAG контекст (похожие посты + примеры)
+            rag_similar = []
+            rag_positive = []
+            rag_negative = []
+
+            if settings.qdrant_enabled:
+                try:
+                    vector_search = get_vector_search()
+
+                    # Получаем RAG контекст на основе content статьи
+                    draft_preview = f"{article.title}\n\n{article.content[:500] if article.content else ''}"
+                    rag_similar, rag_positive, rag_negative = await vector_search.get_rag_context(draft_preview)
+
+                    logger.info(
+                        "rag_context_obtained",
+                        article_id=article.id,
+                        similar_count=len(rag_similar),
+                        positive_count=len(rag_positive),
+                        negative_count=len(rag_negative)
+                    )
+                except Exception as e:
+                    logger.warning("rag_context_error", error=str(e), article_id=article.id)
+                    # Продолжаем без RAG если ошибка
+
+            # 3. Формируем промпт для генерации поста
             user_prompt = f"""Новость для переписывания:
 
 Заголовок: {article.title}
@@ -342,9 +367,27 @@ class AICore:
 
 Включи краткую ссылку на него в раздел "ДЛЯ ЮРИСТА" если релевантно."""
 
-            user_prompt += "\n\nСоздай пост для Telegram канала согласно инструкциям."
+            # Добавляем RAG контекст для избежания банальности и повторений
+            if rag_negative:
+                user_prompt += "\n\n🚫 НЕГАТИВНЫЕ ПРИМЕРЫ (НЕ ПИШ�� ТАК - это посты с плохими реакциями):\n"
+                for i, neg in enumerate(rag_negative[:3], 1):
+                    reactions_str = ', '.join([f"{k}: {v}" for k, v in neg.get('reactions', {}).items()])
+                    user_prompt += f"\n{i}. {neg['content'][:150]}...\n   Реакции: {reactions_str}\n"
 
-            # 3. Генерируем пост через LLM
+            if rag_positive:
+                user_prompt += "\n\n✅ ПОЗИТИВНЫЕ ПРИМЕРЫ (ПИШИ ТАК - это посты с хорошими реакциями):\n"
+                for i, pos in enumerate(rag_positive[:3], 1):
+                    reactions_str = ', '.join([f"{k}: {v}" for k, v in pos.get('reactions', {}).items()])
+                    user_prompt += f"\n{i}. {pos['content'][:150]}...\n   Реакции: {reactions_str}\n"
+
+            if rag_similar:
+                user_prompt += "\n\n⚠️ ПОХОЖИЕ УЖЕ ОПУБЛИКОВАННЫЕ ПОСТЫ (НЕ ПОВТОРЯЙ ЭТИ ИДЕИ):\n"
+                for i, sim in enumerate(rag_similar[:5], 1):
+                    user_prompt += f"\n{i}. (Похожесть: {sim['score']:.0%}) {sim['content'][:150]}...\n"
+
+            user_prompt += "\n\nСоздай пост для Telegram канала согласно инструкциям. УЧИТЫВАЙ примеры и НЕ ПОВТОРЯЙ похожие посты!"
+
+            # 4. Генерируем пост через LLM
             draft_content = await self._call_llm(
                 system_prompt=DRAFT_SYSTEM_PROMPT,
                 user_prompt=user_prompt,

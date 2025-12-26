@@ -32,6 +32,7 @@ from app.bot.keyboards import (
 )
 from app.bot.middleware import DbSessionMiddleware
 from app.modules.llm_provider import get_llm_provider
+from app.modules.vector_search import get_vector_search
 import structlog
 
 logger = structlog.get_logger()
@@ -1056,6 +1057,26 @@ async def publish_draft(draft_id: int, db: AsyncSession, admin_id: int) -> bool:
         db.add(feedback)
 
         await db.commit()
+        await db.refresh(publication)
+
+        # Сохраняем вектор в Qdrant (асинхронно, не критично если упадет)
+        if settings.qdrant_enabled:
+            try:
+                vector_search = get_vector_search()
+                await vector_search.add_publication(
+                    pub_id=publication.id,
+                    content=draft.content,
+                    published_at=datetime.utcnow(),
+                    reactions={}  # Пока пусто, будет обновляться при реакциях
+                )
+                logger.info("publication_vectorized", pub_id=publication.id, draft_id=draft.id)
+            except Exception as vec_error:
+                logger.warning(
+                    "vectorization_failed",
+                    draft_id=draft.id,
+                    error=str(vec_error)
+                )
+                # Не падаем - векторизация не критична
 
         logger.info(
             "draft_published",
