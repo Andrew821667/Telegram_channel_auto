@@ -123,8 +123,10 @@ class VectorSearch:
             reactions: Словарь реакций (useful, important, banal, etc.)
         """
         try:
-            # Векторизуем контент
-            vector = self.vectorize(content)
+            # Векторизуем контент в thread pool (не блокирует event loop)
+            import asyncio
+            loop = asyncio.get_event_loop()
+            vector = await loop.run_in_executor(None, self.vectorize, content)
 
             # Формируем payload с метаданными
             payload = {
@@ -215,8 +217,10 @@ class VectorSearch:
             Список похожих постов с метаданными
         """
         try:
-            # Векторизуем запрос
-            query_vector = self.vectorize(text)
+            # Векторизуем запрос в thread pool (не блокирует event loop)
+            import asyncio
+            loop = asyncio.get_event_loop()
+            query_vector = await loop.run_in_executor(None, self.vectorize, text)
 
             # Ищем похожие
             results = self.client.search(

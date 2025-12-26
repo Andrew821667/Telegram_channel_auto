@@ -962,6 +962,25 @@ async def send_draft_for_review(chat_id: int, draft: PostDraft, db: AsyncSession
         logger.error("draft_send_error", draft_id=draft.id, error=str(e))
 
 
+async def _vectorize_publication_background(pub_id: int, content: str, draft_id: int):
+    """Фоновая векторизация публикации в Qdrant (не блокирует UI)."""
+    try:
+        vector_search = get_vector_search()
+        await vector_search.add_publication(
+            pub_id=pub_id,
+            content=content,
+            published_at=datetime.utcnow(),
+            reactions={}
+        )
+        logger.info("publication_vectorized", pub_id=pub_id, draft_id=draft_id)
+    except Exception as vec_error:
+        logger.warning(
+            "vectorization_failed",
+            draft_id=draft_id,
+            error=str(vec_error)
+        )
+
+
 async def publish_draft(draft_id: int, db: AsyncSession, admin_id: int) -> bool:
     """
     Опубликовать драфт в канал.
@@ -1059,24 +1078,15 @@ async def publish_draft(draft_id: int, db: AsyncSession, admin_id: int) -> bool:
         await db.commit()
         await db.refresh(publication)
 
-        # Сохраняем вектор в Qdrant (асинхронно, не критично если упадет)
+        # Запускаем векторизацию в фоновой задаче (не блокирует UI)
         if settings.qdrant_enabled:
-            try:
-                vector_search = get_vector_search()
-                await vector_search.add_publication(
+            asyncio.create_task(
+                _vectorize_publication_background(
                     pub_id=publication.id,
                     content=draft.content,
-                    published_at=datetime.utcnow(),
-                    reactions={}  # Пока пусто, будет обновляться при реакциях
+                    draft_id=draft.id
                 )
-                logger.info("publication_vectorized", pub_id=publication.id, draft_id=draft.id)
-            except Exception as vec_error:
-                logger.warning(
-                    "vectorization_failed",
-                    draft_id=draft.id,
-                    error=str(vec_error)
-                )
-                # Не падаем - векторизация не критична
+            )
 
         logger.info(
             "draft_published",
