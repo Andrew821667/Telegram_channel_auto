@@ -109,7 +109,7 @@ class Settings(BaseSettings):
 
     # Perplexity AI
     perplexity_api_key: str = Field(default="")
-    perplexity_model: str = Field(default="llama-3.1-sonar-large-128k-online")
+    perplexity_model: str = Field(default="sonar")
     perplexity_max_tokens: int = Field(default=2000)
     perplexity_temperature: float = Field(default=0.7)
 
