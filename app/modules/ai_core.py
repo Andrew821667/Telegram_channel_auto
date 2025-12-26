@@ -409,9 +409,24 @@ class AICore:
 
             # 4. Извлекаем заголовок из сгенерированного контента
             lines = draft_content.split('\n')
-            title = lines[0].strip() if lines else article.title
-            # Убираем эмодзи из заголовка для хранения
-            title_clean = ''.join(c for c in title if c.isalnum() or c.isspace() or c in '.,!?-:')
+
+            # Пропускаем маркеры международных новостей и пустые строки
+            intl_markers = ["🌍 Международные новости:", "🌎 За рубежом:", "🌏 В мире:",
+                           "🌐 Новости из-за рубежа:", "🗺️ Зарубежный опыт:"]
+
+            title = article.title  # Заголовок по умолчанию
+            for line in lines:
+                line_stripped = line.strip()
+                # Пропускаем пустые строки и маркеры международных новостей
+                if line_stripped and line_stripped not in intl_markers:
+                    title = line_stripped
+                    break
+
+            # Убираем эмодзи и HTML теги из заголовка для хранения
+            import re
+            title_clean = re.sub(r'<[^>]+>', '', title)  # Убираем HTML теги
+            title_clean = ''.join(c for c in title_clean if c.isalnum() or c.isspace() or c in '.,!?-:;')
+            title_clean = title_clean.strip()
 
             # 5. Создаем драфт
             draft = PostDraft(
