@@ -240,6 +240,40 @@ def get_opinion_keyboard(post_id: int) -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
+def get_edit_mode_keyboard(draft_id: int) -> InlineKeyboardMarkup:
+    """
+    Клавиатура выбора способа редактирования.
+
+    Args:
+        draft_id: ID драфта
+
+    Returns:
+        InlineKeyboardMarkup с вариантами редактирования
+    """
+    builder = InlineKeyboardBuilder()
+
+    builder.row(
+        InlineKeyboardButton(
+            text="✍️ Редактировать вручную",
+            callback_data=f"edit_manual:{draft_id}"
+        )
+    )
+    builder.row(
+        InlineKeyboardButton(
+            text="🤖 Редактировать с помощью AI",
+            callback_data=f"edit_llm:{draft_id}"
+        )
+    )
+    builder.row(
+        InlineKeyboardButton(
+            text="« Назад",
+            callback_data=f"back_to_draft:{draft_id}"
+        )
+    )
+
+    return builder.as_markup()
+
+
 def get_rejection_reasons_keyboard(draft_id: int) -> InlineKeyboardMarkup:
     """
     Клавиатура с причинами отклонения.
