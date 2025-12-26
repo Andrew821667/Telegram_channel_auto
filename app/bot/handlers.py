@@ -222,26 +222,33 @@ async def callback_confirm_publish(callback: CallbackQuery, db: AsyncSession):
     await callback.answer("Публикую...")
 
     if not await check_admin(callback.from_user.id):
+        logger.warning("confirm_publish_no_access", user_id=callback.from_user.id)
         return
 
     draft_id = int(callback.data.split(":")[1])
+    logger.info("confirm_publish_start", draft_id=draft_id, user_id=callback.from_user.id)
 
     # Публикуем пост
     success = await publish_draft(draft_id, db, callback.from_user.id)
+    logger.info("confirm_publish_result", draft_id=draft_id, success=success)
 
     try:
+        logger.info("confirm_publish_updating_message", draft_id=draft_id, has_photo=bool(callback.message.photo))
         if success:
             # Проверяем тип сообщения (photo или text)
             if callback.message.photo:
+                logger.info("confirm_publish_edit_caption", draft_id=draft_id)
                 await callback.message.edit_caption(
                     caption=f"✅ Драфт #{draft_id} успешно опубликован!",
                     reply_markup=None  # Убираем кнопки
                 )
             else:
+                logger.info("confirm_publish_edit_text", draft_id=draft_id)
                 await callback.message.edit_text(
                     text=f"✅ Драфт #{draft_id} успешно опубликован!",
                     reply_markup=None  # Убираем кнопки
                 )
+            logger.info("confirm_publish_message_updated", draft_id=draft_id)
         else:
             if callback.message.photo:
                 await callback.message.edit_caption(
@@ -254,7 +261,7 @@ async def callback_confirm_publish(callback: CallbackQuery, db: AsyncSession):
                     reply_markup=None
                 )
     except Exception as e:
-        logger.error("callback_message_edit_error", error=str(e), draft_id=draft_id)
+        logger.error("callback_message_edit_error", error=str(e), draft_id=draft_id, error_type=type(e).__name__)
         # Если не получилось отредактировать, отправим новое сообщение
         status_msg = f"✅ Драфт #{draft_id} успешно опубликован!" if success else f"❌ Ошибка при публикации драфта #{draft_id}"
         await callback.message.answer(status_msg)
