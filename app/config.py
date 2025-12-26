@@ -107,6 +107,15 @@ class Settings(BaseSettings):
     openai_max_tokens: int = Field(default=2000)
     openai_temperature: float = Field(default=0.7)
 
+    # Perplexity AI
+    perplexity_api_key: str = Field(default="")
+    perplexity_model: str = Field(default="llama-3.1-sonar-large-128k-online")
+    perplexity_max_tokens: int = Field(default=2000)
+    perplexity_temperature: float = Field(default=0.7)
+
+    # LLM Provider Selection
+    default_llm_provider: str = Field(default="openai")  # openai or perplexity
+
     # Telegram
     telegram_bot_token: str = Field(default="")
     telegram_admin_id: int = Field(default=0)

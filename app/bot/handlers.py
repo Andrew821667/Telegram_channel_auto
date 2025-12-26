@@ -27,15 +27,18 @@ from app.bot.keyboards import (
     get_main_menu_keyboard,
     get_rejection_reasons_keyboard,
     get_opinion_keyboard,
-    get_edit_mode_keyboard
+    get_edit_mode_keyboard,
+    get_llm_selection_keyboard
 )
 from app.bot.middleware import DbSessionMiddleware
+from app.modules.llm_provider import get_llm_provider
 import structlog
 
 logger = structlog.get_logger()
 
 # Глобальные переменные (Bot создается лениво чтобы избежать создания aiohttp клиента при импорте)
 _bot: Optional[Bot] = None
+_selected_llm_provider: str = settings.default_llm_provider  # Хранение выбранного LLM провайдера
 dp = Dispatcher()
 router = Router()
 
@@ -464,7 +467,9 @@ async def process_voice_edit(message: Message, state: FSMContext, db: AsyncSessi
         )
         article = result.scalar_one_or_none()
 
-        # Вызываем LLM для редактирования
+        # Используем выбранный LLM провайдер для редактирования
+        llm = get_llm_provider(_selected_llm_provider)
+
         prompt = f"""Ты редактор контента для Telegram канала о AI в юриспруденции.
 
 ИСХОДНЫЙ ПОСТ:
@@ -478,8 +483,7 @@ async def process_voice_edit(message: Message, state: FSMContext, db: AsyncSessi
 
 Создай новую версию поста с учётом инструкций. Сохрани структуру с заголовком, основным текстом и хештегами. Формат тот же что в исходном посте."""
 
-        response = await client.chat.completions.create(
-            model="gpt-4o-mini",
+        new_content = await llm.generate_completion(
             messages=[
                 {"role": "system", "content": "Ты профессиональный редактор контента для Telegram канала."},
                 {"role": "user", "content": prompt}
@@ -487,8 +491,6 @@ async def process_voice_edit(message: Message, state: FSMContext, db: AsyncSessi
             temperature=0.7,
             max_tokens=800
         )
-
-        new_content = response.choices[0].message.content.strip()
 
         # Сохраняем новую версию в state
         await state.update_data(new_content=new_content)
@@ -522,7 +524,7 @@ async def process_voice_edit(message: Message, state: FSMContext, db: AsyncSessi
         )
 
     except Exception as e:
-        logger.error("voice_edit_generation_error", error=str(e))
+        logger.error("voice_edit_generation_error", error=str(e), provider=_selected_llm_provider)
         await message.answer(
             f"❌ Ошибка при генерации: {str(e)}\n\nПопробуйте еще раз или отправьте /cancel"
         )
@@ -546,11 +548,8 @@ async def process_edit(message: Message, state: FSMContext, db: AsyncSession):
         )
         article = result.scalar_one_or_none()
 
-        # Вызываем LLM для редактирования
-        from openai import AsyncOpenAI
-        from app.config import settings
-
-        client = AsyncOpenAI(api_key=settings.openai_api_key)
+        # Используем выбранный LLM провайдер
+        llm = get_llm_provider(_selected_llm_provider)
 
         prompt = f"""Ты редактор контента для Telegram канала о AI в юриспруденции.
 
@@ -565,8 +564,7 @@ async def process_edit(message: Message, state: FSMContext, db: AsyncSession):
 
 Создай новую версию поста с учётом инструкций. Сохрани структуру с заголовком, основным текстом и хештегами. Формат тот же что в исходном посте."""
 
-        response = await client.chat.completions.create(
-            model="gpt-4o-mini",
+        new_content = await llm.generate_completion(
             messages=[
                 {"role": "system", "content": "Ты профессиональный редактор контента для Telegram канала."},
                 {"role": "user", "content": prompt}
@@ -574,8 +572,6 @@ async def process_edit(message: Message, state: FSMContext, db: AsyncSession):
             temperature=0.7,
             max_tokens=800
         )
-
-        new_content = response.choices[0].message.content.strip()
 
         # Сохраняем новую версию в state
         await state.update_data(new_content=new_content)
@@ -609,7 +605,7 @@ async def process_edit(message: Message, state: FSMContext, db: AsyncSession):
         )
 
     except Exception as e:
-        logger.error("edit_generation_error", error=str(e))
+        logger.error("edit_generation_error", error=str(e), provider=_selected_llm_provider)
         await message.answer(
             f"❌ Ошибка при генерации: {str(e)}\n\n"
             f"Попробуйте еще раз или отправьте /cancel"
@@ -821,18 +817,74 @@ async def callback_show_settings(callback: CallbackQuery):
         await callback.answer("⛔️ Нет прав доступа", show_alert=True)
         return
 
-    settings_text = """
+    # Определяем название текущего провайдера
+    provider_name = "OpenAI (GPT-4o-mini)" if _selected_llm_provider == "openai" else "Perplexity (Llama 3.1)"
+
+    settings_text = f"""
 ⚙️ <b>Настройки системы</b>
 
 📊 Сбор новостей: автоматически в 09:00 MSK
-🤖 AI модель: GPT-4o-mini
+🤖 AI модель: {provider_name}
 📝 Макс. драфтов/день: 3
 ✅ Требуется модерация: Да
 
 Для изменения настроек используйте переменные окружения в .env файле.
 """
-    await callback.message.answer(settings_text, parse_mode="HTML")
+
+    # Добавляем кнопку выбора LLM
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(
+            text="🤖 Выбрать LLM провайдера",
+            callback_data="show_llm_selection"
+        )
+    )
+
+    await callback.message.answer(settings_text, parse_mode="HTML", reply_markup=builder.as_markup())
     await callback.answer()
+
+
+@router.callback_query(F.data == "show_llm_selection")
+async def callback_show_llm_selection(callback: CallbackQuery):
+    """Показать выбор LLM провайдера."""
+    await callback.answer()
+
+    if not await check_admin(callback.from_user.id):
+        return
+
+    await callback.message.answer(
+        "🤖 <b>Выберите LLM провайдера:</b>\n\n"
+        "OpenAI использует модель GPT-4o-mini для быстрой генерации текста.\n"
+        "Perplexity использует Llama 3.1 с доступом к актуальной информации.",
+        parse_mode="HTML",
+        reply_markup=get_llm_selection_keyboard(_selected_llm_provider)
+    )
+
+
+@router.callback_query(F.data.startswith("llm_select:"))
+async def callback_llm_select(callback: CallbackQuery):
+    """Обработчик выбора LLM провайдера."""
+    await callback.answer()
+
+    if not await check_admin(callback.from_user.id):
+        return
+
+    global _selected_llm_provider
+    provider = callback.data.split(":")[1]
+    _selected_llm_provider = provider
+
+    provider_name = "OpenAI (GPT-4o-mini)" if provider == "openai" else "Perplexity (Llama 3.1)"
+
+    await callback.message.edit_text(
+        f"✅ <b>Выбран провайдер: {provider_name}</b>\n\n"
+        f"Теперь все AI-генерации будут использовать {provider_name}.",
+        parse_mode="HTML"
+    )
+
+    logger.info("llm_provider_changed", provider=provider, admin_id=callback.from_user.id)
 
 
 # ====================

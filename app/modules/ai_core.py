@@ -1,9 +1,9 @@
 """
 AI Core Module
-Интеллектуальный анализ новостей и генерация драфтов с использованием OpenAI API.
+Интеллектуальный анализ новостей и генерация драфтов с использованием LLM API.
 
 Функционал:
-1. Ранжирование новостей по важности (GPT-4o-mini)
+1. Ранжирование новостей по важности (OpenAI/Perplexity)
 2. Контекстная проверка (упрощенный RAG с PostgreSQL Full-Text Search)
 3. Генерация драфтов постов для Telegram
 """
@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.models.database import RawArticle, PostDraft, LegalKnowledge, log_to_db
+from app.modules.llm_provider import get_llm_provider
 import structlog
 
 logger = structlog.get_logger()
@@ -78,15 +79,17 @@ DRAFT_SYSTEM_PROMPT = """Ты — AI-редактор канала о внедр
 class AICore:
     """Ядро AI анализа и генерации контента."""
 
-    def __init__(self, db_session: AsyncSession):
+    def __init__(self, db_session: AsyncSession, provider: str = None):
         """
         Инициализация AI Core.
 
         Args:
             db_session: Асинхронная сессия базы данных
+            provider: LLM провайдер ('openai' или 'perplexity'). Если None, используется default из settings.
         """
         self.db = db_session
-        self.client = AsyncOpenAI(api_key=settings.openai_api_key)
+        self.provider = provider or settings.default_llm_provider
+        self.llm = get_llm_provider(self.provider)
 
     async def rank_articles(
         self,
@@ -128,11 +131,10 @@ class AICore:
 
 Оцени ценность этой новости для целевой аудитории (бизнес-руководители + юристы, думающие о внедрении AI) от 0 до 10."""
 
-                # Запрос к OpenAI
-                response = await self._call_openai(
+                # Запрос к LLM
+                response = await self._call_llm(
                     system_prompt=RANKING_SYSTEM_PROMPT,
                     user_prompt=user_prompt,
-                    model=settings.openai_model_analysis,
                     max_tokens=10,
                     temperature=0.3  # Низкая температура для консистентности
                 )
@@ -315,11 +317,10 @@ class AICore:
 
             user_prompt += "\n\nСоздай пост для Telegram канала согласно инструкциям."
 
-            # 3. Генерируем пост через GPT
-            draft_content = await self._call_openai(
+            # 3. Генерируем пост через LLM
+            draft_content = await self._call_llm(
                 system_prompt=DRAFT_SYSTEM_PROMPT,
                 user_prompt=user_prompt,
-                model=settings.openai_model_analysis,
                 max_tokens=settings.openai_max_tokens,
                 temperature=settings.openai_temperature
             )
@@ -425,37 +426,27 @@ class AICore:
 
         return stats
 
-    async def _call_openai(
+    async def _call_llm(
         self,
         system_prompt: str,
         user_prompt: str,
-        model: Optional[str] = None,
         max_tokens: Optional[int] = None,
         temperature: Optional[float] = None
     ) -> str:
         """
-        Вызвать OpenAI API с retry механизмом.
+        Вызвать LLM API с retry механизмом.
 
         Args:
             system_prompt: Системный промпт
             user_prompt: Пользовательский промпт
-            model: Модель (по умолчанию из настроек)
             max_tokens: Максимум токенов
             temperature: Температура
 
         Returns:
             Ответ модели
         """
-        if model is None:
-            model = settings.openai_model_analysis
-        if max_tokens is None:
-            max_tokens = settings.openai_max_tokens
-        if temperature is None:
-            temperature = settings.openai_temperature
-
         try:
-            response = await self.client.chat.completions.create(
-                model=model,
+            result = await self.llm.generate_completion(
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
@@ -464,26 +455,27 @@ class AICore:
                 temperature=temperature
             )
 
-            return response.choices[0].message.content.strip()
+            return result
 
         except Exception as e:
             logger.error(
-                "openai_api_error",
-                model=model,
+                "llm_api_error",
+                provider=self.provider,
                 error=str(e)
             )
             raise
 
 
-async def process_articles_with_ai(db_session: AsyncSession) -> Dict[str, Any]:
+async def process_articles_with_ai(db_session: AsyncSession, provider: str = None) -> Dict[str, Any]:
     """
     Удобная функция для запуска AI обработки статей.
 
     Args:
         db_session: Асинхронная сессия БД
+        provider: LLM провайдер ('openai' или 'perplexity'). Если None, используется default из settings.
 
     Returns:
         Статистика обработки
     """
-    ai_core = AICore(db_session)
+    ai_core = AICore(db_session, provider=provider)
     return await ai_core.process_filtered_articles()
