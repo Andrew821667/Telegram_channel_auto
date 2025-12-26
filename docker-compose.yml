@@ -38,6 +38,19 @@ services:
       timeout: 3s
       retries: 5
 
+  # Qdrant Vector Database
+  qdrant:
+    image: qdrant/qdrant:v1.7.3
+    container_name: legal_ai_qdrant
+    restart: unless-stopped
+    volumes:
+      - qdrant_data:/qdrant/storage
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    environment:
+      - QDRANT__SERVICE__GRPC_PORT=6334
+
   # Main Application
   app:
     build:
@@ -52,6 +65,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      qdrant:
+        condition: service_started
     volumes:
       - ./app:/app/app
       - ./templates:/app/templates
@@ -84,6 +99,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      qdrant:
+        condition: service_started
     volumes:
       - ./app:/app/app
       - ./templates:/app/templates
@@ -112,6 +129,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      qdrant:
+        condition: service_started
     volumes:
       - ./app:/app/app
     command: celery -A app.tasks.celery_tasks beat --loglevel=info --schedule=/tmp/celerybeat-schedule
@@ -132,6 +151,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      qdrant:
+        condition: service_started
     volumes:
       - ./app:/app/app
       - ./media:/app/media
@@ -141,4 +162,6 @@ volumes:
   postgres_data:
     driver: local
   redis_data:
+    driver: local
+  qdrant_data:
     driver: local

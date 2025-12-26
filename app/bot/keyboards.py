@@ -218,6 +218,7 @@ def get_opinion_keyboard(post_id: int) -> InlineKeyboardMarkup:
     """
     builder = InlineKeyboardBuilder()
 
+    # Позитивные реакции
     builder.row(
         InlineKeyboardButton(
             text="👍 Полезно",
@@ -234,6 +235,26 @@ def get_opinion_keyboard(post_id: int) -> InlineKeyboardMarkup:
         InlineKeyboardButton(
             text="🤔 Спорно",
             callback_data=f"react:{post_id}:controversial"
+        )
+    )
+
+    # Негативные реакции для улучшения контента
+    builder.row(
+        InlineKeyboardButton(
+            text="💤 Банальщина",
+            callback_data=f"react:{post_id}:banal"
+        )
+    )
+    builder.row(
+        InlineKeyboardButton(
+            text="🤷 Очевидный вывод",
+            callback_data=f"react:{post_id}:obvious"
+        )
+    )
+    builder.row(
+        InlineKeyboardButton(
+            text="👎 Плохое качество",
+            callback_data=f"react:{post_id}:poor_quality"
         )
     )
 
@@ -306,6 +327,46 @@ def get_rejection_reasons_keyboard(draft_id: int) -> InlineKeyboardMarkup:
         InlineKeyboardButton(
             text="« Назад",
             callback_data=f"back_to_draft:{draft_id}"
+        )
+    )
+
+    return builder.as_markup()
+
+
+def get_llm_selection_keyboard(current_provider: str = "openai") -> InlineKeyboardMarkup:
+    """
+    Клавиатура для выбора LLM провайдера.
+
+    Args:
+        current_provider: Текущий выбранный провайдер
+
+    Returns:
+        InlineKeyboardMarkup с вариантами LLM
+    """
+    builder = InlineKeyboardBuilder()
+
+    # OpenAI
+    openai_text = "✅ OpenAI (GPT-4o-mini)" if current_provider == "openai" else "OpenAI (GPT-4o-mini)"
+    builder.row(
+        InlineKeyboardButton(
+            text=openai_text,
+            callback_data="llm_select:openai"
+        )
+    )
+
+    # Perplexity
+    perplexity_text = "✅ Perplexity (Llama 3.1)" if current_provider == "perplexity" else "Perplexity (Llama 3.1)"
+    builder.row(
+        InlineKeyboardButton(
+            text=perplexity_text,
+            callback_data="llm_select:perplexity"
+        )
+    )
+
+    builder.row(
+        InlineKeyboardButton(
+            text="« Назад",
+            callback_data="show_settings"
         )
     )
 

@@ -27,15 +27,19 @@ from app.bot.keyboards import (
     get_main_menu_keyboard,
     get_rejection_reasons_keyboard,
     get_opinion_keyboard,
-    get_edit_mode_keyboard
+    get_edit_mode_keyboard,
+    get_llm_selection_keyboard
 )
 from app.bot.middleware import DbSessionMiddleware
+from app.modules.llm_provider import get_llm_provider
+from app.modules.vector_search import get_vector_search
 import structlog
 
 logger = structlog.get_logger()
 
 # Глобальные переменные (Bot создается лениво чтобы избежать создания aiohttp клиента при импорте)
 _bot: Optional[Bot] = None
+_selected_llm_provider: str = settings.default_llm_provider  # Хранение выбранного LLM провайдера
 dp = Dispatcher()
 router = Router()
 
@@ -214,35 +218,53 @@ async def callback_publish(callback: CallbackQuery, db: AsyncSession):
 @router.callback_query(F.data.startswith("confirm_publish:"))
 async def callback_confirm_publish(callback: CallbackQuery, db: AsyncSession):
     """Подтверждение публикации."""
+    # ВАЖНО: отвечаем сразу, чтобы кнопка не зависала
+    await callback.answer("Публикую...")
+
     if not await check_admin(callback.from_user.id):
+        logger.warning("confirm_publish_no_access", user_id=callback.from_user.id)
         return
 
     draft_id = int(callback.data.split(":")[1])
+    logger.info("confirm_publish_start", draft_id=draft_id, user_id=callback.from_user.id)
 
     # Публикуем пост
     success = await publish_draft(draft_id, db, callback.from_user.id)
+    logger.info("confirm_publish_result", draft_id=draft_id, success=success)
 
-    if success:
-        # Проверяем тип сообщения (photo или text)
-        if callback.message.photo:
-            await callback.message.edit_caption(
-                caption=f"✅ Драфт #{draft_id} успешно опубликован!"
-            )
+    try:
+        logger.info("confirm_publish_updating_message", draft_id=draft_id, has_photo=bool(callback.message.photo))
+        if success:
+            # Проверяем тип сообщения (photo или text)
+            if callback.message.photo:
+                logger.info("confirm_publish_edit_caption", draft_id=draft_id)
+                await callback.message.edit_caption(
+                    caption=f"✅ Драфт #{draft_id} успешно опубликован!",
+                    reply_markup=None  # Убираем кнопки
+                )
+            else:
+                logger.info("confirm_publish_edit_text", draft_id=draft_id)
+                await callback.message.edit_text(
+                    text=f"✅ Драфт #{draft_id} успешно опубликован!",
+                    reply_markup=None  # Убираем кнопки
+                )
+            logger.info("confirm_publish_message_updated", draft_id=draft_id)
         else:
-            await callback.message.edit_text(
-                f"✅ Драфт #{draft_id} успешно опубликован!"
-            )
-        await callback.answer("Опубликовано!")
-    else:
-        if callback.message.photo:
-            await callback.message.edit_caption(
-                caption=f"❌ Ошибка при публикации драфта #{draft_id}"
-            )
-        else:
-            await callback.message.edit_text(
-                f"❌ Ошибка при публикации драфта #{draft_id}"
-            )
-        await callback.answer("Ошибка!", show_alert=True)
+            if callback.message.photo:
+                await callback.message.edit_caption(
+                    caption=f"❌ Ошибка при публикации драфта #{draft_id}",
+                    reply_markup=None
+                )
+            else:
+                await callback.message.edit_text(
+                    text=f"❌ Ошибка при публикации драфта #{draft_id}",
+                    reply_markup=None
+                )
+    except Exception as e:
+        logger.error("callback_message_edit_error", error=str(e), draft_id=draft_id, error_type=type(e).__name__)
+        # Если не получилось отредактировать, отправим новое сообщение
+        status_msg = f"✅ Драфт #{draft_id} успешно опубликован!" if success else f"❌ Ошибка при публикации драфта #{draft_id}"
+        await callback.message.answer(status_msg)
 
 
 @router.callback_query(F.data.startswith("reject:"))
@@ -264,6 +286,9 @@ async def callback_reject(callback: CallbackQuery, db: AsyncSession):
 @router.callback_query(F.data.startswith("reject_reason:"))
 async def callback_reject_reason(callback: CallbackQuery, db: AsyncSession):
     """Обработка выбора причины отклонения."""
+    # ВАЖНО: отвечаем сразу, чтобы кнопка не зависала
+    await callback.answer("Отклоняю...")
+
     if not await check_admin(callback.from_user.id):
         return
 
@@ -284,9 +309,8 @@ async def callback_reject_reason(callback: CallbackQuery, db: AsyncSession):
             await callback.message.edit_text(
                 f"❌ Драфт #{draft_id} отклонен\nПричина: {reason}"
             )
-        await callback.answer("Отклонено")
     else:
-        await callback.answer("Ошибка!", show_alert=True)
+        await callback.message.answer("❌ Ошибка при отклонении драфта", show_alert=True)
 
 
 @router.callback_query(F.data.startswith("edit:"))
@@ -307,7 +331,7 @@ async def callback_edit(callback: CallbackQuery):
 
 
 @router.callback_query(F.data.startswith("edit_manual:"))
-async def callback_edit_manual(callback: CallbackQuery, state: FSMContext):
+async def callback_edit_manual(callback: CallbackQuery, state: FSMContext, db: AsyncSession):
     """Обработчик ручного редактирования."""
     await callback.answer()
 
@@ -317,13 +341,34 @@ async def callback_edit_manual(callback: CallbackQuery, state: FSMContext):
 
     draft_id = int(callback.data.split(":")[1])
 
+    # Получаем текущий драфт
+    result = await db.execute(
+        select(PostDraft).where(PostDraft.id == draft_id)
+    )
+    draft = result.scalar_one_or_none()
+
+    if not draft:
+        await callback.answer("❌ Драфт не найден", show_alert=True)
+        return
+
     await state.update_data(draft_id=draft_id)
     await state.set_state(EditDraft.waiting_for_manual_edit)
 
+    # Отправляем текущий текст отдельным сообщением для удобного копирования
     await callback.message.answer(
-        "✍️ Отправьте новый текст для поста.\n"
-        "Используйте HTML разметку.\n\n"
-        "Отправьте /cancel для отмены."
+        "✍️ <b>ТЕКУЩИЙ ТЕКСТ ПОСТА</b>\n"
+        "Скопируйте сообщение ниже ⬇️, отредактируйте и отправьте обратно:",
+        parse_mode="HTML"
+    )
+
+    # Текст поста отдельным сообщением (легко копировать долгим нажатием)
+    await callback.message.answer(draft.content)
+
+    await callback.message.answer(
+        "📌 Используйте HTML разметку:\n"
+        "<b>жирный</b>, <i>курсив</i>, <code>код</code>\n\n"
+        "Отправьте /cancel для отмены.",
+        parse_mode="HTML"
     )
 
 
@@ -464,31 +509,42 @@ async def process_voice_edit(message: Message, state: FSMContext, db: AsyncSessi
         )
         article = result.scalar_one_or_none()
 
-        # Вызываем LLM для редактирования
-        prompt = f"""Ты редактор контента для Telegram канала о AI в юриспруденции.
+        # Используем выбранный LLM провайдер для редактирования
+        llm = get_llm_provider(_selected_llm_provider)
 
-ИСХОДНЫЙ ПОСТ:
+        prompt = f"""Ты профессиональный редактор Telegram-постов о юридических новостях в сфере AI.
+
+📌 ИСХОДНЫЙ ПОСТ (который нужно отредактировать):
 {original_content}
 
-ОРИГИНАЛЬНАЯ СТАТЬЯ:
-{article.content if article else 'Не доступна'}
+📰 ОРИГИНАЛЬНАЯ СТАТЬЯ (для справки):
+{article.content[:1000] if article else 'Не доступна'}
 
-ИНСТРУКЦИИ ПО РЕДАКТИРОВАНИЮ:
+✏️ ИНСТРУКЦИИ ПОЛЬЗОВАТЕЛЯ:
 {edit_instructions}
 
-Создай новую версию поста с учётом инструкций. Сохрани структуру с заголовком, основным текстом и хештегами. Формат тот же что в исходном посте."""
+🎯 ТВОЯ ЗАДАЧА:
+Внимательно прочитай инструкции пользователя и ТОЧНО выполни их. Не добавляй ничего от себя, только то что просит пользователь.
 
-        response = await client.chat.completions.create(
-            model="gpt-4o-mini",
+ВАЖНО:
+1. Выполни ТОЛЬКО то, что просит пользователь в инструкциях
+2. Сохрани общую структуру поста (заголовок, текст, хештеги)
+3. Используй HTML разметку (<b>, <i>, <code>)
+4. Если пользователь просит сделать короче - убери лишние детали
+5. Если просит добавить - добавь релевантную информацию
+6. Если просит изменить тон - измени стиль написания
+7. Не выдумывай факты, используй информацию из оригинальной статьи
+
+ВЕРНИ ТОЛЬКО отредактированный текст поста, без комментариев и пояснений."""
+
+        new_content = await llm.generate_completion(
             messages=[
-                {"role": "system", "content": "Ты профессиональный редактор контента для Telegram канала."},
+                {"role": "system", "content": "Ты опытный редактор. Строго следуй инструкциям пользователя. Возвращай только финальный текст, без объяснений."},
                 {"role": "user", "content": prompt}
             ],
-            temperature=0.7,
-            max_tokens=800
+            temperature=0.3,
+            max_tokens=3500
         )
-
-        new_content = response.choices[0].message.content.strip()
 
         # Сохраняем новую версию в state
         await state.update_data(new_content=new_content)
@@ -522,7 +578,7 @@ async def process_voice_edit(message: Message, state: FSMContext, db: AsyncSessi
         )
 
     except Exception as e:
-        logger.error("voice_edit_generation_error", error=str(e))
+        logger.error("voice_edit_generation_error", error=str(e), provider=_selected_llm_provider)
         await message.answer(
             f"❌ Ошибка при генерации: {str(e)}\n\nПопробуйте еще раз или отправьте /cancel"
         )
@@ -546,36 +602,42 @@ async def process_edit(message: Message, state: FSMContext, db: AsyncSession):
         )
         article = result.scalar_one_or_none()
 
-        # Вызываем LLM для редактирования
-        from openai import AsyncOpenAI
-        from app.config import settings
+        # Используем выбранный LLM провайдер
+        llm = get_llm_provider(_selected_llm_provider)
 
-        client = AsyncOpenAI(api_key=settings.openai_api_key)
+        prompt = f"""Ты профессиональный редактор Telegram-постов о юридических новостях в сфере AI.
 
-        prompt = f"""Ты редактор контента для Telegram канала о AI в юриспруденции.
-
-ИСХОДНЫЙ ПОСТ:
+📌 ИСХОДНЫЙ ПОСТ (который нужно отредактировать):
 {original_content}
 
-ОРИГИНАЛЬНАЯ СТАТЬЯ:
-{article.content if article else 'Не доступна'}
+📰 ОРИГИНАЛЬНАЯ СТАТЬЯ (для справки):
+{article.content[:1000] if article else 'Не доступна'}
 
-ИНСТРУКЦИИ ПО РЕДАКТИРОВАНИЮ:
+✏️ ИНСТРУКЦИИ ПОЛЬЗОВАТЕЛЯ:
 {edit_instructions}
 
-Создай новую версию поста с учётом инструкций. Сохрани структуру с заголовком, основным текстом и хештегами. Формат тот же что в исходном посте."""
+🎯 ТВОЯ ЗАДАЧА:
+Внимательно прочитай инструкции пользователя и ТОЧНО выполни их. Не добавляй ничего от себя, только то что просит пользователь.
 
-        response = await client.chat.completions.create(
-            model="gpt-4o-mini",
+ВАЖНО:
+1. Выполни ТОЛЬКО то, что просит пользователь в инструкциях
+2. Сохрани общую структуру поста (заголовок, текст, хештеги)
+3. Используй HTML разметку (<b>, <i>, <code>)
+4. Если пользователь просит сделать короче - убери лишние детали
+5. Если просит добавить - добавь релевантную информацию
+6. Если просит изменить тон - измени стиль написания
+7. Не выдумывай факты, используй информацию из оригинальной статьи
+
+ВЕРНИ ТОЛЬКО отредактированный текст поста, без комментариев и пояснений."""
+
+        new_content = await llm.generate_completion(
             messages=[
-                {"role": "system", "content": "Ты профессиональный редактор контента для Telegram канала."},
+                {"role": "system", "content": "Ты опытный редактор. Строго следуй инструкциям пользователя. Возвращай только финальный текст, без объяснений."},
                 {"role": "user", "content": prompt}
             ],
-            temperature=0.7,
-            max_tokens=800
+            temperature=0.3,
+            max_tokens=3500
         )
-
-        new_content = response.choices[0].message.content.strip()
 
         # Сохраняем новую версию в state
         await state.update_data(new_content=new_content)
@@ -609,7 +671,7 @@ async def process_edit(message: Message, state: FSMContext, db: AsyncSession):
         )
 
     except Exception as e:
-        logger.error("edit_generation_error", error=str(e))
+        logger.error("edit_generation_error", error=str(e), provider=_selected_llm_provider)
         await message.answer(
             f"❌ Ошибка при генерации: {str(e)}\n\n"
             f"Попробуйте еще раз или отправьте /cancel"
@@ -619,6 +681,9 @@ async def process_edit(message: Message, state: FSMContext, db: AsyncSession):
 @router.callback_query(F.data.startswith("publish_edited:"))
 async def callback_publish_edited(callback: CallbackQuery, state: FSMContext, db: AsyncSession):
     """Опубликовать отредактированную версию."""
+    # ВАЖНО: отвечаем сразу, чтобы кнопка не зависала
+    await callback.answer("Публикую...")
+
     if not await check_admin(callback.from_user.id):
         return
 
@@ -640,27 +705,35 @@ async def callback_publish_edited(callback: CallbackQuery, state: FSMContext, db
         # Публикуем
         success = await publish_draft(draft_id, db, callback.from_user.id)
 
-        if success:
-            # Проверяем тип сообщения (photo или text)
-            if callback.message.photo:
-                await callback.message.edit_caption(
-                    caption=f"✅ Отредактированный драфт #{draft_id} успешно опубликован!"
-                )
+        try:
+            if success:
+                # Проверяем тип сообщения (photo или text)
+                if callback.message.photo:
+                    await callback.message.edit_caption(
+                        caption=f"✅ Отредактированный драфт #{draft_id} успешно опубликован!",
+                        reply_markup=None
+                    )
+                else:
+                    await callback.message.edit_text(
+                        text=f"✅ Отредактированный драфт #{draft_id} успешно опубликован!",
+                        reply_markup=None
+                    )
             else:
-                await callback.message.edit_text(
-                    f"✅ Отредактированный драфт #{draft_id} успешно опубликован!"
-                )
-            await callback.answer("Опубликовано!")
-        else:
-            if callback.message.photo:
-                await callback.message.edit_caption(
-                    caption=f"❌ Ошибка при публикации драфта #{draft_id}"
-                )
-            else:
-                await callback.message.edit_text(
-                    f"❌ Ошибка при публикации драфта #{draft_id}"
-                )
-            await callback.answer("Ошибка!", show_alert=True)
+                if callback.message.photo:
+                    await callback.message.edit_caption(
+                        caption=f"❌ Ошибка при публикации драфта #{draft_id}",
+                        reply_markup=None
+                    )
+                else:
+                    await callback.message.edit_text(
+                        text=f"❌ Ошибка при публикации драфта #{draft_id}",
+                        reply_markup=None
+                    )
+        except Exception as e:
+            logger.error("callback_publish_edited_error", error=str(e), draft_id=draft_id)
+            # Fallback - отправляем новое сообщение если редактирование не удалось
+            status_msg = f"✅ Отредактированный драфт #{draft_id} успешно опубликован!" if success else f"❌ Ошибка при публикации драфта #{draft_id}"
+            await callback.message.answer(status_msg)
     else:
         await callback.answer("❌ Ошибка: драфт не найден", show_alert=True)
 
@@ -821,18 +894,74 @@ async def callback_show_settings(callback: CallbackQuery):
         await callback.answer("⛔️ Нет прав доступа", show_alert=True)
         return
 
-    settings_text = """
+    # Определяем название текущего провайдера
+    provider_name = "OpenAI (GPT-4o-mini)" if _selected_llm_provider == "openai" else "Perplexity (Llama 3.1)"
+
+    settings_text = f"""
 ⚙️ <b>Настройки системы</b>
 
 📊 Сбор новостей: автоматически в 09:00 MSK
-🤖 AI модель: GPT-4o-mini
+🤖 AI модель: {provider_name}
 📝 Макс. драфтов/день: 3
 ✅ Требуется модерация: Да
 
 Для изменения настроек используйте переменные окружения в .env файле.
 """
-    await callback.message.answer(settings_text, parse_mode="HTML")
+
+    # Добавляем кнопку выбора LLM
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(
+            text="🤖 Выбрать LLM провайдера",
+            callback_data="show_llm_selection"
+        )
+    )
+
+    await callback.message.answer(settings_text, parse_mode="HTML", reply_markup=builder.as_markup())
     await callback.answer()
+
+
+@router.callback_query(F.data == "show_llm_selection")
+async def callback_show_llm_selection(callback: CallbackQuery):
+    """Показать выбор LLM провайдера."""
+    await callback.answer()
+
+    if not await check_admin(callback.from_user.id):
+        return
+
+    await callback.message.answer(
+        "🤖 <b>Выберите LLM провайдера:</b>\n\n"
+        "OpenAI использует модель GPT-4o-mini для быстрой генерации текста.\n"
+        "Perplexity использует Llama 3.1 с доступом к актуальной информации.",
+        parse_mode="HTML",
+        reply_markup=get_llm_selection_keyboard(_selected_llm_provider)
+    )
+
+
+@router.callback_query(F.data.startswith("llm_select:"))
+async def callback_llm_select(callback: CallbackQuery):
+    """Обработчик выбора LLM провайдера."""
+    await callback.answer()
+
+    if not await check_admin(callback.from_user.id):
+        return
+
+    global _selected_llm_provider
+    provider = callback.data.split(":")[1]
+    _selected_llm_provider = provider
+
+    provider_name = "OpenAI (GPT-4o-mini)" if provider == "openai" else "Perplexity (Llama 3.1)"
+
+    await callback.message.edit_text(
+        f"✅ <b>Выбран провайдер: {provider_name}</b>\n\n"
+        f"Теперь все AI-генерации будут использовать {provider_name}.",
+        parse_mode="HTML"
+    )
+
+    logger.info("llm_provider_changed", provider=provider, admin_id=callback.from_user.id)
 
 
 # ====================
@@ -863,32 +992,39 @@ async def send_draft_for_review(chat_id: int, draft: PostDraft, db: AsyncSession
         # Используем порядковый номер или ID
         display_number = draft_number if draft_number is not None else draft.id
 
-        # Формируем сообщение
-        preview_text = f"""
-🆕 <b>Новый драфт #{display_number}</b>
+        # Формируем preview текст
+        preview_header = f"🆕 <b>Новый драфт #{display_number}</b>"
 
-{draft.content}
-
+        preview_footer = f"""
 ━━━━━━━━━━━━━━━━
 📊 Confidence: {draft.confidence_score:.2f}
 🔗 Источник: {article.source_name if article else 'Unknown'}
 ⏰ Создан: {draft.created_at.strftime('%d.%m.%Y %H:%M')}
 """
 
+        full_preview_text = f"{preview_header}\n\n{draft.content}\n{preview_footer}"
+
         # Отправляем с изображением если есть
         if draft.image_path:
+            # Отправляем двумя сообщениями для обхода лимита caption (1024 символа)
             photo = FSInputFile(draft.image_path)
             await bot.send_photo(
                 chat_id=chat_id,
                 photo=photo,
-                caption=preview_text[:1024],  # Telegram limit
+                caption=preview_header
+            )
+
+            # Отправляем полный текст preview с кнопками
+            await bot.send_message(
+                chat_id=chat_id,
+                text=f"{draft.content}\n{preview_footer}",
                 reply_markup=get_draft_review_keyboard(draft.id),
                 parse_mode="HTML"
             )
         else:
             await bot.send_message(
                 chat_id=chat_id,
-                text=preview_text,
+                text=full_preview_text,
                 reply_markup=get_draft_review_keyboard(draft.id),
                 parse_mode="HTML"
             )
@@ -897,6 +1033,25 @@ async def send_draft_for_review(chat_id: int, draft: PostDraft, db: AsyncSession
 
     except Exception as e:
         logger.error("draft_send_error", draft_id=draft.id, error=str(e))
+
+
+async def _vectorize_publication_background(pub_id: int, content: str, draft_id: int):
+    """Фоновая векторизация публикации в Qdrant (не блокирует UI)."""
+    try:
+        vector_search = get_vector_search()
+        await vector_search.add_publication(
+            pub_id=pub_id,
+            content=content,
+            published_at=datetime.utcnow(),
+            reactions={}
+        )
+        logger.info("publication_vectorized", pub_id=pub_id, draft_id=draft_id)
+    except Exception as vec_error:
+        logger.warning(
+            "vectorization_failed",
+            draft_id=draft_id,
+            error=str(vec_error)
+        )
 
 
 async def publish_draft(draft_id: int, db: AsyncSession, admin_id: int) -> bool:
@@ -929,6 +1084,38 @@ async def publish_draft(draft_id: int, db: AsyncSession, admin_id: int) -> bool:
 
         # Формируем финальный текст с интерактивными элементами
         final_text = draft.content
+        logger.info("publish_draft_before_title_removal", draft_id=draft_id, has_image=bool(draft.image_path), title=draft.title[:50] if draft.title else None, content_start=final_text[:100])
+
+        # Если есть изображение - убираем заголовок из текста (он уже на картинке)
+        if draft.image_path and draft.title:
+            # Сначала ищем маркеры международных новостей
+            intl_markers = ["🌍 Международные новости:\n\n", "🌎 За рубежом:\n\n", "🌏 В мире:\n\n",
+                           "🌐 Новости из-за рубежа:\n\n", "🗺️ Зарубежный опыт:\n\n"]
+
+            intl_prefix = ""
+            for marker in intl_markers:
+                if final_text.startswith(marker):
+                    intl_prefix = marker
+                    final_text = final_text[len(marker):]  # Временно убираем маркер
+                    break
+
+            # Убираем заголовок (обычно в начале в тегах <b>...</b>)
+            title_patterns = [
+                f"<b>{draft.title}</b>\n\n",
+                f"<b>{draft.title}</b>\n",
+                f"{draft.title}\n\n",
+                f"{draft.title}\n"
+            ]
+            for pattern in title_patterns:
+                if final_text.startswith(pattern):
+                    logger.info("publish_draft_title_pattern_matched", draft_id=draft_id, pattern=pattern[:50])
+                    final_text = final_text[len(pattern):]
+                    break
+
+            # Возвращаем маркер международных новостей если был
+            final_text = intl_prefix + final_text
+
+            logger.info("publish_draft_after_title_removal", draft_id=draft_id, content_start=final_text[:100])
 
         # Добавляем разделитель и источник
         if article:
@@ -940,13 +1127,19 @@ async def publish_draft(draft_id: int, db: AsyncSession, admin_id: int) -> bool:
 
         # Публикуем в канал
         if draft.image_path:
-            # Telegram ограничивает caption до 1024 символов
-            caption = final_text[:1024] if len(final_text) > 1024 else final_text
+            # Публикуем двумя последовательными сообщениями для обхода лимита caption (1024 символа)
+            # 1. Фото БЕЗ подписи (заголовок уже на изображении)
             photo = FSInputFile(draft.image_path)
-            message = await get_bot().send_photo(
+            photo_message = await get_bot().send_photo(
                 chat_id=settings.telegram_channel_id,
-                photo=photo,
-                caption=caption,
+                photo=photo
+            )
+
+            # 2. Полный текст с интерактивными кнопками (до 4096 символов)
+            text = final_text[:4096] if len(final_text) > 4096 else final_text
+            message = await get_bot().send_message(
+                chat_id=settings.telegram_channel_id,
+                text=text,
                 parse_mode="HTML",
                 reply_markup=get_reader_keyboard(
                     article.url,
@@ -987,6 +1180,20 @@ async def publish_draft(draft_id: int, db: AsyncSession, admin_id: int) -> bool:
         db.add(feedback)
 
         await db.commit()
+        await db.refresh(publication)
+
+        # Векторизация через Celery (не блокирует UI)
+        if settings.qdrant_enabled:
+            try:
+                from app.tasks.celery_tasks import vectorize_publication_task
+                vectorize_publication_task.delay(
+                    pub_id=publication.id,
+                    content=draft.content,
+                    draft_id=draft.id
+                )
+                logger.info("vectorization_task_queued", pub_id=publication.id, draft_id=draft.id)
+            except Exception as e:
+                logger.warning("vectorization_task_queue_error", error=str(e))
 
         logger.info(
             "draft_published",

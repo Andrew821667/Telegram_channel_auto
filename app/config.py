@@ -104,8 +104,22 @@ class Settings(BaseSettings):
     openai_model_critical: str = Field(default="gpt-4o")
     openai_tts_model: str = Field(default="tts-1")
     openai_tts_voice: str = Field(default="nova")
-    openai_max_tokens: int = Field(default=2000)
+    openai_max_tokens: int = Field(default=3500)
     openai_temperature: float = Field(default=0.7)
+
+    # Perplexity AI
+    perplexity_api_key: str = Field(default="")
+    perplexity_model: str = Field(default="sonar")
+    perplexity_max_tokens: int = Field(default=3500)
+    perplexity_temperature: float = Field(default=0.7)
+
+    # LLM Provider Selection
+    default_llm_provider: str = Field(default="perplexity")  # openai or perplexity
+
+    # Qdrant Vector Database
+    qdrant_host: str = Field(default="qdrant")
+    qdrant_port: int = Field(default=6333)
+    qdrant_enabled: bool = Field(default=True)  # Включить/выключить векторный поиск
 
     # Telegram
     telegram_bot_token: str = Field(default="")
