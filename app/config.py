@@ -104,13 +104,13 @@ class Settings(BaseSettings):
     openai_model_critical: str = Field(default="gpt-4o")
     openai_tts_model: str = Field(default="tts-1")
     openai_tts_voice: str = Field(default="nova")
-    openai_max_tokens: int = Field(default=2000)
+    openai_max_tokens: int = Field(default=3500)
     openai_temperature: float = Field(default=0.7)
 
     # Perplexity AI
     perplexity_api_key: str = Field(default="")
     perplexity_model: str = Field(default="sonar")
-    perplexity_max_tokens: int = Field(default=2000)
+    perplexity_max_tokens: int = Field(default=3500)
     perplexity_temperature: float = Field(default=0.7)
 
     # LLM Provider Selection

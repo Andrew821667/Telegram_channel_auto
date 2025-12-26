@@ -489,7 +489,7 @@ async def process_voice_edit(message: Message, state: FSMContext, db: AsyncSessi
                 {"role": "user", "content": prompt}
             ],
             temperature=0.7,
-            max_tokens=800
+            max_tokens=3500
         )
 
         # Сохраняем новую версию в state
@@ -570,7 +570,7 @@ async def process_edit(message: Message, state: FSMContext, db: AsyncSession):
                 {"role": "user", "content": prompt}
             ],
             temperature=0.7,
-            max_tokens=800
+            max_tokens=3500
         )
 
         # Сохраняем новую версию в state
