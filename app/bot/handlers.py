@@ -5,7 +5,7 @@ Telegram Bot Handlers
 
 import asyncio
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Dict, List
 
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.filters import Command, CommandStart
@@ -33,6 +33,7 @@ from app.bot.keyboards import (
 from app.bot.middleware import DbSessionMiddleware
 from app.modules.llm_provider import get_llm_provider
 from app.modules.vector_search import get_vector_search
+from app.modules.analytics import AnalyticsService
 import structlog
 
 logger = structlog.get_logger()
@@ -1381,6 +1382,263 @@ async def get_statistics(db: AsyncSession) -> str:
 
 
 # ====================
+# Analytics Dashboard
+# ====================
+
+def format_analytics_report(
+    stats: Dict,
+    top_posts: List[Dict],
+    worst_posts: List[Dict],
+    sources: List[Dict],
+    weekday_stats: Dict,
+    vector_stats: Optional[Dict]
+) -> str:
+    """
+    Форматировать красивый отчёт аналитики.
+
+    Args:
+        stats: Общая статистика
+        top_posts: Топ постов
+        worst_posts: Худшие посты
+        sources: Статистика источников
+        weekday_stats: Статистика по дням недели
+        vector_stats: Статистика векторной базы
+
+    Returns:
+        Отформатированный текст отчёта
+    """
+    period_days = stats.get("period_days", 7)
+
+    report = f"""📊 <b>Аналитика канала @legal_ai_pro</b>
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+📈 <b>За последние {period_days} дней:</b>
+
+<b>Публикации:</b>
+├─ 📝 Опубликовано: {stats['total_publications']} постов
+├─ ✅ Одобрено: {stats['approved_drafts']} из {stats['total_drafts']} драфтов ({stats['approval_rate']:.0f}%)
+├─ ❌ Отклонено: {stats['rejected_drafts']} драфтов
+└─ 📊 Avg quality score: {stats['avg_quality_score']}
+
+<b>Реакции:</b>
+├─ 👍 Полезно: {stats['reactions']['useful']} ({stats['reactions']['useful']/max(stats['total_reactions'],1)*100:.0f}%)
+├─ 🔥 Важно: {stats['reactions']['important']} ({stats['reactions']['important']/max(stats['total_reactions'],1)*100:.0f}%)
+├─ 🤔 Спорно: {stats['reactions']['controversial']} ({stats['reactions']['controversial']/max(stats['total_reactions'],1)*100:.0f}%)
+├─ 💤 Банальщина: {stats['reactions']['banal']} ({stats['reactions']['banal']/max(stats['total_reactions'],1)*100:.0f}%)
+├─ 🤷 Очевидно: {stats['reactions']['obvious']} ({stats['reactions']['obvious']/max(stats['total_reactions'],1)*100:.0f}%)
+└─ 👎 Плохое: {stats['reactions']['poor_quality']} ({stats['reactions']['poor_quality']/max(stats['total_reactions'],1)*100:.0f}%)
+
+<b>Engagement:</b>
+└─ 📊 Всего реакций: {stats['total_reactions']}
+"""
+
+    # Топ посты
+    if top_posts:
+        report += "\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        report += "🔥 <b>Топ-3 поста:</b>\n\n"
+
+        for i, post in enumerate(top_posts[:3], 1):
+            title = post['title'][:80] + "..." if len(post['title']) > 80 else post['title']
+            date = post['published_at'].strftime('%d.%m.%Y %H:%M')
+            reactions = post['reactions']
+
+            report += f"{i}️⃣ <b>{title}</b>\n"
+            report += f"   📅 {date}\n"
+            report += f"   👍 {reactions.get('useful', 0)} | 🔥 {reactions.get('important', 0)} | 🤔 {reactions.get('controversial', 0)}\n"
+            report += f"   📊 Quality: {post['quality_score']}\n"
+            if post['telegram_message_id']:
+                report += f"   🔗 <a href='https://t.me/legal_ai_pro/{post['telegram_message_id']}'>Перейти к посту</a>\n"
+            report += "\n"
+
+    # Худшие посты
+    if worst_posts:
+        report += "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        report += "💤 <b>Худшие посты (учимся на ошибках):</b>\n\n"
+
+        for i, post in enumerate(worst_posts[:3], 1):
+            title = post['title'][:80] + "..." if len(post['title']) > 80 else post['title']
+            date = post['published_at'].strftime('%d.%m.%Y %H:%M')
+            reactions = post['reactions']
+
+            report += f"{i}️⃣ <b>{title}</b>\n"
+            report += f"   📅 {date}\n"
+            report += f"   💤 {reactions.get('banal', 0)} | 👎 {reactions.get('poor_quality', 0)} | 🤷 {reactions.get('obvious', 0)}\n"
+            report += f"   📊 Quality: {post['quality_score']}\n"
+
+            # Определить основную проблему
+            if reactions.get('banal', 0) > 0:
+                report += "   ⚠️ Проблема: Слишком общо, нет конкретики\n"
+            elif reactions.get('obvious', 0) > 0:
+                report += "   ⚠️ Проблема: Очевидные выводы\n"
+            elif reactions.get('poor_quality', 0) > 0:
+                report += "   ⚠️ Проблема: Низкое качество контента\n"
+
+            report += "\n"
+
+    # Статистика по дням недели (если есть данные)
+    if weekday_stats:
+        report += "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        report += "📅 <b>Статистика по дням недели:</b>\n\n"
+
+        best_day = None
+        best_score = -999.0
+
+        for day in ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]:
+            if day in weekday_stats:
+                day_data = weekday_stats[day]
+                total = day_data['total_posts']
+                avg_score = day_data['avg_quality_score']
+
+                if avg_score > best_score:
+                    best_score = avg_score
+                    best_day = day
+
+                marker = "⭐" if day == best_day and total > 0 else ""
+                report += f"{day}: {total} постов | Avg quality: {avg_score} {marker}\n"
+
+        if best_day:
+            report += f"\n🏆 Лучший день: <b>{best_day}</b> (avg quality: {best_score})\n"
+
+    # Эффективность источников
+    if sources:
+        report += "\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        report += "📰 <b>Топ источников:</b>\n\n"
+
+        for i, source in enumerate(sources[:5], 1):
+            name = source['source_name'][:40] + "..." if len(source['source_name']) > 40 else source['source_name']
+            collected = source['total_collected']
+            published = source['total_published']
+            pub_rate = source['publication_rate']
+            quality = source['avg_quality_score']
+
+            status = ""
+            if quality >= 0.6:
+                status = "✅"
+            elif quality >= 0.3:
+                status = "⚠️"
+            else:
+                status = "❌"
+
+            report += f"{i}. <b>{name}</b> {status}\n"
+            report += f"   ├─ Отобрано: {collected} новостей\n"
+            report += f"   ├─ Опубликовано: {published} ({pub_rate:.0f}%)\n"
+            report += f"   └─ Avg quality: {quality}\n"
+            report += "\n"
+
+    # Статистика векторной базы
+    if vector_stats:
+        report += "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        report += "🗄️ <b>Векторная база Qdrant:</b>\n\n"
+        report += f"├─ 📦 Всего векторов: {vector_stats['total_vectors']}\n"
+        report += f"├─ ✅ Позитивных примеров: {vector_stats['positive_examples']} (score > 0.5)\n"
+        report += f"├─ ❌ Негативных примеров: {vector_stats['negative_examples']} (score < -0.3)\n"
+        report += f"├─ ⚖️ Нейтральных: {vector_stats['neutral_examples']}\n"
+        report += f"└─ 📊 Avg score всей базы: {vector_stats['avg_quality_score']}\n"
+
+    report += "\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+    report += f"📅 Обновлено: {datetime.now().strftime('%d.%m.%Y %H:%M')}\n"
+
+    return report
+
+
+@router.message(Command("analytics"))
+async def cmd_analytics(message: Message, db: AsyncSession):
+    """Показать аналитику канала."""
+
+    if not await check_admin(message.from_user.id):
+        await message.answer("⛔ У вас нет доступа к этой команде")
+        return
+
+    # Клавиатура выбора периода
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="📅 7 дней", callback_data="analytics:7"),
+            InlineKeyboardButton(text="📅 30 дней", callback_data="analytics:30"),
+        ],
+        [
+            InlineKeyboardButton(text="📅 Всё время", callback_data="analytics:all"),
+        ]
+    ])
+
+    await message.answer(
+        "📊 <b>Выберите период для аналитики:</b>",
+        parse_mode="HTML",
+        reply_markup=keyboard
+    )
+
+
+@router.callback_query(F.data.startswith("analytics:"))
+async def callback_analytics(callback: CallbackQuery, db: AsyncSession):
+    """Отобразить аналитику за период."""
+
+    await callback.answer("Собираю аналитику...")
+
+    if not await check_admin(callback.from_user.id):
+        await callback.message.answer("⛔ У вас нет доступа")
+        return
+
+    try:
+        period = callback.data.split(":")[1]
+        days = int(period) if period != "all" else 9999
+
+        logger.info("analytics_requested", period=period, days=days, user_id=callback.from_user.id)
+
+        # Создаём сервис аналитики
+        analytics = AnalyticsService(db)
+
+        # Собираем все данные
+        stats = await analytics.get_period_stats(days)
+        top_posts = await analytics.get_top_posts(3, days)
+        worst_posts = await analytics.get_worst_posts(3, days)
+        sources = await analytics.get_source_stats(days)
+        weekday_stats = await analytics.get_weekday_stats(min(days, 30))  # Максимум 30 дней для статистики по дням
+        vector_stats = await analytics.get_vector_db_stats()
+
+        # Форматируем отчёт
+        report = format_analytics_report(
+            stats=stats,
+            top_posts=top_posts,
+            worst_posts=worst_posts,
+            sources=sources,
+            weekday_stats=weekday_stats,
+            vector_stats=vector_stats
+        )
+
+        # Telegram ограничивает сообщения до 4096 символов
+        # Если отчёт длинный - разбиваем на части
+        if len(report) > 4096:
+            # Разбиваем по разделителям
+            parts = report.split("━━━━━━━━━━━━━━━━━━━━━━━━━━")
+
+            current_part = ""
+            for part in parts:
+                if len(current_part + part) > 4000:
+                    # Отправляем текущую часть
+                    await callback.message.answer(current_part, parse_mode="HTML", disable_web_page_preview=True)
+                    current_part = part
+                else:
+                    current_part += "━━━━━━━━━━━━━━━━━━━━━━━━━━" + part if current_part else part
+
+            # Отправляем последнюю часть
+            if current_part:
+                await callback.message.answer(current_part, parse_mode="HTML", disable_web_page_preview=True)
+        else:
+            # Отправляем целиком
+            await callback.message.answer(report, parse_mode="HTML", disable_web_page_preview=True)
+
+        logger.info("analytics_sent", period=period, report_length=len(report))
+
+    except Exception as e:
+        logger.error("analytics_error", error=str(e), period=callback.data)
+        await callback.message.answer(
+            "❌ Произошла ошибка при сборе аналитики. Попробуйте позже.",
+            parse_mode="HTML"
+        )
+
+
+# ====================
 # Настройка команд бота
 # ====================
 
@@ -1390,7 +1648,8 @@ async def setup_bot_commands():
         BotCommand(command="start", description="🏠 Главное меню"),
         BotCommand(command="drafts", description="📝 Новые драфты"),
         BotCommand(command="fetch", description="🔄 Запустить сбор новостей"),
-        BotCommand(command="stats", description="📊 Статистика системы"),
+        BotCommand(command="analytics", description="📊 Аналитика канала"),
+        BotCommand(command="stats", description="📈 Статистика системы"),
         BotCommand(command="help", description="❓ Помощь"),
     ]
     await get_bot().set_my_commands(commands)
