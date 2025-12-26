@@ -1182,16 +1182,18 @@ async def publish_draft(draft_id: int, db: AsyncSession, admin_id: int) -> bool:
         await db.commit()
         await db.refresh(publication)
 
-        # ВРЕМЕННО ОТКЛЮЧЕНО: Векторизация блокирует UI
-        # TODO: Перенести в Celery task
-        # if settings.qdrant_enabled:
-        #     asyncio.create_task(
-        #         _vectorize_publication_background(
-        #             pub_id=publication.id,
-        #             content=draft.content,
-        #             draft_id=draft.id
-        #         )
-        #     )
+        # Векторизация через Celery (не блокирует UI)
+        if settings.qdrant_enabled:
+            try:
+                from app.tasks.celery_tasks import vectorize_publication_task
+                vectorize_publication_task.delay(
+                    pub_id=publication.id,
+                    content=draft.content,
+                    draft_id=draft.id
+                )
+                logger.info("vectorization_task_queued", pub_id=publication.id, draft_id=draft.id)
+            except Exception as e:
+                logger.warning("vectorization_task_queue_error", error=str(e))
 
         logger.info(
             "draft_published",

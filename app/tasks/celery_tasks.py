@@ -473,6 +473,49 @@ app.conf.beat_schedule = {
 }
 
 
+
+# ====================
+# Векторизация публикаций
+# ====================
+
+@app.task(max_retries=3, autoretry_for=(Exception,), retry_backoff=60)
+def vectorize_publication_task(pub_id: int, content: str, draft_id: int):
+    """
+    Векторизация опубликованного поста в Qdrant.
+
+    Args:
+        pub_id: ID публикации
+        content: Текст поста
+        draft_id: ID драфта
+    """
+    logger.info("vectorize_publication_task_started", pub_id=pub_id, draft_id=draft_id)
+
+    async def vectorize():
+        from app.modules.vector_search import get_vector_search
+        from datetime import datetime
+
+        try:
+            vector_search = get_vector_search()
+            await vector_search.add_publication(
+                pub_id=pub_id,
+                content=content,
+                published_at=datetime.utcnow(),
+                reactions={}
+            )
+            logger.info("vectorize_publication_task_success", pub_id=pub_id, draft_id=draft_id)
+            return {"status": "success", "pub_id": pub_id}
+        except Exception as e:
+            logger.error("vectorize_publication_task_error", pub_id=pub_id, error=str(e))
+            raise
+
+    try:
+        result = asyncio.run(vectorize())
+        return result
+    except Exception as e:
+        logger.error("vectorize_publication_task_failed", pub_id=pub_id, error=str(e))
+        raise
+
+
 # ====================
 # Команды для ручного запуска
 # ====================
