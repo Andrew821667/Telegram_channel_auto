@@ -114,7 +114,7 @@ class Settings(BaseSettings):
     perplexity_temperature: float = Field(default=0.7)
 
     # LLM Provider Selection
-    default_llm_provider: str = Field(default="openai")  # openai or perplexity
+    default_llm_provider: str = Field(default="perplexity")  # openai or perplexity
 
     # Telegram
     telegram_bot_token: str = Field(default="")
