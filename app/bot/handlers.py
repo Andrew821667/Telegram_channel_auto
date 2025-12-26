@@ -992,13 +992,20 @@ async def publish_draft(draft_id: int, db: AsyncSession, admin_id: int) -> bool:
 
         # Публикуем в канал
         if draft.image_path:
-            # Telegram ограничивает caption до 1024 символов
-            caption = final_text[:1024] if len(final_text) > 1024 else final_text
+            # Публикуем двумя последовательными сообщениями для обхода лимита caption (1024 символа)
+            # 1. Фото с минимальной подписью (только заголовок)
             photo = FSInputFile(draft.image_path)
-            message = await get_bot().send_photo(
+            photo_message = await get_bot().send_photo(
                 chat_id=settings.telegram_channel_id,
                 photo=photo,
-                caption=caption,
+                caption=draft.title if draft.title else ""
+            )
+
+            # 2. Полный текст с интерактивными кнопками (до 4096 символов)
+            text = final_text[:4096] if len(final_text) > 4096 else final_text
+            message = await get_bot().send_message(
+                chat_id=settings.telegram_channel_id,
+                text=text,
                 parse_mode="HTML",
                 reply_markup=get_reader_keyboard(
                     article.url,
