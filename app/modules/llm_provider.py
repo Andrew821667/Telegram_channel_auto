@@ -101,8 +101,23 @@ class LLMProvider:
         }
 
         try:
+            logger.info("perplexity_request",
+                       model=payload["model"],
+                       messages_count=len(messages),
+                       temperature=payload["temperature"],
+                       max_tokens=payload["max_tokens"])
+
             async with httpx.AsyncClient() as client:
                 response = await client.post(url, json=payload, headers=headers, timeout=60.0)
+
+                # Логируем детали ответа перед проверкой статуса
+                if response.status_code != 200:
+                    error_detail = response.text
+                    logger.error("perplexity_api_error",
+                               status_code=response.status_code,
+                               error=error_detail,
+                               payload=payload)
+
                 response.raise_for_status()
 
                 data = response.json()
@@ -113,6 +128,12 @@ class LLMProvider:
                            tokens=data.get("usage", {}).get("total_tokens"))
                 return result
 
+        except httpx.HTTPStatusError as e:
+            logger.error("perplexity_http_error",
+                        status_code=e.response.status_code,
+                        error=str(e),
+                        response_text=e.response.text)
+            raise
         except Exception as e:
             logger.error("perplexity_generation_error", error=str(e))
             raise
