@@ -1073,6 +1073,7 @@ async def publish_draft(draft_id: int, db: AsyncSession, admin_id: int) -> bool:
 
         # Формируем финальный текст с интерактивными элементами
         final_text = draft.content
+        logger.info("publish_draft_before_title_removal", draft_id=draft_id, has_image=bool(draft.image_path), title=draft.title[:50] if draft.title else None, content_start=final_text[:100])
 
         # Если есть изображение - убираем заголовок из текста (он уже на картинке)
         if draft.image_path and draft.title:
@@ -1085,8 +1086,10 @@ async def publish_draft(draft_id: int, db: AsyncSession, admin_id: int) -> bool:
             ]
             for pattern in title_patterns:
                 if final_text.startswith(pattern):
+                    logger.info("publish_draft_title_pattern_matched", draft_id=draft_id, pattern=pattern[:50])
                     final_text = final_text[len(pattern):]
                     break
+            logger.info("publish_draft_after_title_removal", draft_id=draft_id, content_start=final_text[:100])
 
         # Добавляем разделитель и источник
         if article:
