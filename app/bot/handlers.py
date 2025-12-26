@@ -229,25 +229,35 @@ async def callback_confirm_publish(callback: CallbackQuery, db: AsyncSession):
     # Публикуем пост
     success = await publish_draft(draft_id, db, callback.from_user.id)
 
-    if success:
-        # Проверяем тип сообщения (photo или text)
-        if callback.message.photo:
-            await callback.message.edit_caption(
-                caption=f"✅ Драфт #{draft_id} успешно опубликован!"
-            )
+    try:
+        if success:
+            # Проверяем тип сообщения (photo или text)
+            if callback.message.photo:
+                await callback.message.edit_caption(
+                    caption=f"✅ Драфт #{draft_id} успешно опубликован!",
+                    reply_markup=None  # Убираем кнопки
+                )
+            else:
+                await callback.message.edit_text(
+                    text=f"✅ Драфт #{draft_id} успешно опубликован!",
+                    reply_markup=None  # Убираем кнопки
+                )
         else:
-            await callback.message.edit_text(
-                f"✅ Драфт #{draft_id} успешно опубликован!"
-            )
-    else:
-        if callback.message.photo:
-            await callback.message.edit_caption(
-                caption=f"❌ Ошибка при публикации драфта #{draft_id}"
-            )
-        else:
-            await callback.message.edit_text(
-                f"❌ Ошибка при публикации драфта #{draft_id}"
-            )
+            if callback.message.photo:
+                await callback.message.edit_caption(
+                    caption=f"❌ Ошибка при публикации драфта #{draft_id}",
+                    reply_markup=None
+                )
+            else:
+                await callback.message.edit_text(
+                    text=f"❌ Ошибка при публикации драфта #{draft_id}",
+                    reply_markup=None
+                )
+    except Exception as e:
+        logger.error("callback_message_edit_error", error=str(e), draft_id=draft_id)
+        # Если не получилось отредактировать, отправим новое сообщение
+        status_msg = f"✅ Драфт #{draft_id} успешно опубликован!" if success else f"❌ Ошибка при публикации драфта #{draft_id}"
+        await callback.message.answer(status_msg)
 
 
 @router.callback_query(F.data.startswith("reject:"))
