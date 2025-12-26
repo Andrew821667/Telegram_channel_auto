@@ -1074,6 +1074,20 @@ async def publish_draft(draft_id: int, db: AsyncSession, admin_id: int) -> bool:
         # Формируем финальный текст с интерактивными элементами
         final_text = draft.content
 
+        # Если есть изображение - убираем заголовок из текста (он уже на картинке)
+        if draft.image_path and draft.title:
+            # Убираем заголовок (обычно в начале в тегах <b>...</b>)
+            title_patterns = [
+                f"<b>{draft.title}</b>\n\n",
+                f"<b>{draft.title}</b>\n",
+                f"{draft.title}\n\n",
+                f"{draft.title}\n"
+            ]
+            for pattern in title_patterns:
+                if final_text.startswith(pattern):
+                    final_text = final_text[len(pattern):]
+                    break
+
         # Добавляем разделитель и источник
         if article:
             final_text += f"\n\n━━━━━━━━━━━━━━━━"
@@ -1085,12 +1099,11 @@ async def publish_draft(draft_id: int, db: AsyncSession, admin_id: int) -> bool:
         # Публикуем в канал
         if draft.image_path:
             # Публикуем двумя последовательными сообщениями для обхода лимита caption (1024 символа)
-            # 1. Фото с минимальной подписью (только заголовок)
+            # 1. Фото БЕЗ подписи (заголовок уже на изображении)
             photo = FSInputFile(draft.image_path)
             photo_message = await get_bot().send_photo(
                 chat_id=settings.telegram_channel_id,
-                photo=photo,
-                caption=draft.title if draft.title else ""
+                photo=photo
             )
 
             # 2. Полный текст с интерактивными кнопками (до 4096 символов)
