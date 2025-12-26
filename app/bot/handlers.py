@@ -217,6 +217,9 @@ async def callback_publish(callback: CallbackQuery, db: AsyncSession):
 @router.callback_query(F.data.startswith("confirm_publish:"))
 async def callback_confirm_publish(callback: CallbackQuery, db: AsyncSession):
     """Подтверждение публикации."""
+    # ВАЖНО: отвечаем сразу, чтобы кнопка не зависала
+    await callback.answer("Публикую...")
+
     if not await check_admin(callback.from_user.id):
         return
 
@@ -235,7 +238,6 @@ async def callback_confirm_publish(callback: CallbackQuery, db: AsyncSession):
             await callback.message.edit_text(
                 f"✅ Драфт #{draft_id} успешно опубликован!"
             )
-        await callback.answer("Опубликовано!")
     else:
         if callback.message.photo:
             await callback.message.edit_caption(
@@ -245,7 +247,6 @@ async def callback_confirm_publish(callback: CallbackQuery, db: AsyncSession):
             await callback.message.edit_text(
                 f"❌ Ошибка при публикации драфта #{draft_id}"
             )
-        await callback.answer("Ошибка!", show_alert=True)
 
 
 @router.callback_query(F.data.startswith("reject:"))
@@ -267,6 +268,9 @@ async def callback_reject(callback: CallbackQuery, db: AsyncSession):
 @router.callback_query(F.data.startswith("reject_reason:"))
 async def callback_reject_reason(callback: CallbackQuery, db: AsyncSession):
     """Обработка выбора причины отклонения."""
+    # ВАЖНО: отвечаем сразу, чтобы кнопка не зависала
+    await callback.answer("Отклоняю...")
+
     if not await check_admin(callback.from_user.id):
         return
 
@@ -287,9 +291,8 @@ async def callback_reject_reason(callback: CallbackQuery, db: AsyncSession):
             await callback.message.edit_text(
                 f"❌ Драфт #{draft_id} отклонен\nПричина: {reason}"
             )
-        await callback.answer("Отклонено")
     else:
-        await callback.answer("Ошибка!", show_alert=True)
+        await callback.message.answer("❌ Ошибка при отклонении драфта", show_alert=True)
 
 
 @router.callback_query(F.data.startswith("edit:"))
@@ -915,32 +918,39 @@ async def send_draft_for_review(chat_id: int, draft: PostDraft, db: AsyncSession
         # Используем порядковый номер или ID
         display_number = draft_number if draft_number is not None else draft.id
 
-        # Формируем сообщение
-        preview_text = f"""
-🆕 <b>Новый драфт #{display_number}</b>
+        # Формируем preview текст
+        preview_header = f"🆕 <b>Новый драфт #{display_number}</b>"
 
-{draft.content}
-
+        preview_footer = f"""
 ━━━━━━━━━━━━━━━━
 📊 Confidence: {draft.confidence_score:.2f}
 🔗 Источник: {article.source_name if article else 'Unknown'}
 ⏰ Создан: {draft.created_at.strftime('%d.%m.%Y %H:%M')}
 """
 
+        full_preview_text = f"{preview_header}\n\n{draft.content}\n{preview_footer}"
+
         # Отправляем с изображением если есть
         if draft.image_path:
+            # Отправляем двумя сообщениями для обхода лимита caption (1024 символа)
             photo = FSInputFile(draft.image_path)
             await bot.send_photo(
                 chat_id=chat_id,
                 photo=photo,
-                caption=preview_text[:1024],  # Telegram limit
+                caption=preview_header
+            )
+
+            # Отправляем полный текст preview с кнопками
+            await bot.send_message(
+                chat_id=chat_id,
+                text=f"{draft.content}\n{preview_footer}",
                 reply_markup=get_draft_review_keyboard(draft.id),
                 parse_mode="HTML"
             )
         else:
             await bot.send_message(
                 chat_id=chat_id,
-                text=preview_text,
+                text=full_preview_text,
                 reply_markup=get_draft_review_keyboard(draft.id),
                 parse_mode="HTML"
             )
