@@ -163,44 +163,45 @@ class AnalyticsService:
 
             query = text("""
                 SELECT
-                    id,
-                    title,
-                    content,
-                    published_at,
-                    telegram_message_id,
-                    reactions,
+                    p.id,
+                    d.title,
+                    d.content,
+                    p.published_at,
+                    p.message_id as telegram_message_id,
+                    p.reactions,
                     (
-                        COALESCE((reactions->>'useful')::int, 0) +
-                        COALESCE((reactions->>'important')::int, 0) -
-                        COALESCE((reactions->>'banal')::int, 0) -
-                        COALESCE((reactions->>'obvious')::int, 0) -
-                        COALESCE((reactions->>'poor_quality')::int, 0)
+                        COALESCE((p.reactions->>'useful')::int, 0) +
+                        COALESCE((p.reactions->>'important')::int, 0) -
+                        COALESCE((p.reactions->>'banal')::int, 0) -
+                        COALESCE((p.reactions->>'obvious')::int, 0) -
+                        COALESCE((p.reactions->>'poor_quality')::int, 0)
                     )::float / NULLIF(
-                        COALESCE((reactions->>'useful')::int, 0) +
-                        COALESCE((reactions->>'important')::int, 0) +
-                        COALESCE((reactions->>'banal')::int, 0) +
-                        COALESCE((reactions->>'obvious')::int, 0) +
-                        COALESCE((reactions->>'poor_quality')::int, 0) +
-                        COALESCE((reactions->>'controversial')::int, 0),
+                        COALESCE((p.reactions->>'useful')::int, 0) +
+                        COALESCE((p.reactions->>'important')::int, 0) +
+                        COALESCE((p.reactions->>'banal')::int, 0) +
+                        COALESCE((p.reactions->>'obvious')::int, 0) +
+                        COALESCE((p.reactions->>'poor_quality')::int, 0) +
+                        COALESCE((p.reactions->>'controversial')::int, 0),
                         0
                     ) as quality_score,
                     (
-                        COALESCE((reactions->>'useful')::int, 0) +
-                        COALESCE((reactions->>'important')::int, 0) +
-                        COALESCE((reactions->>'banal')::int, 0) +
-                        COALESCE((reactions->>'obvious')::int, 0) +
-                        COALESCE((reactions->>'poor_quality')::int, 0) +
-                        COALESCE((reactions->>'controversial')::int, 0)
+                        COALESCE((p.reactions->>'useful')::int, 0) +
+                        COALESCE((p.reactions->>'important')::int, 0) +
+                        COALESCE((p.reactions->>'banal')::int, 0) +
+                        COALESCE((p.reactions->>'obvious')::int, 0) +
+                        COALESCE((p.reactions->>'poor_quality')::int, 0) +
+                        COALESCE((p.reactions->>'controversial')::int, 0)
                     ) as total_reactions
-                FROM publications
-                WHERE published_at >= :date_from
+                FROM publications p
+                JOIN post_drafts d ON p.draft_id = d.id
+                WHERE p.published_at >= :date_from
                 AND (
-                    COALESCE((reactions->>'useful')::int, 0) +
-                    COALESCE((reactions->>'important')::int, 0) +
-                    COALESCE((reactions->>'banal')::int, 0) +
-                    COALESCE((reactions->>'obvious')::int, 0) +
-                    COALESCE((reactions->>'poor_quality')::int, 0) +
-                    COALESCE((reactions->>'controversial')::int, 0)
+                    COALESCE((p.reactions->>'useful')::int, 0) +
+                    COALESCE((p.reactions->>'important')::int, 0) +
+                    COALESCE((p.reactions->>'banal')::int, 0) +
+                    COALESCE((p.reactions->>'obvious')::int, 0) +
+                    COALESCE((p.reactions->>'poor_quality')::int, 0) +
+                    COALESCE((p.reactions->>'controversial')::int, 0)
                 ) > 0
                 ORDER BY quality_score DESC, total_reactions DESC
                 LIMIT :limit
@@ -246,41 +247,42 @@ class AnalyticsService:
 
             query = text("""
                 SELECT
-                    id,
-                    title,
-                    content,
-                    published_at,
-                    telegram_message_id,
-                    reactions,
+                    p.id,
+                    d.title,
+                    d.content,
+                    p.published_at,
+                    p.message_id as telegram_message_id,
+                    p.reactions,
                     (
-                        COALESCE((reactions->>'useful')::int, 0) +
-                        COALESCE((reactions->>'important')::int, 0) -
-                        COALESCE((reactions->>'banal')::int, 0) -
-                        COALESCE((reactions->>'obvious')::int, 0) -
-                        COALESCE((reactions->>'poor_quality')::int, 0)
+                        COALESCE((p.reactions->>'useful')::int, 0) +
+                        COALESCE((p.reactions->>'important')::int, 0) -
+                        COALESCE((p.reactions->>'banal')::int, 0) -
+                        COALESCE((p.reactions->>'obvious')::int, 0) -
+                        COALESCE((p.reactions->>'poor_quality')::int, 0)
                     )::float / NULLIF(
-                        COALESCE((reactions->>'useful')::int, 0) +
-                        COALESCE((reactions->>'important')::int, 0) +
-                        COALESCE((reactions->>'banal')::int, 0) +
-                        COALESCE((reactions->>'obvious')::int, 0) +
-                        COALESCE((reactions->>'poor_quality')::int, 0) +
-                        COALESCE((reactions->>'controversial')::int, 0),
+                        COALESCE((p.reactions->>'useful')::int, 0) +
+                        COALESCE((p.reactions->>'important')::int, 0) +
+                        COALESCE((p.reactions->>'banal')::int, 0) +
+                        COALESCE((p.reactions->>'obvious')::int, 0) +
+                        COALESCE((p.reactions->>'poor_quality')::int, 0) +
+                        COALESCE((p.reactions->>'controversial')::int, 0),
                         0
                     ) as quality_score,
                     (
-                        COALESCE((reactions->>'useful')::int, 0) +
-                        COALESCE((reactions->>'important')::int, 0) +
-                        COALESCE((reactions->>'banal')::int, 0) +
-                        COALESCE((reactions->>'obvious')::int, 0) +
-                        COALESCE((reactions->>'poor_quality')::int, 0) +
-                        COALESCE((reactions->>'controversial')::int, 0)
+                        COALESCE((p.reactions->>'useful')::int, 0) +
+                        COALESCE((p.reactions->>'important')::int, 0) +
+                        COALESCE((p.reactions->>'banal')::int, 0) +
+                        COALESCE((p.reactions->>'obvious')::int, 0) +
+                        COALESCE((p.reactions->>'poor_quality')::int, 0) +
+                        COALESCE((p.reactions->>'controversial')::int, 0)
                     ) as total_reactions
-                FROM publications
-                WHERE published_at >= :date_from
+                FROM publications p
+                JOIN post_drafts d ON p.draft_id = d.id
+                WHERE p.published_at >= :date_from
                 AND (
-                    COALESCE((reactions->>'banal')::int, 0) +
-                    COALESCE((reactions->>'obvious')::int, 0) +
-                    COALESCE((reactions->>'poor_quality')::int, 0)
+                    COALESCE((p.reactions->>'banal')::int, 0) +
+                    COALESCE((p.reactions->>'obvious')::int, 0) +
+                    COALESCE((p.reactions->>'poor_quality')::int, 0)
                 ) > 0
                 ORDER BY quality_score ASC, total_reactions DESC
                 LIMIT :limit
@@ -329,7 +331,7 @@ class AnalyticsService:
                     source_name,
                     COUNT(*) as total_collected
                 FROM raw_articles
-                WHERE created_at >= :date_from
+                WHERE fetched_at >= :date_from
                 GROUP BY source_name
                 ORDER BY total_collected DESC
             """)
@@ -342,7 +344,7 @@ class AnalyticsService:
             # Статистика по опубликованным постам
             query_pubs = text("""
                 SELECT
-                    p.source_name,
+                    a.source_name,
                     COUNT(*) as total_published,
                     AVG(
                         (
@@ -362,8 +364,10 @@ class AnalyticsService:
                         )
                     ) as avg_quality_score
                 FROM publications p
+                JOIN post_drafts d ON p.draft_id = d.id
+                JOIN raw_articles a ON d.article_id = a.id
                 WHERE p.published_at >= :date_from
-                GROUP BY p.source_name
+                GROUP BY a.source_name
             """)
             result_pubs = await self.db.execute(query_pubs, {"date_from": date_from})
 
