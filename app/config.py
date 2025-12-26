@@ -116,6 +116,11 @@ class Settings(BaseSettings):
     # LLM Provider Selection
     default_llm_provider: str = Field(default="perplexity")  # openai or perplexity
 
+    # Qdrant Vector Database
+    qdrant_host: str = Field(default="qdrant")
+    qdrant_port: int = Field(default=6333)
+    qdrant_enabled: bool = Field(default=True)  # Включить/выключить векторный поиск
+
     # Telegram
     telegram_bot_token: str = Field(default="")
     telegram_admin_id: int = Field(default=0)
