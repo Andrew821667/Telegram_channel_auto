@@ -155,6 +155,42 @@ class Settings(BaseSettings):
             return []
         return [s.strip() for s in self.rss_sources.split(",") if s.strip()]
 
+    # Hacker News
+    hackernews_enabled: bool = Field(default=True)
+
+    # Reddit
+    reddit_enabled: bool = Field(default=True)
+    reddit_subreddits: str = Field(default="MachineLearning,artificial,LegalTech")
+
+    @property
+    def reddit_subreddits_list(self) -> List[str]:
+        """Parse Reddit subreddits from comma-separated string."""
+        if not self.reddit_subreddits:
+            return []
+        return [s.strip() for s in self.reddit_subreddits.split(",") if s.strip()]
+
+    # ArXiv
+    arxiv_enabled: bool = Field(default=True)
+    arxiv_categories: str = Field(default="cs.AI,cs.LG")
+
+    @property
+    def arxiv_categories_list(self) -> List[str]:
+        """Parse ArXiv categories from comma-separated string."""
+        if not self.arxiv_categories:
+            return []
+        return [c.strip() for c in self.arxiv_categories.split(",") if c.strip()]
+
+    # Medium
+    medium_enabled: bool = Field(default=True)
+    medium_tags: str = Field(default="artificial-intelligence,machine-learning")
+
+    @property
+    def medium_tags_list(self) -> List[str]:
+        """Parse Medium tags from comma-separated string."""
+        if not self.medium_tags:
+            return []
+        return [t.strip() for t in self.medium_tags.split(",") if t.strip()]
+
     # Cleaner/Filter
     cleaner_min_content_length: int = Field(default=300)
     cleaner_similarity_threshold: float = Field(default=0.85)

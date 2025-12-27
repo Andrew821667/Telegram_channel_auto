@@ -9,6 +9,7 @@ News Fetcher Module
 """
 
 import asyncio
+import json
 import random
 from datetime import datetime
 from typing import List, Optional, Dict, Any
@@ -505,6 +506,433 @@ Search only for recent news. Return maximum 10 articles."""
 
         return articles
 
+    async def fetch_hackernews(self) -> List[Dict[str, Any]]:
+        """
+        Получить новости из Hacker News API.
+
+        Returns:
+            Список словарей с новостями
+        """
+        articles = []
+
+        logger.info("fetching_hackernews")
+
+        try:
+            # Получаем топ-500 историй
+            top_stories_url = "https://hacker-news.firebaseio.com/v0/topstories.json"
+            response = await self._fetch_with_retry(top_stories_url)
+
+            if not response:
+                return articles
+
+            story_ids = json.loads(response)
+
+            # Ключевые слова для фильтрации
+            keywords = [
+                'ai', 'artificial intelligence', 'machine learning', 'ml',
+                'legal tech', 'legaltech', 'law', 'lawyer', 'court',
+                'automation', 'neural', 'llm', 'gpt', 'openai',
+                'compliance', 'contract', 'regulation'
+            ]
+
+            # Берем первые 100 историй (топ самые релевантные)
+            checked_count = 0
+            for story_id in story_ids[:100]:
+                if len(articles) >= 10:  # Лимит на количество
+                    break
+
+                try:
+                    # Получаем детали истории
+                    story_url = f"https://hacker-news.firebaseio.com/v0/item/{story_id}.json"
+                    story_response = await self._fetch_with_retry(story_url)
+
+                    if not story_response:
+                        continue
+
+                    story = json.loads(story_response)
+
+                    # Фильтруем только stories (не jobs, polls)
+                    if story.get('type') != 'story':
+                        continue
+
+                    # Проверяем наличие URL
+                    if not story.get('url'):
+                        continue
+
+                    title = story.get('title', '')
+                    text = story.get('text', '')
+
+                    # Проверяем релевантность по ключевым словам
+                    combined_text = f"{title} {text}".lower()
+                    is_relevant = any(keyword in combined_text for keyword in keywords)
+
+                    if not is_relevant:
+                        checked_count += 1
+                        continue
+
+                    # Формируем дату
+                    published_at = None
+                    if 'time' in story:
+                        from datetime import datetime
+                        published_at = datetime.utcfromtimestamp(story['time'])
+
+                    # Создаем статью
+                    article_data = {
+                        "url": story['url'],
+                        "title": title,
+                        "content": text or f"{title}\n\nDiscussion: https://news.ycombinator.com/item?id={story_id}",
+                        "source_name": "Hacker News",
+                        "published_at": published_at,
+                    }
+
+                    articles.append(article_data)
+
+                    logger.info(
+                        "hackernews_article_fetched",
+                        title=title[:50],
+                        score=story.get('score', 0)
+                    )
+
+                    checked_count += 1
+
+                except Exception as e:
+                    logger.error(
+                        "hackernews_story_parse_error",
+                        story_id=story_id,
+                        error=str(e)
+                    )
+                    continue
+
+            logger.info(
+                "hackernews_fetch_complete",
+                articles_count=len(articles),
+                checked_count=checked_count
+            )
+
+        except Exception as e:
+            logger.error(
+                "hackernews_fetch_error",
+                error=str(e)
+            )
+
+        return articles
+
+    async def fetch_reddit(self, subreddit: str = "MachineLearning") -> List[Dict[str, Any]]:
+        """
+        Получить новости из Reddit (без OAuth, через JSON API).
+
+        Args:
+            subreddit: Название subreddit
+
+        Returns:
+            Список словарей с новостями
+        """
+        articles = []
+
+        logger.info("fetching_reddit", subreddit=subreddit)
+
+        try:
+            # Reddit JSON API (не требует OAuth для публичных постов)
+            reddit_url = f"https://www.reddit.com/r/{subreddit}/hot.json?limit=25"
+
+            # Специальный User-Agent для Reddit API
+            old_user_agent = self.client.headers.get("User-Agent")
+            self.client.headers["User-Agent"] = "LegalTechNewsBot/1.0 (AI News Aggregator)"
+
+            response = await self._fetch_with_retry(reddit_url)
+
+            # Возвращаем старый User-Agent
+            if old_user_agent:
+                self.client.headers["User-Agent"] = old_user_agent
+
+            if not response:
+                return articles
+
+            data = json.loads(response)
+
+            # Парсим посты
+            for post in data.get('data', {}).get('children', []):
+                try:
+                    post_data = post.get('data', {})
+
+                    # Пропускаем stickied посты
+                    if post_data.get('stickied'):
+                        continue
+
+                    # Пропускаем удаленные
+                    if post_data.get('removed_by_category'):
+                        continue
+
+                    title = post_data.get('title', '')
+                    selftext = post_data.get('selftext', '')
+                    url = post_data.get('url', '')
+                    permalink = f"https://www.reddit.com{post_data.get('permalink', '')}"
+
+                    # Если это self post (текстовый), используем permalink
+                    if post_data.get('is_self'):
+                        url = permalink
+
+                    # Формируем контент
+                    content = selftext[:1000] if selftext else title
+
+                    # Добавляем метаданные
+                    score = post_data.get('score', 0)
+                    num_comments = post_data.get('num_comments', 0)
+                    content += f"\n\n👍 {score} upvotes | 💬 {num_comments} comments"
+
+                    # Дата
+                    published_at = None
+                    if 'created_utc' in post_data:
+                        published_at = datetime.utcfromtimestamp(post_data['created_utc'])
+
+                    article_data = {
+                        "url": url,
+                        "title": title,
+                        "content": content,
+                        "source_name": f"Reddit r/{subreddit}",
+                        "published_at": published_at,
+                    }
+
+                    articles.append(article_data)
+
+                    logger.info(
+                        "reddit_post_fetched",
+                        subreddit=subreddit,
+                        title=title[:50],
+                        score=score
+                    )
+
+                    # Лимит
+                    if len(articles) >= 10:
+                        break
+
+                except Exception as e:
+                    logger.error(
+                        "reddit_post_parse_error",
+                        subreddit=subreddit,
+                        error=str(e)
+                    )
+                    continue
+
+            logger.info(
+                "reddit_fetch_complete",
+                subreddit=subreddit,
+                articles_count=len(articles)
+            )
+
+        except Exception as e:
+            logger.error(
+                "reddit_fetch_error",
+                subreddit=subreddit,
+                error=str(e)
+            )
+
+        return articles
+
+    async def fetch_arxiv(self, category: str = "cs.AI") -> List[Dict[str, Any]]:
+        """
+        Получить научные статьи из ArXiv API.
+
+        Args:
+            category: Категория (cs.AI, cs.LG, cs.CL)
+
+        Returns:
+            Список словарей с новостями
+        """
+        articles = []
+
+        logger.info("fetching_arxiv", category=category)
+
+        try:
+            # ArXiv API query
+            # Ищем статьи за последние 7 дней, отсортированные по дате
+            arxiv_url = (
+                f"http://export.arxiv.org/api/query?"
+                f"search_query=cat:{category}&"
+                f"sortBy=submittedDate&"
+                f"sortOrder=descending&"
+                f"max_results=20"
+            )
+
+            response = await self._fetch_with_retry(arxiv_url)
+
+            if not response:
+                return articles
+
+            # Парсим XML ответ
+            from xml.etree import ElementTree as ET
+
+            root = ET.fromstring(response)
+
+            # Namespace для ArXiv
+            ns = {
+                'atom': 'http://www.w3.org/2005/Atom',
+                'arxiv': 'http://arxiv.org/schemas/atom'
+            }
+
+            # Парсим entries
+            for entry in root.findall('atom:entry', ns):
+                try:
+                    title_elem = entry.find('atom:title', ns)
+                    summary_elem = entry.find('atom:summary', ns)
+                    link_elem = entry.find('atom:id', ns)
+                    published_elem = entry.find('atom:published', ns)
+
+                    if not all([title_elem, summary_elem, link_elem]):
+                        continue
+
+                    title = title_elem.text.strip().replace('\n', ' ')
+                    summary = summary_elem.text.strip().replace('\n', ' ')[:500]
+                    url = link_elem.text.strip()
+
+                    # Дата публикации
+                    published_at = None
+                    if published_elem is not None:
+                        published_at = self._parse_date(published_elem.text)
+
+                    # Авторы
+                    authors = []
+                    for author in entry.findall('atom:author', ns):
+                        name_elem = author.find('atom:name', ns)
+                        if name_elem is not None:
+                            authors.append(name_elem.text)
+
+                    authors_str = ', '.join(authors[:3])  # Первые 3 автора
+                    if len(authors) > 3:
+                        authors_str += ' et al.'
+
+                    # Формируем контент
+                    content = f"{summary}\n\nAuthors: {authors_str}"
+
+                    article_data = {
+                        "url": url,
+                        "title": title,
+                        "content": content,
+                        "source_name": f"ArXiv {category}",
+                        "published_at": published_at,
+                    }
+
+                    articles.append(article_data)
+
+                    logger.info(
+                        "arxiv_article_fetched",
+                        category=category,
+                        title=title[:50]
+                    )
+
+                    # Лимит
+                    if len(articles) >= 5:  # Меньше научных статей, они длиннее
+                        break
+
+                except Exception as e:
+                    logger.error(
+                        "arxiv_entry_parse_error",
+                        category=category,
+                        error=str(e)
+                    )
+                    continue
+
+            logger.info(
+                "arxiv_fetch_complete",
+                category=category,
+                articles_count=len(articles)
+            )
+
+        except Exception as e:
+            logger.error(
+                "arxiv_fetch_error",
+                category=category,
+                error=str(e)
+            )
+
+        return articles
+
+    async def fetch_medium_rss(self, tag: str = "artificial-intelligence") -> List[Dict[str, Any]]:
+        """
+        Получить статьи из Medium по тегу через RSS.
+
+        Args:
+            tag: Тег на Medium (artificial-intelligence, machine-learning, legaltech)
+
+        Returns:
+            Список словарей с новостями
+        """
+        articles = []
+
+        logger.info("fetching_medium", tag=tag)
+
+        try:
+            # Medium RSS feed для тега
+            medium_url = f"https://medium.com/feed/tag/{tag}"
+
+            response = await self._fetch_with_retry(medium_url)
+
+            if not response:
+                return articles
+
+            # Парсим RSS
+            feed = feedparser.parse(response)
+
+            for entry in feed.entries[:10]:  # Лимит 10 статей
+                try:
+                    title = entry.title
+                    summary = entry.get('summary', '')
+
+                    # Убираем HTML теги из summary
+                    from bs4 import BeautifulSoup
+                    soup = BeautifulSoup(summary, 'html.parser')
+                    clean_summary = soup.get_text()[:500]
+
+                    url = entry.link
+
+                    # Дата
+                    published_at = self._parse_date(entry.get('published'))
+
+                    # Автор
+                    author = entry.get('author', 'Unknown')
+
+                    # Формируем контент
+                    content = f"{clean_summary}\n\nAuthor: {author}"
+
+                    article_data = {
+                        "url": url,
+                        "title": title,
+                        "content": content,
+                        "source_name": f"Medium ({tag})",
+                        "published_at": published_at,
+                    }
+
+                    articles.append(article_data)
+
+                    logger.info(
+                        "medium_article_fetched",
+                        tag=tag,
+                        title=title[:50]
+                    )
+
+                except Exception as e:
+                    logger.error(
+                        "medium_entry_parse_error",
+                        tag=tag,
+                        error=str(e)
+                    )
+                    continue
+
+            logger.info(
+                "medium_fetch_complete",
+                tag=tag,
+                articles_count=len(articles)
+            )
+
+        except Exception as e:
+            logger.error(
+                "medium_fetch_error",
+                tag=tag,
+                error=str(e)
+            )
+
+        return articles
+
     async def save_articles(self, articles: List[Dict[str, Any]]) -> int:
         """
         Сохранить статьи в базу данных.
@@ -588,6 +1016,33 @@ Search only for recent news. Return maximum 10 articles."""
                 perplexity_articles_en = await self.fetch_perplexity_news("en")
                 saved_perplexity_en = await self.save_articles(perplexity_articles_en)
                 stats["Perplexity Search EN"] = saved_perplexity_en
+
+            # Hacker News
+            if settings.hackernews_enabled:
+                hn_articles = await self.fetch_hackernews()
+                saved_hn = await self.save_articles(hn_articles)
+                stats["Hacker News"] = saved_hn
+
+            # Reddit - несколько subreddits
+            if settings.reddit_enabled:
+                for subreddit in settings.reddit_subreddits_list:
+                    reddit_articles = await self.fetch_reddit(subreddit)
+                    saved_reddit = await self.save_articles(reddit_articles)
+                    stats[f"Reddit r/{subreddit}"] = saved_reddit
+
+            # ArXiv - научные публикации
+            if settings.arxiv_enabled:
+                for category in settings.arxiv_categories_list:
+                    arxiv_articles = await self.fetch_arxiv(category)
+                    saved_arxiv = await self.save_articles(arxiv_articles)
+                    stats[f"ArXiv {category}"] = saved_arxiv
+
+            # Medium
+            if settings.medium_enabled:
+                for tag in settings.medium_tags_list:
+                    medium_articles = await self.fetch_medium_rss(tag)
+                    saved_medium = await self.save_articles(medium_articles)
+                    stats[f"Medium {tag}"] = saved_medium
 
         # Дополнительные RSS источники из БД
         result = await self.db.execute(
