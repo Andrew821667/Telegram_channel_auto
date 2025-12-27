@@ -933,6 +933,133 @@ Search only for recent news. Return maximum 10 articles."""
 
         return articles
 
+    async def fetch_telegram_channel(self, channel_username: str, limit: int = 10) -> List[Dict[str, Any]]:
+        """
+        Получить сообщения из публичного Telegram канала через Telethon.
+
+        Args:
+            channel_username: Username канала без @ (например: ai_newz)
+            limit: Количество последних сообщений
+
+        Returns:
+            Список словарей с новостями
+        """
+        articles = []
+
+        logger.info("fetching_telegram_channel", channel=channel_username)
+
+        try:
+            from telethon import TelegramClient
+            from telethon.tl.functions.messages import GetHistoryRequest
+
+            # Используем настройки из конфига
+            api_id = settings.telegram_api_id
+            api_hash = settings.telegram_api_hash
+            session_name = settings.telegram_session_name or "news_fetcher"
+
+            if not api_id or not api_hash:
+                logger.warning(
+                    "telegram_api_not_configured",
+                    message="Set TELEGRAM_API_ID and TELEGRAM_API_HASH in .env"
+                )
+                return articles
+
+            # Создаем клиент
+            client = TelegramClient(session_name, api_id, api_hash)
+
+            await client.connect()
+
+            # Проверяем авторизацию
+            if not await client.is_user_authorized():
+                logger.warning(
+                    "telegram_not_authorized",
+                    message="Run telegram_auth.py first to authorize"
+                )
+                await client.disconnect()
+                return articles
+
+            # Получаем канал
+            try:
+                channel = await client.get_entity(channel_username)
+            except Exception as e:
+                logger.error(
+                    "telegram_channel_not_found",
+                    channel=channel_username,
+                    error=str(e)
+                )
+                await client.disconnect()
+                return articles
+
+            # Получаем сообщения
+            messages = await client.get_messages(channel, limit=limit)
+
+            for message in messages:
+                try:
+                    # Пропускаем пустые сообщения
+                    if not message.text:
+                        continue
+
+                    # Формируем URL к сообщению
+                    msg_url = f"https://t.me/{channel_username}/{message.id}"
+
+                    # Берем первые 500 символов как заголовок
+                    title = message.text[:100].replace('\n', ' ')
+                    if len(message.text) > 100:
+                        title += "..."
+
+                    # Полный текст как контент
+                    content = message.text
+
+                    # Добавляем просмотры если есть
+                    if message.views:
+                        content += f"\n\n👁 {message.views} views"
+
+                    # Дата
+                    published_at = message.date.replace(tzinfo=None) if message.date else datetime.utcnow()
+
+                    article_data = {
+                        "url": msg_url,
+                        "title": title,
+                        "content": content,
+                        "source_name": f"Telegram @{channel_username}",
+                        "published_at": published_at,
+                    }
+
+                    articles.append(article_data)
+
+                    logger.info(
+                        "telegram_message_fetched",
+                        channel=channel_username,
+                        message_id=message.id,
+                        views=message.views
+                    )
+
+                except Exception as e:
+                    logger.error(
+                        "telegram_message_parse_error",
+                        channel=channel_username,
+                        message_id=message.id if message else None,
+                        error=str(e)
+                    )
+                    continue
+
+            await client.disconnect()
+
+            logger.info(
+                "telegram_fetch_complete",
+                channel=channel_username,
+                articles_count=len(articles)
+            )
+
+        except Exception as e:
+            logger.error(
+                "telegram_fetch_error",
+                channel=channel_username,
+                error=str(e)
+            )
+
+        return articles
+
     async def save_articles(self, articles: List[Dict[str, Any]]) -> int:
         """
         Сохранить статьи в базу данных.
@@ -1043,6 +1170,13 @@ Search only for recent news. Return maximum 10 articles."""
                     medium_articles = await self.fetch_medium_rss(tag)
                     saved_medium = await self.save_articles(medium_articles)
                     stats[f"Medium {tag}"] = saved_medium
+
+            # Telegram Channels (если настроен API)
+            if settings.telegram_channels_enabled:
+                for channel in settings.telegram_channels_list:
+                    telegram_articles = await self.fetch_telegram_channel(channel)
+                    saved_telegram = await self.save_articles(telegram_articles)
+                    stats[f"Telegram @{channel}"] = saved_telegram
 
         # Дополнительные RSS источники из БД
         result = await self.db.execute(

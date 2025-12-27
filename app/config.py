@@ -122,11 +122,25 @@ class Settings(BaseSettings):
     qdrant_port: int = Field(default=6333)
     qdrant_enabled: bool = Field(default=True)  # Включить/выключить векторный поиск
 
-    # Telegram
+    # Telegram Bot
     telegram_bot_token: str = Field(default="")
     telegram_admin_id: int = Field(default=0)
     telegram_channel_id: str = Field(default="")
     telegram_channel_id_numeric: int = Field(default=0)
+
+    # Telegram API (для чтения каналов через Telethon)
+    telegram_api_id: int = Field(default=0)
+    telegram_api_hash: str = Field(default="")
+    telegram_session_name: str = Field(default="news_fetcher")
+    telegram_channels_enabled: bool = Field(default=False)  # Выключено по умолчанию до авторизации
+    telegram_channels: str = Field(default="ai_newz,data_science_etc,ai_machinelearning_big_data")
+
+    @property
+    def telegram_channels_list(self) -> List[str]:
+        """Parse Telegram channels from comma-separated string."""
+        if not self.telegram_channels:
+            return []
+        return [c.strip() for c in self.telegram_channels.split(",") if c.strip()]
 
     # News Fetcher
     fetcher_enabled: bool = Field(default=True)
