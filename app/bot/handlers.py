@@ -1449,7 +1449,8 @@ def format_analytics_report(
             report += f"   👍 {reactions.get('useful', 0)} | 🔥 {reactions.get('important', 0)} | 🤔 {reactions.get('controversial', 0)}\n"
             report += f"   📊 Quality: {post['quality_score']}\n"
             if post['telegram_message_id']:
-                report += f"   🔗 <a href='https://t.me/legal_ai_pro/{post['telegram_message_id']}'>Перейти к посту</a>\n"
+                msg_id = post['telegram_message_id']
+                report += f'   🔗 <a href="https://t.me/legal_ai_pro/{msg_id}">Перейти к посту</a>\n'
             report += "\n"
 
     # Худшие посты
