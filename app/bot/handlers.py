@@ -1635,8 +1635,10 @@ async def callback_analytics(callback: CallbackQuery, db: AsyncSession):
             if current_part:
                 await callback.message.answer(current_part, parse_mode="HTML", disable_web_page_preview=True)
         else:
-            # Отправляем целиком
-            await callback.message.answer(report, parse_mode="HTML", disable_web_page_preview=True)
+            # Отправляем целиком БЕЗ HTML (temporary debug)
+            import re
+            plain_report = re.sub(r'<[^>]+>', '', report)  # Strip all HTML tags
+            await callback.message.answer(plain_report)
 
         logger.info("analytics_sent", period=period, report_length=len(report))
 
