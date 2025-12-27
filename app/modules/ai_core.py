@@ -34,17 +34,22 @@ RANKING_SYSTEM_PROMPT = """Ты — эксперт по AI в бизнесе и 
 - Практикующие юристы
 
 Критерии оценки (по шкале 0-10):
-- Бизнес-ценность и ROI потенциал (30%)
+- Бизнес-ценность и ROI потенциал (25%)
 - Связь с юридическими/комплаенс аспектами (20%)
 - Новизна и актуальность (20%)
-- Практическая применимость (15%)
-- ПРИОРИТЕТ: Российский рынок и разработка ИИ (15%)
+- Практическая применимость (20%)
+- Российский рынок и разработка ИИ (15%)
 
 ВАЖНО - ПРИОРИТЕТЫ ПО РЕЛЕВАНТНОСТИ:
-- Российские новости, события в РФ, российские компании: +3 балла
+- Российские новости, события в РФ, российские компании: +2 балла
 - Разработка ИИ, AI engineering, ML engineering, создание AI-продуктов: +2 балла
-- Чисто зарубежные новости без связи с Россией: -2 балла
-- Общие новости об использовании AI без деталей разработки: -1 балл
+- Международные кейсы с применимостью к России: +1 балл
+- Разнообразные источники информации ценны для агрегации: не занижай оценку качественным зарубежным источникам
+
+ВАЖНО - ЦЕЛЬ АГРЕГАЦИИ:
+Наша задача — АГРЕГАЦИЯ НОВОСТЕЙ из разных источников для полной картины рынка AI.
+Оценивай объективно качество и ценность контента, не дискриминируй источники.
+Хорошая новость из зарубежного источника лучше, чем слабая новость из российского.
 
 Отвечай ТОЛЬКО числом от 0 до 10 без дополнительных пояснений."""
 
@@ -155,6 +160,29 @@ class AICore:
 
         logger.info("ranking_articles", count=len(articles))
 
+        # Получаем статистику источников за последние 7 дней для diversity boost
+        from datetime import timedelta
+        date_from = datetime.utcnow() - timedelta(days=7)
+
+        query_sources = text("""
+            SELECT ra.source_name, COUNT(*) as pub_count
+            FROM publications p
+            JOIN post_drafts pd ON p.draft_id = pd.id
+            JOIN raw_articles ra ON pd.article_id = ra.id
+            WHERE p.published_at >= :date_from
+            GROUP BY ra.source_name
+        """)
+        result_sources = await self.db.execute(query_sources, {"date_from": date_from})
+        source_counts = {row.source_name: row.pub_count for row in result_sources}
+
+        max_source_count = max(source_counts.values()) if source_counts else 0
+
+        logger.info(
+            "source_diversity_stats",
+            sources=source_counts,
+            max_count=max_source_count
+        )
+
         ranked_articles = []
 
         # Ранжируем каждую статью
@@ -181,23 +209,52 @@ class AICore:
 
                 # Парсим оценку
                 try:
-                    score = float(response.strip())
-                    score = max(0.0, min(10.0, score))  # Ограничиваем 0-10
+                    base_score = float(response.strip())
+                    base_score = max(0.0, min(10.0, base_score))  # Ограничиваем 0-10
                 except ValueError:
                     logger.warning(
                         "invalid_score",
                         article_id=article.id,
                         response=response
                     )
-                    score = 5.0  # Средняя оценка по умолчанию
+                    base_score = 5.0  # Средняя оценка по умолчанию
 
-                ranked_articles.append((article, score))
+                # Применяем diversity boost
+                # Источники, которые публиковались меньше, получают boost
+                source_pub_count = source_counts.get(article.source_name, 0)
+
+                # Diversity boost: чем меньше публикаций из источника, тем больше boost
+                # Источники с 0 публикаций: +1.5 балла
+                # Источники с публикациями ниже среднего: +0.5-1.0 балла
+                # Источники с публикациями выше среднего: -0.5 балла
+                if max_source_count > 0:
+                    avg_count = sum(source_counts.values()) / len(source_counts) if source_counts else 0
+
+                    if source_pub_count == 0:
+                        diversity_boost = 1.5
+                    elif source_pub_count < avg_count:
+                        diversity_boost = 1.0
+                    elif source_pub_count > max_source_count * 0.7:
+                        diversity_boost = -0.5
+                    else:
+                        diversity_boost = 0.0
+                else:
+                    # Нет статистики - нет boost
+                    diversity_boost = 0.0
+
+                final_score = max(0.0, min(10.0, base_score + diversity_boost))
+
+                ranked_articles.append((article, final_score))
 
                 logger.info(
                     "article_ranked",
                     article_id=article.id,
                     title=article.title[:50],
-                    score=score
+                    source=article.source_name,
+                    base_score=base_score,
+                    diversity_boost=diversity_boost,
+                    final_score=final_score,
+                    source_pub_count=source_pub_count
                 )
 
                 # Rate limiting

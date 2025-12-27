@@ -53,6 +53,25 @@ class AnalyticsService:
             result_pubs = await self.db.execute(query_pubs, {"date_from": date_from})
             total_pubs = result_pubs.scalar() or 0
 
+            # Количество публикаций с реакциями (для engagement rate)
+            query_engaged = text("""
+                SELECT COUNT(*) as engaged_publications
+                FROM publications
+                WHERE published_at >= :date_from
+                AND (
+                    COALESCE((reactions->>'useful')::int, 0) +
+                    COALESCE((reactions->>'important')::int, 0) +
+                    COALESCE((reactions->>'controversial')::int, 0) +
+                    COALESCE((reactions->>'banal')::int, 0) +
+                    COALESCE((reactions->>'obvious')::int, 0) +
+                    COALESCE((reactions->>'poor_quality')::int, 0) +
+                    COALESCE((reactions->>'low_content_quality')::int, 0) +
+                    COALESCE((reactions->>'bad_source')::int, 0)
+                ) > 0
+            """)
+            result_engaged = await self.db.execute(query_engaged, {"date_from": date_from})
+            engaged_pubs = result_engaged.scalar() or 0
+
             # Количество драфтов (одобренных и отклоненных)
             query_drafts = text("""
                 SELECT
@@ -77,7 +96,9 @@ class AnalyticsService:
                     SUM(COALESCE((reactions->>'controversial')::int, 0)) as controversial,
                     SUM(COALESCE((reactions->>'banal')::int, 0)) as banal,
                     SUM(COALESCE((reactions->>'obvious')::int, 0)) as obvious,
-                    SUM(COALESCE((reactions->>'poor_quality')::int, 0)) as poor_quality
+                    SUM(COALESCE((reactions->>'poor_quality')::int, 0)) as poor_quality,
+                    SUM(COALESCE((reactions->>'low_content_quality')::int, 0)) as low_content_quality,
+                    SUM(COALESCE((reactions->>'bad_source')::int, 0)) as bad_source
                 FROM publications
                 WHERE published_at >= :date_from
             """)
@@ -90,7 +111,9 @@ class AnalyticsService:
                 "controversial": reactions_row.controversial or 0,
                 "banal": reactions_row.banal or 0,
                 "obvious": reactions_row.obvious or 0,
-                "poor_quality": reactions_row.poor_quality or 0
+                "poor_quality": reactions_row.poor_quality or 0,
+                "low_content_quality": reactions_row.low_content_quality or 0,
+                "bad_source": reactions_row.bad_source or 0
             }
 
             total_reactions = sum(reactions.values())
@@ -104,13 +127,17 @@ class AnalyticsService:
                             COALESCE((reactions->>'important')::int, 0) -
                             COALESCE((reactions->>'banal')::int, 0) -
                             COALESCE((reactions->>'obvious')::int, 0) -
-                            COALESCE((reactions->>'poor_quality')::int, 0)
+                            COALESCE((reactions->>'poor_quality')::int, 0) -
+                            COALESCE((reactions->>'low_content_quality')::int, 0) -
+                            COALESCE((reactions->>'bad_source')::int, 0)
                         )::float / NULLIF(
                             COALESCE((reactions->>'useful')::int, 0) +
                             COALESCE((reactions->>'important')::int, 0) +
                             COALESCE((reactions->>'banal')::int, 0) +
                             COALESCE((reactions->>'obvious')::int, 0) +
                             COALESCE((reactions->>'poor_quality')::int, 0) +
+                            COALESCE((reactions->>'low_content_quality')::int, 0) +
+                            COALESCE((reactions->>'bad_source')::int, 0) +
                             COALESCE((reactions->>'controversial')::int, 0),
                             0
                         )
@@ -123,6 +150,8 @@ class AnalyticsService:
                         COALESCE((reactions->>'banal')::int, 0) +
                         COALESCE((reactions->>'obvious')::int, 0) +
                         COALESCE((reactions->>'poor_quality')::int, 0) +
+                        COALESCE((reactions->>'low_content_quality')::int, 0) +
+                        COALESCE((reactions->>'bad_source')::int, 0) +
                         COALESCE((reactions->>'controversial')::int, 0)
                     ) > 0
                 """)
@@ -131,9 +160,14 @@ class AnalyticsService:
             else:
                 avg_quality_score = 0.0
 
+            # Рассчитываем engagement rate
+            engagement_rate = (engaged_pubs / total_pubs * 100) if total_pubs > 0 else 0
+
             return {
                 "period_days": days,
                 "total_publications": total_pubs,
+                "engaged_publications": engaged_pubs,
+                "engagement_rate": round(engagement_rate, 1),
                 "total_drafts": total_drafts,
                 "approved_drafts": approved_drafts,
                 "rejected_drafts": rejected_drafts,
@@ -534,3 +568,96 @@ class AnalyticsService:
         except Exception as e:
             logger.error("get_vector_db_stats_error", error=str(e))
             return None
+
+    async def get_source_recommendations(self, days: int = 30) -> List[Dict]:
+        """
+        Получить рекомендации по источникам (какие стоит отключить).
+
+        Args:
+            days: Количество дней для анализа
+
+        Returns:
+            Список источников с рекомендациями
+        """
+        try:
+            date_from = datetime.utcnow() - timedelta(days=days)
+
+            # Находим источники с низким качеством
+            query = text("""
+                SELECT
+                    ra.source_name,
+                    COUNT(p.id) as total_publications,
+                    AVG(
+                        (
+                            COALESCE((p.reactions->>'useful')::int, 0) +
+                            COALESCE((p.reactions->>'important')::int, 0) -
+                            COALESCE((p.reactions->>'banal')::int, 0) -
+                            COALESCE((p.reactions->>'obvious')::int, 0) -
+                            COALESCE((p.reactions->>'poor_quality')::int, 0) -
+                            COALESCE((p.reactions->>'low_content_quality')::int, 0) -
+                            COALESCE((p.reactions->>'bad_source')::int, 0)
+                        )::float / NULLIF(
+                            COALESCE((p.reactions->>'useful')::int, 0) +
+                            COALESCE((p.reactions->>'important')::int, 0) +
+                            COALESCE((p.reactions->>'banal')::int, 0) +
+                            COALESCE((p.reactions->>'obvious')::int, 0) +
+                            COALESCE((p.reactions->>'poor_quality')::int, 0) +
+                            COALESCE((p.reactions->>'low_content_quality')::int, 0) +
+                            COALESCE((p.reactions->>'bad_source')::int, 0) +
+                            COALESCE((p.reactions->>'controversial')::int, 0),
+                            0
+                        )
+                    ) as avg_quality_score,
+                    SUM(COALESCE((p.reactions->>'bad_source')::int, 0)) as bad_source_reactions,
+                    SUM(COALESCE((p.reactions->>'low_content_quality')::int, 0)) as low_quality_reactions
+                FROM publications p
+                JOIN post_drafts pd ON p.draft_id = pd.id
+                JOIN raw_articles ra ON pd.article_id = ra.id
+                WHERE p.published_at >= :date_from
+                GROUP BY ra.source_name
+                HAVING COUNT(p.id) >= 2
+            """)
+
+            result = await self.db.execute(query, {"date_from": date_from})
+
+            recommendations = []
+            for row in result.fetchall():
+                avg_score = row.avg_quality_score or 0.0
+                bad_source_count = row.bad_source_reactions or 0
+                low_quality_count = row.low_quality_reactions or 0
+                total_pubs = row.total_publications
+
+                # Определяем рекомендацию
+                recommendation = None
+                severity = None
+
+                if avg_score < -0.4 and bad_source_count >= 2:
+                    recommendation = "🚫 ОТКЛЮЧИТЬ: Ненадежный источник с низким качеством информации"
+                    severity = "critical"
+                elif avg_score < -0.3 and (bad_source_count >= 1 or low_quality_count >= 2):
+                    recommendation = "⚠️ ПРОВЕРИТЬ: Источник с проблемами качества"
+                    severity = "warning"
+                elif avg_score < 0.0 and total_pubs >= 5:
+                    recommendation = "💡 ПЕРЕСМОТРЕТЬ: Источник с отрицательными реакциями"
+                    severity = "info"
+
+                if recommendation:
+                    recommendations.append({
+                        "source_name": row.source_name,
+                        "total_publications": total_pubs,
+                        "avg_quality_score": round(avg_score, 2),
+                        "bad_source_reactions": bad_source_count,
+                        "low_quality_reactions": low_quality_count,
+                        "recommendation": recommendation,
+                        "severity": severity
+                    })
+
+            # Сортировка по серьезности (critical > warning > info)
+            severity_order = {"critical": 0, "warning": 1, "info": 2}
+            recommendations.sort(key=lambda x: (severity_order.get(x["severity"], 999), x["avg_quality_score"]))
+
+            return recommendations
+
+        except Exception as e:
+            logger.error("get_source_recommendations_error", error=str(e), days=days)
+            return []

@@ -184,7 +184,9 @@ class VectorSearch:
         negative = (
             reactions.get("banal", 0) +
             reactions.get("obvious", 0) +
-            reactions.get("poor_quality", 0)
+            reactions.get("poor_quality", 0) +
+            reactions.get("low_content_quality", 0) +
+            reactions.get("bad_source", 0)
         )
 
         # Нейтральные
@@ -198,6 +200,43 @@ class VectorSearch:
         # Балл: (+1 за позитивные, -1 за негативные, 0 за нейтральные) / total
         score = (positive - negative) / total
         return max(-1.0, min(1.0, score))
+
+    def update_quality_score(self, pub_id: int, reactions: Dict):
+        """
+        Обновить quality_score для публикации в векторной БД.
+
+        Args:
+            pub_id: ID публикации
+            reactions: Новый словарь реакций
+        """
+        try:
+            # Рассчитываем новый quality score
+            quality_score = self._calculate_quality_score(reactions)
+
+            # Обновляем payload в Qdrant
+            self.client.set_payload(
+                collection_name=self.COLLECTION_NAME,
+                payload={
+                    "reactions": reactions,
+                    "quality_score": quality_score
+                },
+                points=[pub_id]
+            )
+
+            logger.info(
+                "quality_score_updated",
+                pub_id=pub_id,
+                quality_score=quality_score,
+                total_reactions=sum(reactions.values()) if reactions else 0
+            )
+
+        except Exception as e:
+            logger.error(
+                "update_quality_score_error",
+                pub_id=pub_id,
+                error=str(e)
+            )
+            # Не падаем - обновление не критично
 
     async def find_similar(
         self,

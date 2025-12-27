@@ -112,6 +112,7 @@ class Settings(BaseSettings):
     perplexity_model: str = Field(default="sonar")
     perplexity_max_tokens: int = Field(default=3500)
     perplexity_temperature: float = Field(default=0.7)
+    perplexity_search_enabled: bool = Field(default=True)  # Включить real-time поиск новостей через Perplexity
 
     # LLM Provider Selection
     default_llm_provider: str = Field(default="perplexity")  # openai or perplexity

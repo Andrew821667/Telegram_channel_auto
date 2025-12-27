@@ -1264,18 +1264,19 @@ async def reject_draft(
 @router.callback_query(F.data.startswith("opinion:"))
 async def callback_opinion(callback: CallbackQuery, db: AsyncSession):
     """
-    Показать клавиатуру для выбора мнения о посте.
+    Показать клавиатуру для выбора мнения о посте (редактирует клавиатуру под постом).
     """
     try:
         # Извлекаем post_id из callback_data
         post_id = int(callback.data.split(":")[1])
 
-        # Показываем опции для выражения мнения
-        await callback.answer()
-        await callback.message.answer(
-            "📊 Выберите ваше мнение о посте:",
+        # Редактируем клавиатуру под постом (не создаем новое сообщение!)
+        await callback.message.edit_reply_markup(
             reply_markup=get_opinion_keyboard(post_id)
         )
+
+        # Показываем уведомление (не alert, просто тост)
+        await callback.answer("📊 Выберите вашу реакцию ⬇️")
 
     except Exception as e:
         logger.error("opinion_callback_error", error=str(e))
@@ -1291,7 +1292,7 @@ async def callback_react(callback: CallbackQuery, db: AsyncSession):
         # Извлекаем данные из callback_data: react:post_id:reaction_type
         parts = callback.data.split(":")
         post_id = int(parts[1])
-        reaction_type = parts[2]  # useful, important, controversial
+        reaction_type = parts[2]
 
         # Получаем публикацию
         result = await db.execute(
@@ -1315,28 +1316,67 @@ async def callback_react(callback: CallbackQuery, db: AsyncSession):
         publication.reactions = reactions
         await db.commit()
 
-        # Формируем ответное сообщение
+        # Обновляем quality_score в Qdrant (асинхронно, не блокирует)
+        try:
+            from app.modules.vector_search import get_vector_search
+            vector_search = get_vector_search()
+            vector_search.update_quality_score(publication.id, reactions)
+        except Exception as e:
+            logger.error("qdrant_update_error", error=str(e), pub_id=publication.id)
+            # Продолжаем работу даже если Qdrant недоступен
+
+        # Полный словарь всех реакций
         reaction_emoji = {
             "useful": "👍",
             "important": "🔥",
-            "controversial": "🤔"
+            "controversial": "🤔",
+            "banal": "💤",
+            "obvious": "🤷",
+            "poor_quality": "👎",
+            "low_content_quality": "📉",
+            "bad_source": "📰"
         }
         reaction_text = {
             "useful": "Полезно",
             "important": "Важно",
-            "controversial": "Спорно"
+            "controversial": "Спорно",
+            "banal": "Банальщина",
+            "obvious": "Очевидный вывод",
+            "poor_quality": "Плохое качество",
+            "low_content_quality": "Низкое качество контента",
+            "bad_source": "Плохой источник"
         }
 
         emoji = reaction_emoji.get(reaction_type, "👍")
         text = reaction_text.get(reaction_type, "")
 
-        await callback.answer(f"{emoji} Спасибо за ваше мнение: {text}!", show_alert=True)
-
-        # Удаляем сообщение с кнопками
+        # Возвращаем исходную клавиатуру "Ваше мнение"
         try:
-            await callback.message.delete()
-        except Exception:
-            pass  # Игнорируем ошибки удаления
+            # Получаем article URL для клавиатуры
+            draft_result = await db.execute(
+                select(PostDraft).where(PostDraft.id == post_id)
+            )
+            draft = draft_result.scalar_one_or_none()
+
+            if draft and draft.article_id:
+                article_result = await db.execute(
+                    select(RawArticle).where(RawArticle.id == draft.article_id)
+                )
+                article = article_result.scalar_one_or_none()
+
+                # Возвращаем клавиатуру к исходному виду
+                await callback.message.edit_reply_markup(
+                    reply_markup=get_reader_keyboard(
+                        article.url if article else "",
+                        post_id=post_id
+                    )
+                )
+        except Exception as edit_error:
+            logger.warning("keyboard_restore_error", error=str(edit_error))
+            # Не критично, продолжаем
+
+        # Показываем благодарность
+        await callback.answer(f"{emoji} Спасибо за ваше мнение: {text}!", show_alert=True)
 
         logger.info(
             "user_reaction_recorded",
@@ -1392,7 +1432,8 @@ def format_analytics_report(
     worst_posts: List[Dict],
     sources: List[Dict],
     weekday_stats: Dict,
-    vector_stats: Optional[Dict]
+    vector_stats: Optional[Dict],
+    source_recommendations: Optional[List[Dict]] = None
 ) -> str:
     """
     Форматировать красивый отчёт аналитики.
@@ -1427,10 +1468,14 @@ def format_analytics_report(
 ├─ 🤔 Спорно: {stats['reactions']['controversial']} ({stats['reactions']['controversial']/max(stats['total_reactions'],1)*100:.0f}%)
 ├─ 💤 Банальщина: {stats['reactions']['banal']} ({stats['reactions']['banal']/max(stats['total_reactions'],1)*100:.0f}%)
 ├─ 🤷 Очевидно: {stats['reactions']['obvious']} ({stats['reactions']['obvious']/max(stats['total_reactions'],1)*100:.0f}%)
-└─ 👎 Плохое: {stats['reactions']['poor_quality']} ({stats['reactions']['poor_quality']/max(stats['total_reactions'],1)*100:.0f}%)
+├─ 👎 Плохое: {stats['reactions']['poor_quality']} ({stats['reactions']['poor_quality']/max(stats['total_reactions'],1)*100:.0f}%)
+├─ 📉 Низкое качество: {stats['reactions']['low_content_quality']} ({stats['reactions']['low_content_quality']/max(stats['total_reactions'],1)*100:.0f}%)
+└─ 📰 Плохой источник: {stats['reactions']['bad_source']} ({stats['reactions']['bad_source']/max(stats['total_reactions'],1)*100:.0f}%)
 
 <b>Engagement:</b>
-└─ 📊 Всего реакций: {stats['total_reactions']}
+├─ 📊 Всего реакций: {stats['total_reactions']}
+├─ 💬 Постов с реакциями: {stats['engaged_publications']} из {stats['total_publications']}
+└─ 🎯 Engagement rate: {stats['engagement_rate']}%
 """
 
     # Топ посты
@@ -1476,6 +1521,10 @@ def format_analytics_report(
                 report += "   ⚠️ Проблема: Очевидные выводы\n"
             elif reactions.get('poor_quality', 0) > 0:
                 report += "   ⚠️ Проблема: Низкое качество контента\n"
+            elif reactions.get('low_content_quality', 0) > 0:
+                report += "   ⚠️ Проблема: Плохая подача материала\n"
+            elif reactions.get('bad_source', 0) > 0:
+                report += "   ⚠️ Проблема: Ненадежный или некачественный источник\n"
 
             report += "\n"
 
@@ -1540,6 +1589,24 @@ def format_analytics_report(
         report += f"├─ ⚖️ Нейтральных: {vector_stats['neutral_examples']}\n"
         report += f"└─ 📊 Avg score всей базы: {vector_stats['avg_quality_score']}\n"
 
+    # Рекомендации по источникам
+    if source_recommendations:
+        report += "\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        report += "⚡ <b>Рекомендации по источникам:</b>\n\n"
+
+        for rec in source_recommendations[:5]:  # Показываем топ-5
+            source_name_escaped = html.escape(rec["source_name"])
+            report += f"<b>{source_name_escaped}</b>\n"
+            report += f"   {rec['recommendation']}\n"
+            report += f"   ├─ Публикаций: {rec['total_publications']}\n"
+            report += f"   ├─ Avg quality: {rec['avg_quality_score']}\n"
+            report += f"   ├─ Реакций 'Плохой источник': {rec['bad_source_reactions']}\n"
+            report += f"   └─ Реакций 'Низкое качество': {rec['low_quality_reactions']}\n"
+            report += "\n"
+
+        if not source_recommendations:
+            report += "✅ Все источники работают хорошо!\n"
+
     report += "\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
     report += f"📅 Обновлено: {datetime.now().strftime('%d.%m.%Y %H:%M')}\n"
 
@@ -1600,6 +1667,7 @@ async def callback_analytics(callback: CallbackQuery, db: AsyncSession):
         sources = await analytics.get_source_stats(days)
         weekday_stats = await analytics.get_weekday_stats(min(days, 30))  # Максимум 30 дней для статистики по дням
         vector_stats = await analytics.get_vector_db_stats()
+        source_recommendations = await analytics.get_source_recommendations(min(days, 30))
 
         # Форматируем отчёт
         report = format_analytics_report(
@@ -1608,7 +1676,8 @@ async def callback_analytics(callback: CallbackQuery, db: AsyncSession):
             worst_posts=worst_posts,
             sources=sources,
             weekday_stats=weekday_stats,
-            vector_stats=vector_stats
+            vector_stats=vector_stats,
+            source_recommendations=source_recommendations
         )
 
 

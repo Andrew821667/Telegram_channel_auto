@@ -257,6 +257,18 @@ def get_opinion_keyboard(post_id: int) -> InlineKeyboardMarkup:
             callback_data=f"react:{post_id}:poor_quality"
         )
     )
+    builder.row(
+        InlineKeyboardButton(
+            text="📉 Низкое качество контента",
+            callback_data=f"react:{post_id}:low_content_quality"
+        )
+    )
+    builder.row(
+        InlineKeyboardButton(
+            text="📰 Плохой источник",
+            callback_data=f"react:{post_id}:bad_source"
+        )
+    )
 
     return builder.as_markup()
 
