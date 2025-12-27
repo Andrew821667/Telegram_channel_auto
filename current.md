@@ -956,14 +956,24 @@ docker compose build --no-cache bot
 - `b8b5676` - feat: Add analytics dashboard with comprehensive metrics
 - `8d30b21` - fix: Fix SQL queries in analytics - add proper JOINs for title/content/source_name
 - `cae852c` - fix: Add HTML escaping for analytics report to prevent parsing errors
+- `c27d100` - fix: Use double quotes in HTML href attribute for Telegram compatibility
+- `f1235db` - fix: Escape < and > HTML entities in Qdrant stats to prevent parsing errors
 
 #### Результат:
-✅ **Полностью работающий Analytics Dashboard:**
+✅ **Полностью работающий Analytics Dashboard с красивым форматированием:**
 - Comprehensive метрики по всем аспектам канала
 - Data-driven инсайты для принятия решений
 - Понимание что работает, что не работает
 - Автоматическое определение лучших практик
 - Фундамент для оптимизации контента
+- Красивое HTML форматирование с emoji и ссылками на посты
+- Выбор периода (7/30 дней, всё время)
+
+**Исправленные проблемы:**
+- ✅ SQL JOIN для доступа к title/content/source_name из связанных таблиц
+- ✅ HTML escaping для динамических данных (заголовки, источники)
+- ✅ Двойные кавычки в атрибутах ссылок (Telegram требование)
+- ✅ Экранирование `<` и `>` в тексте (score &lt; -0.3)
 
 #### Следующие шаги (Этап 2):
 - Тестирование dashboard на реальных данных
