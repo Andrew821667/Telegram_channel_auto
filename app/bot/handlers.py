@@ -1264,18 +1264,19 @@ async def reject_draft(
 @router.callback_query(F.data.startswith("opinion:"))
 async def callback_opinion(callback: CallbackQuery, db: AsyncSession):
     """
-    Показать клавиатуру для выбора мнения о посте.
+    Показать клавиатуру для выбора мнения о посте (редактирует клавиатуру под постом).
     """
     try:
         # Извлекаем post_id из callback_data
         post_id = int(callback.data.split(":")[1])
 
-        # Показываем опции для выражения мнения
-        await callback.answer()
-        await callback.message.answer(
-            "📊 Выберите ваше мнение о посте:",
+        # Редактируем клавиатуру под постом (не создаем новое сообщение!)
+        await callback.message.edit_reply_markup(
             reply_markup=get_opinion_keyboard(post_id)
         )
+
+        # Показываем уведомление (не alert, просто тост)
+        await callback.answer("📊 Выберите вашу реакцию ⬇️")
 
     except Exception as e:
         logger.error("opinion_callback_error", error=str(e))
@@ -1291,7 +1292,7 @@ async def callback_react(callback: CallbackQuery, db: AsyncSession):
         # Извлекаем данные из callback_data: react:post_id:reaction_type
         parts = callback.data.split(":")
         post_id = int(parts[1])
-        reaction_type = parts[2]  # useful, important, controversial
+        reaction_type = parts[2]
 
         # Получаем публикацию
         result = await db.execute(
@@ -1315,7 +1316,7 @@ async def callback_react(callback: CallbackQuery, db: AsyncSession):
         publication.reactions = reactions
         await db.commit()
 
-        # Обновляем quality_score в Qdrant
+        # Обновляем quality_score в Qdrant (асинхронно, не блокирует)
         try:
             from app.modules.vector_search import get_vector_search
             vector_search = get_vector_search()
@@ -1324,28 +1325,58 @@ async def callback_react(callback: CallbackQuery, db: AsyncSession):
             logger.error("qdrant_update_error", error=str(e), pub_id=publication.id)
             # Продолжаем работу даже если Qdrant недоступен
 
-        # Формируем ответное сообщение
+        # Полный словарь всех реакций
         reaction_emoji = {
             "useful": "👍",
             "important": "🔥",
-            "controversial": "🤔"
+            "controversial": "🤔",
+            "banal": "💤",
+            "obvious": "🤷",
+            "poor_quality": "👎",
+            "low_content_quality": "📉",
+            "bad_source": "📰"
         }
         reaction_text = {
             "useful": "Полезно",
             "important": "Важно",
-            "controversial": "Спорно"
+            "controversial": "Спорно",
+            "banal": "Банальщина",
+            "obvious": "Очевидный вывод",
+            "poor_quality": "Плохое качество",
+            "low_content_quality": "Низкое качество контента",
+            "bad_source": "Плохой источник"
         }
 
         emoji = reaction_emoji.get(reaction_type, "👍")
         text = reaction_text.get(reaction_type, "")
 
-        await callback.answer(f"{emoji} Спасибо за ваше мнение: {text}!", show_alert=True)
-
-        # Удаляем сообщение с кнопками
+        # Возвращаем исходную клавиатуру "Ваше мнение"
         try:
-            await callback.message.delete()
-        except Exception:
-            pass  # Игнорируем ошибки удаления
+            # Получаем article URL для клавиатуры
+            draft_result = await db.execute(
+                select(PostDraft).where(PostDraft.id == post_id)
+            )
+            draft = draft_result.scalar_one_or_none()
+
+            if draft and draft.article_id:
+                article_result = await db.execute(
+                    select(RawArticle).where(RawArticle.id == draft.article_id)
+                )
+                article = article_result.scalar_one_or_none()
+
+                # Возвращаем клавиатуру к исходному виду
+                await callback.message.edit_reply_markup(
+                    reply_markup=get_reader_keyboard(
+                        article.url if article else "",
+                        post_id=post_id
+                    )
+                )
+        except Exception as edit_error:
+            logger.warning("keyboard_restore_error", error=str(edit_error))
+            # Не критично, продолжаем
+
+        # Показываем благодарность
+        await callback.answer(f"{emoji} Спасибо за ваше мнение: {text}!", show_alert=True)
 
         logger.info(
             "user_reaction_recorded",
