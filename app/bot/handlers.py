@@ -1315,6 +1315,15 @@ async def callback_react(callback: CallbackQuery, db: AsyncSession):
         publication.reactions = reactions
         await db.commit()
 
+        # Обновляем quality_score в Qdrant
+        try:
+            from app.modules.vector_search import get_vector_search
+            vector_search = get_vector_search()
+            vector_search.update_quality_score(publication.id, reactions)
+        except Exception as e:
+            logger.error("qdrant_update_error", error=str(e), pub_id=publication.id)
+            # Продолжаем работу даже если Qdrant недоступен
+
         # Формируем ответное сообщение
         reaction_emoji = {
             "useful": "👍",
@@ -1392,7 +1401,8 @@ def format_analytics_report(
     worst_posts: List[Dict],
     sources: List[Dict],
     weekday_stats: Dict,
-    vector_stats: Optional[Dict]
+    vector_stats: Optional[Dict],
+    source_recommendations: Optional[List[Dict]] = None
 ) -> str:
     """
     Форматировать красивый отчёт аналитики.
@@ -1427,10 +1437,14 @@ def format_analytics_report(
 ├─ 🤔 Спорно: {stats['reactions']['controversial']} ({stats['reactions']['controversial']/max(stats['total_reactions'],1)*100:.0f}%)
 ├─ 💤 Банальщина: {stats['reactions']['banal']} ({stats['reactions']['banal']/max(stats['total_reactions'],1)*100:.0f}%)
 ├─ 🤷 Очевидно: {stats['reactions']['obvious']} ({stats['reactions']['obvious']/max(stats['total_reactions'],1)*100:.0f}%)
-└─ 👎 Плохое: {stats['reactions']['poor_quality']} ({stats['reactions']['poor_quality']/max(stats['total_reactions'],1)*100:.0f}%)
+├─ 👎 Плохое: {stats['reactions']['poor_quality']} ({stats['reactions']['poor_quality']/max(stats['total_reactions'],1)*100:.0f}%)
+├─ 📉 Низкое качество: {stats['reactions']['low_content_quality']} ({stats['reactions']['low_content_quality']/max(stats['total_reactions'],1)*100:.0f}%)
+└─ 📰 Плохой источник: {stats['reactions']['bad_source']} ({stats['reactions']['bad_source']/max(stats['total_reactions'],1)*100:.0f}%)
 
 <b>Engagement:</b>
-└─ 📊 Всего реакций: {stats['total_reactions']}
+├─ 📊 Всего реакций: {stats['total_reactions']}
+├─ 💬 Постов с реакциями: {stats['engaged_publications']} из {stats['total_publications']}
+└─ 🎯 Engagement rate: {stats['engagement_rate']}%
 """
 
     # Топ посты
@@ -1476,6 +1490,10 @@ def format_analytics_report(
                 report += "   ⚠️ Проблема: Очевидные выводы\n"
             elif reactions.get('poor_quality', 0) > 0:
                 report += "   ⚠️ Проблема: Низкое качество контента\n"
+            elif reactions.get('low_content_quality', 0) > 0:
+                report += "   ⚠️ Проблема: Плохая подача материала\n"
+            elif reactions.get('bad_source', 0) > 0:
+                report += "   ⚠️ Проблема: Ненадежный или некачественный источник\n"
 
             report += "\n"
 
@@ -1540,6 +1558,24 @@ def format_analytics_report(
         report += f"├─ ⚖️ Нейтральных: {vector_stats['neutral_examples']}\n"
         report += f"└─ 📊 Avg score всей базы: {vector_stats['avg_quality_score']}\n"
 
+    # Рекомендации по источникам
+    if source_recommendations:
+        report += "\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        report += "⚡ <b>Рекомендации по источникам:</b>\n\n"
+
+        for rec in source_recommendations[:5]:  # Показываем топ-5
+            source_name_escaped = html.escape(rec["source_name"])
+            report += f"<b>{source_name_escaped}</b>\n"
+            report += f"   {rec['recommendation']}\n"
+            report += f"   ├─ Публикаций: {rec['total_publications']}\n"
+            report += f"   ├─ Avg quality: {rec['avg_quality_score']}\n"
+            report += f"   ├─ Реакций 'Плохой источник': {rec['bad_source_reactions']}\n"
+            report += f"   └─ Реакций 'Низкое качество': {rec['low_quality_reactions']}\n"
+            report += "\n"
+
+        if not source_recommendations:
+            report += "✅ Все источники работают хорошо!\n"
+
     report += "\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
     report += f"📅 Обновлено: {datetime.now().strftime('%d.%m.%Y %H:%M')}\n"
 
@@ -1600,6 +1636,7 @@ async def callback_analytics(callback: CallbackQuery, db: AsyncSession):
         sources = await analytics.get_source_stats(days)
         weekday_stats = await analytics.get_weekday_stats(min(days, 30))  # Максимум 30 дней для статистики по дням
         vector_stats = await analytics.get_vector_db_stats()
+        source_recommendations = await analytics.get_source_recommendations(min(days, 30))
 
         # Форматируем отчёт
         report = format_analytics_report(
@@ -1608,7 +1645,8 @@ async def callback_analytics(callback: CallbackQuery, db: AsyncSession):
             worst_posts=worst_posts,
             sources=sources,
             weekday_stats=weekday_stats,
-            vector_stats=vector_stats
+            vector_stats=vector_stats,
+            source_recommendations=source_recommendations
         )
 
 
