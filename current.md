@@ -34,6 +34,14 @@
 - [x] Сохранение в PostgreSQL (таблица raw_articles)
 - [x] Соблюдение robots.txt и rate limiting
 - [x] Поддержка дополнительных RSS источников
+- [x] **НОВОЕ:** Интеграция 7 дополнительных источников (100% бесплатные):
+  - ✅ Perplexity AI Real-Time Search (RU + EN)
+  - ✅ Hacker News API (tech community)
+  - ✅ Reddit API (r/MachineLearning, r/artificial, r/LegalTech)
+  - ✅ ArXiv API (cs.AI, cs.LG - научные публикации)
+  - ✅ Medium RSS (artificial-intelligence, machine-learning)
+  - ✅ 5 Российских RSS (Lenta.ru, RBC, Interfax, TASS, Habr)
+  - ✅ Telegram Channels via Telethon (настраивается отдельно)
 
 #### ✅ Модуль 2: Фильтр (Cleaner)
 - [x] Реализация cleaner.py
@@ -982,6 +990,104 @@ docker compose build --no-cache bot
 - A/B тестирование (время публикации, форматы)
 
 **Ветка:** `claude/bot-channel-development-lCoIU`
+
+---
+
+## 📰 Источники новостей (обновлено 2025-12-27)
+
+### Активные источники (8 типов, ~150 статей/день):
+
+#### 1. **Google News RSS** (базовый)
+- Русский канал: AI + право/бизнес/комплаенс
+- Английский канал: AI + law/legal/compliance
+- ~15 статей/день
+- ✅ Бесплатно
+
+#### 2. **Perplexity AI Real-Time Search** 🆕
+- Real-time web поиск через Perplexity AI
+- Русский + английский
+- Structured JSON output
+- ~20 статей/день
+- ⚠️ Требует API ключ (~$5-10/мес)
+
+#### 3. **Hacker News API** 🆕
+- Топ tech stories с AI/legal keywords
+- Community-curated content
+- Дискуссии экспертов
+- ~10 статей/день
+- ✅ Бесплатно, без API ключа
+
+#### 4. **Reddit API** 🆕
+- Subreddits: r/MachineLearning, r/artificial, r/LegalTech
+- JSON API без OAuth
+- Upvotes + количество комментариев
+- ~30 постов/день (10 на subreddit)
+- ✅ Бесплатно
+
+#### 5. **ArXiv API** 🆕
+- Научные публикации: cs.AI, cs.LG
+- Последние исследования по AI/ML
+- Авторы + аннотации
+- ~10 статей/день
+- ✅ Бесплатно, открытый доступ
+
+#### 6. **Medium RSS** 🆕
+- Теги: artificial-intelligence, machine-learning
+- Экспертные статьи
+- ~20 статей/день
+- ✅ Бесплатно через RSS
+
+#### 7. **Российские RSS источники** 🆕
+- Lenta.ru - Технологии (quality: 0.7)
+- RBC - Технологии (quality: 0.8)
+- Interfax - Наука и технологии (quality: 0.75)
+- TASS - Наука и технологии (quality: 0.75)
+- Habr - Новости (quality: 0.6)
+- ~15 статей/день
+- ✅ Бесплатно
+
+#### 8. **Telegram Channels** 🆕 (опционально)
+- Публичные каналы через Telethon
+- ai_newz, data_science_etc, ai_machinelearning_big_data
+- ~30 сообщений/день
+- ✅ Бесплатно
+- ⚠️ Требует настройку Telegram API (см. TELEGRAM_SETUP.md)
+
+### Итого:
+**~150+ статей в день из разнообразных источников**
+- 7 источников активны по умолчанию
+- Telegram Channels - опционально (требует авторизацию)
+- Все бесплатные (кроме Perplexity - опционально)
+
+### Настройка источников (.env):
+
+```bash
+# Управление источниками
+HACKERNEWS_ENABLED=true
+REDDIT_ENABLED=true
+REDDIT_SUBREDDITS=MachineLearning,artificial,LegalTech
+
+ARXIV_ENABLED=true
+ARXIV_CATEGORIES=cs.AI,cs.LG
+
+MEDIUM_ENABLED=true
+MEDIUM_TAGS=artificial-intelligence,machine-learning
+
+# Perplexity (опционально)
+PERPLEXITY_SEARCH_ENABLED=true
+PERPLEXITY_API_KEY=your_key_here
+
+# Telegram Channels (опционально, требует настройку)
+TELEGRAM_CHANNELS_ENABLED=false  # Включите после авторизации
+TELEGRAM_API_ID=your_api_id
+TELEGRAM_API_HASH=your_api_hash
+TELEGRAM_CHANNELS=ai_newz,data_science_etc,ai_machinelearning_big_data
+```
+
+### Документация:
+- **TELEGRAM_SETUP.md** - подробный гайд по настройке Telegram Channels
+- **scripts/telegram_auth.py** - скрипт для авторизации
+- **migrations/add_russian_news_sources.sql** - SQL для российских источников
 
 ---
 
