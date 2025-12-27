@@ -373,6 +373,138 @@ class NewsFetcher:
                 logger.warning("date_parse_error", date_str=date_str)
                 return None
 
+    async def fetch_perplexity_news(self, lang: str = "ru") -> List[Dict[str, Any]]:
+        """
+        Получить новости через Perplexity AI real-time search.
+
+        Args:
+            lang: Язык новостей (ru или en)
+
+        Returns:
+            Список словарей с новостями
+        """
+        articles = []
+
+        # Определяем запрос в зависимости от языка
+        if lang == "ru":
+            query = settings.google_news_query_ru.replace(" AND ", " ")
+            search_prompt = f"""Найди последние новости (за последние 24 часа) по запросу: {query}
+
+Верни результаты в формате JSON массива, где каждый элемент содержит:
+- title: заголовок новости
+- content: краткое содержание (2-3 предложения)
+- url: ссылка на источник
+- source_name: название источника
+- published_at: дата публикации в формате ISO 8601
+
+Ищи только актуальные новости. Верни максимум 10 новостей."""
+        else:
+            query = settings.google_news_query_en.replace(" AND ", " ")
+            search_prompt = f"""Find latest news (from last 24 hours) for query: {query}
+
+Return results as JSON array where each element contains:
+- title: news headline
+- content: brief summary (2-3 sentences)
+- url: source link
+- source_name: source name
+- published_at: publication date in ISO 8601 format
+
+Search only for recent news. Return maximum 10 articles."""
+
+        logger.info("fetching_perplexity_news", lang=lang)
+
+        try:
+            # Используем LLM provider для Perplexity
+            from app.modules.llm_provider import get_llm_provider
+
+            llm = get_llm_provider("perplexity")
+
+            # Делаем запрос к Perplexity с real-time search
+            response = await llm.generate_completion(
+                messages=[
+                    {"role": "system", "content": "You are a news aggregator assistant. Always return valid JSON."},
+                    {"role": "user", "content": search_prompt}
+                ],
+                max_tokens=3000,
+                temperature=0.3
+            )
+
+            # Парсим JSON ответ
+            import json
+            import re
+
+            # Извлекаем JSON из ответа (может быть обернут в markdown)
+            json_match = re.search(r'```json\s*(.*?)\s*```', response, re.DOTALL)
+            if json_match:
+                json_str = json_match.group(1)
+            else:
+                # Пытаемся парсить весь ответ как JSON
+                json_str = response.strip()
+
+            try:
+                news_data = json.loads(json_str)
+
+                # Проверяем что это список
+                if not isinstance(news_data, list):
+                    logger.warning("perplexity_response_not_list", response=response[:200])
+                    return articles
+
+                for item in news_data:
+                    try:
+                        # Парсим дату если есть
+                        published_at = None
+                        if "published_at" in item and item["published_at"]:
+                            published_at = self._parse_date(item["published_at"])
+
+                        # Создаем статью
+                        article_data = {
+                            "url": item.get("url", ""),
+                            "title": item.get("title", ""),
+                            "content": item.get("content", ""),
+                            "source_name": f"Perplexity Search ({lang.upper()})",
+                            "published_at": published_at or datetime.utcnow(),
+                        }
+
+                        # Проверяем обязательные поля
+                        if article_data["url"] and article_data["title"]:
+                            articles.append(article_data)
+
+                            logger.info(
+                                "perplexity_article_fetched",
+                                lang=lang,
+                                title=article_data["title"][:50]
+                            )
+
+                    except Exception as e:
+                        logger.error(
+                            "perplexity_article_parse_error",
+                            error=str(e),
+                            item=str(item)[:200]
+                        )
+                        continue
+
+            except json.JSONDecodeError as e:
+                logger.error(
+                    "perplexity_json_parse_error",
+                    error=str(e),
+                    response=response[:500]
+                )
+
+        except Exception as e:
+            logger.error(
+                "perplexity_fetch_error",
+                lang=lang,
+                error=str(e)
+            )
+
+        logger.info(
+            "perplexity_fetch_complete",
+            lang=lang,
+            articles_count=len(articles)
+        )
+
+        return articles
+
     async def save_articles(self, articles: List[Dict[str, Any]]) -> int:
         """
         Сохранить статьи в базу данных.
@@ -444,6 +576,18 @@ class NewsFetcher:
             articles_en = await self.fetch_google_news_rss("en")
             saved_en = await self.save_articles(articles_en)
             stats["Google News EN"] = saved_en
+
+            # Perplexity Real-Time Search (если включен)
+            if settings.perplexity_search_enabled:
+                # Русские новости через Perplexity
+                perplexity_articles_ru = await self.fetch_perplexity_news("ru")
+                saved_perplexity_ru = await self.save_articles(perplexity_articles_ru)
+                stats["Perplexity Search RU"] = saved_perplexity_ru
+
+                # Английские новости через Perplexity
+                perplexity_articles_en = await self.fetch_perplexity_news("en")
+                saved_perplexity_en = await self.save_articles(perplexity_articles_en)
+                stats["Perplexity Search EN"] = saved_perplexity_en
 
         # Дополнительные RSS источники из БД
         result = await self.db.execute(
