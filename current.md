@@ -952,8 +952,10 @@ docker compose build --no-cache bot
 - Immediate callback response
 - Информативное сообщение "Собираю аналитику..."
 
-#### Коммит:
+#### Коммиты:
 - `b8b5676` - feat: Add analytics dashboard with comprehensive metrics
+- `8d30b21` - fix: Fix SQL queries in analytics - add proper JOINs for title/content/source_name
+- `cae852c` - fix: Add HTML escaping for analytics report to prevent parsing errors
 
 #### Результат:
 ✅ **Полностью работающий Analytics Dashboard:**
