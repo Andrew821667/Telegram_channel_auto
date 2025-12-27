@@ -4,6 +4,7 @@ Telegram Bot Handlers
 """
 
 import asyncio
+import html
 from datetime import datetime
 from typing import Optional, Dict, List
 
@@ -1438,7 +1439,8 @@ def format_analytics_report(
         report += "🔥 <b>Топ-3 поста:</b>\n\n"
 
         for i, post in enumerate(top_posts[:3], 1):
-            title = post['title'][:80] + "..." if len(post['title']) > 80 else post['title']
+            title_raw = post['title'][:80] + "..." if len(post['title']) > 80 else post['title']
+            title = html.escape(title_raw)
             date = post['published_at'].strftime('%d.%m.%Y %H:%M')
             reactions = post['reactions']
 
@@ -1456,7 +1458,8 @@ def format_analytics_report(
         report += "💤 <b>Худшие посты (учимся на ошибках):</b>\n\n"
 
         for i, post in enumerate(worst_posts[:3], 1):
-            title = post['title'][:80] + "..." if len(post['title']) > 80 else post['title']
+            title_raw = post['title'][:80] + "..." if len(post['title']) > 80 else post['title']
+            title = html.escape(title_raw)
             date = post['published_at'].strftime('%d.%m.%Y %H:%M')
             reactions = post['reactions']
 
@@ -1505,7 +1508,8 @@ def format_analytics_report(
         report += "📰 <b>Топ источников:</b>\n\n"
 
         for i, source in enumerate(sources[:5], 1):
-            name = source['source_name'][:40] + "..." if len(source['source_name']) > 40 else source['source_name']
+            name_raw = source['source_name'][:40] + "..." if len(source['source_name']) > 40 else source['source_name']
+            name = html.escape(name_raw)
             collected = source['total_collected']
             published = source['total_published']
             pub_rate = source['publication_rate']
