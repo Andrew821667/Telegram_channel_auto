@@ -1612,10 +1612,20 @@ async def callback_analytics(callback: CallbackQuery, db: AsyncSession):
             vector_stats=vector_stats
         )
 
-        # Debug: сохраняем весь отчет
-        logger.info("analytics_full_report",
-                   total_length=len(report),
-                   report=report)
+        # Debug: найти что на байтовой позиции 3329
+        report_bytes = report.encode('utf-8')
+        logger.info("analytics_bytes_info",
+                   total_chars=len(report),
+                   total_bytes=len(report_bytes))
+
+        if len(report_bytes) > 3329:
+            # Показать контекст вокруг позиции 3329 байт
+            context_start = max(0, 3320)
+            context_end = min(len(report_bytes), 3340)
+            context_bytes = report_bytes[context_start:context_end]
+            logger.info("byte_3329_context",
+                       position=3329,
+                       context=context_bytes.decode('utf-8', errors='replace'))
 
         # Telegram ограничивает сообщения до 4096 символов
         # Если отчёт длинный - разбиваем на части
