@@ -1448,10 +1448,9 @@ def format_analytics_report(
             report += f"   📅 {date}\n"
             report += f"   👍 {reactions.get('useful', 0)} | 🔥 {reactions.get('important', 0)} | 🤔 {reactions.get('controversial', 0)}\n"
             report += f"   📊 Quality: {post['quality_score']}\n"
-            # Временно отключил ссылки для debug
-            # if post['telegram_message_id']:
-            #     msg_id = post['telegram_message_id']
-            #     report += f'   🔗 <a href="https://t.me/legal_ai_pro/{msg_id}">Перейти к посту</a>\n'
+            if post['telegram_message_id']:
+                msg_id = post['telegram_message_id']
+                report += f'   🔗 <a href="https://t.me/legal_ai_pro/{msg_id}">Перейти к посту</a>\n'
             report += "\n"
 
     # Худшие посты
@@ -1536,8 +1535,8 @@ def format_analytics_report(
         report += "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
         report += "🗄️ <b>Векторная база Qdrant:</b>\n\n"
         report += f"├─ 📦 Всего векторов: {vector_stats['total_vectors']}\n"
-        report += f"├─ ✅ Позитивных примеров: {vector_stats['positive_examples']} (score > 0.5)\n"
-        report += f"├─ ❌ Негативных примеров: {vector_stats['negative_examples']} (score < -0.3)\n"
+        report += f"├─ ✅ Позитивных примеров: {vector_stats['positive_examples']} (score &gt; 0.5)\n"
+        report += f"├─ ❌ Негативных примеров: {vector_stats['negative_examples']} (score &lt; -0.3)\n"
         report += f"├─ ⚖️ Нейтральных: {vector_stats['neutral_examples']}\n"
         report += f"└─ 📊 Avg score всей базы: {vector_stats['avg_quality_score']}\n"
 
@@ -1612,22 +1611,6 @@ async def callback_analytics(callback: CallbackQuery, db: AsyncSession):
             vector_stats=vector_stats
         )
 
-        # Debug: найти что на байтовой позиции ошибки
-        report_bytes = report.encode('utf-8')
-        logger.info("analytics_bytes_info",
-                   total_chars=len(report),
-                   total_bytes=len(report_bytes))
-
-        # Проверить позицию 3089 (текущий offset ошибки)
-        error_position = 3089
-        if len(report_bytes) > error_position:
-            # Показать контекст вокруг позиции ошибки
-            context_start = max(0, error_position - 20)
-            context_end = min(len(report_bytes), error_position + 20)
-            context_bytes = report_bytes[context_start:context_end]
-            logger.info("byte_error_context",
-                       position=error_position,
-                       context=repr(context_bytes.decode('utf-8', errors='replace')))
 
         # Telegram ограничивает сообщения до 4096 символов
         # Если отчёт длинный - разбиваем на части
@@ -1648,7 +1631,7 @@ async def callback_analytics(callback: CallbackQuery, db: AsyncSession):
             if current_part:
                 await callback.message.answer(current_part, parse_mode="HTML", disable_web_page_preview=True)
         else:
-            # Отправляем целиком С HTML но без ссылок (debug)
+            # Отправляем целиком
             await callback.message.answer(report, parse_mode="HTML", disable_web_page_preview=True)
 
         logger.info("analytics_sent", period=period, report_length=len(report))
