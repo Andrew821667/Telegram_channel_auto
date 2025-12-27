@@ -168,7 +168,7 @@ class AICore:
             SELECT ra.source_name, COUNT(*) as pub_count
             FROM publications p
             JOIN post_drafts pd ON p.draft_id = pd.id
-            JOIN raw_articles ra ON pd.raw_article_id = ra.id
+            JOIN raw_articles ra ON pd.article_id = ra.id
             WHERE p.published_at >= :date_from
             GROUP BY ra.source_name
         """)
