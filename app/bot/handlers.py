@@ -1448,9 +1448,10 @@ def format_analytics_report(
             report += f"   📅 {date}\n"
             report += f"   👍 {reactions.get('useful', 0)} | 🔥 {reactions.get('important', 0)} | 🤔 {reactions.get('controversial', 0)}\n"
             report += f"   📊 Quality: {post['quality_score']}\n"
-            if post['telegram_message_id']:
-                msg_id = post['telegram_message_id']
-                report += f'   🔗 <a href="https://t.me/legal_ai_pro/{msg_id}">Перейти к посту</a>\n'
+            # Временно отключил ссылки для debug
+            # if post['telegram_message_id']:
+            #     msg_id = post['telegram_message_id']
+            #     report += f'   🔗 <a href="https://t.me/legal_ai_pro/{msg_id}">Перейти к посту</a>\n'
             report += "\n"
 
     # Худшие посты
@@ -1635,10 +1636,8 @@ async def callback_analytics(callback: CallbackQuery, db: AsyncSession):
             if current_part:
                 await callback.message.answer(current_part, parse_mode="HTML", disable_web_page_preview=True)
         else:
-            # Отправляем целиком БЕЗ HTML (temporary debug)
-            import re
-            plain_report = re.sub(r'<[^>]+>', '', report)  # Strip all HTML tags
-            await callback.message.answer(plain_report)
+            # Отправляем целиком С HTML но без ссылок (debug)
+            await callback.message.answer(report, parse_mode="HTML", disable_web_page_preview=True)
 
         logger.info("analytics_sent", period=period, report_length=len(report))
 
