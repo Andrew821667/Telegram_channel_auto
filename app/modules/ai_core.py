@@ -606,7 +606,8 @@ class AICore:
                     {"role": "user", "content": user_prompt}
                 ],
                 max_tokens=max_tokens,
-                temperature=temperature
+                temperature=temperature,
+                db=self.db
             )
 
             return result
