@@ -661,6 +661,30 @@ Search only for recent news. Return maximum 10 articles."""
                 saved_perplexity_en = await self.save_articles(perplexity_articles_en)
                 stats["Perplexity Search EN"] = saved_perplexity_en
 
+            # 🆕 Telegram Channels (если включен)
+            if settings.telegram_fetch_enabled and settings.telegram_api_id and settings.telegram_api_hash:
+                from app.modules.telegram_fetcher import fetch_telegram_news
+
+                telegram_stats, telegram_articles = await fetch_telegram_news()
+                saved_telegram = await self.save_articles(telegram_articles)
+
+                # Добавляем статистику по каждому каналу
+                for channel_name, count in telegram_stats.items():
+                    # count - это сколько было собрано ДО сохранения
+                    # Но нам нужно знать сколько реально сохранилось
+                    # Поэтому просто используем общий счетчик
+                    pass
+
+                # Общая статистика по Telegram
+                stats["Telegram Channels"] = saved_telegram
+
+                # Детальная статистика по каналам (для логов)
+                logger.info(
+                    "telegram_detailed_stats",
+                    channels_stats=telegram_stats,
+                    total_saved=saved_telegram
+                )
+
         # Дополнительные RSS источники из БД
         result = await self.db.execute(
             select(Source).where(Source.enabled == True, Source.type == "rss")
