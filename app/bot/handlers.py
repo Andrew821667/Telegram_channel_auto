@@ -1393,6 +1393,7 @@ async def callback_react(callback: CallbackQuery, db: AsyncSession):
 async def get_statistics(db: AsyncSession) -> str:
     """Получить статистику системы."""
     from sqlalchemy import func
+    from app.modules.api_usage_tracker import get_current_month_cost
 
     # Количество статей
     articles_count = await db.scalar(select(func.count(RawArticle.id)))
@@ -1408,6 +1409,9 @@ async def get_statistics(db: AsyncSession) -> str:
         select(func.count(PostDraft.id)).where(PostDraft.status == 'pending_review')
     )
 
+    # Получаем стоимость API за текущий месяц
+    api_cost_data = await get_current_month_cost(db)
+
     stats_text = f"""
 📊 <b>Статистика системы</b>
 
@@ -1416,8 +1420,26 @@ async def get_statistics(db: AsyncSession) -> str:
 ✅ Опубликовано: {publications_count}
 ⏳ Ожидают модерации: {pending_count}
 
-📅 Обновлено: {datetime.now().strftime('%d.%m.%Y %H:%M')}
+━━━━━━━━━━━━━━━━
+
+💰 <b>Стоимость API за {api_cost_data['month_name']}</b>
+
+💵 Общая стоимость: ${api_cost_data['total_cost_usd']:.4f}
+📊 Всего токенов: {api_cost_data['total_tokens']:,}
+🔢 Всего запросов: {api_cost_data['total_requests']}
 """
+
+    # Добавляем статистику по провайдерам
+    if api_cost_data['by_provider']:
+        stats_text += "\n<b>По провайдерам:</b>\n"
+        for provider, data in api_cost_data['by_provider'].items():
+            provider_name = "OpenAI" if provider == "openai" else "Perplexity"
+            stats_text += f"├─ {provider_name}:\n"
+            stats_text += f"│  ├─ Стоимость: ${data['cost_usd']:.4f}\n"
+            stats_text += f"│  ├─ Токенов: {data['tokens']:,}\n"
+            stats_text += f"│  └─ Запросов: {data['requests']}\n"
+
+    stats_text += f"\n📅 Обновлено: {datetime.now().strftime('%d.%m.%Y %H:%M')}\n"
 
     return stats_text
 

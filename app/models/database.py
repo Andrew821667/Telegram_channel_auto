@@ -4,9 +4,10 @@ Database models and connection management using SQLAlchemy.
 
 from datetime import datetime
 from typing import AsyncGenerator, Optional, List
+from decimal import Decimal
 from sqlalchemy import (
     Column, Integer, String, Text, Float, Boolean, TIMESTAMP,
-    BigInteger, ForeignKey, CheckConstraint, Index, ARRAY, text
+    BigInteger, ForeignKey, CheckConstraint, Index, ARRAY, text, Date, Numeric
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import (
@@ -225,6 +226,53 @@ class MediaFile(Base):
             "file_type IN ('image', 'audio')",
             name='chk_file_type'
         ),
+    )
+
+
+class APIUsage(Base):
+    """Статистика использования API (OpenAI, Perplexity) для отслеживания стоимости."""
+
+    __tablename__ = "api_usage"
+
+    id = Column(Integer, primary_key=True, index=True)
+    provider = Column(String(50), nullable=False, index=True)  # openai, perplexity
+    model = Column(String(100), nullable=False, index=True)  # gpt-4o-mini, sonar, etc
+    operation = Column(String(100), index=True)  # ranking, draft_generation, editing, etc
+
+    # Токены
+    prompt_tokens = Column(Integer, default=0)
+    completion_tokens = Column(Integer, default=0)
+    total_tokens = Column(Integer, default=0)
+
+    # Стоимость в USD
+    cost_usd = Column(Numeric(10, 6), default=0.0)  # До 6 знаков после запятой
+
+    # Метаданные
+    article_id = Column(Integer, ForeignKey("raw_articles.id", ondelete="SET NULL"), nullable=True, index=True)
+    draft_id = Column(Integer, ForeignKey("post_drafts.id", ondelete="SET NULL"), nullable=True, index=True)
+
+    created_at = Column(TIMESTAMP, default=datetime.utcnow, index=True)
+    date = Column(Date, default=datetime.utcnow, index=True)  # Для группировки по дням/месяцам
+
+
+class MonthlyAPIStats(Base):
+    """Агрегированная статистика API за месяц для быстрого доступа."""
+
+    __tablename__ = "monthly_api_stats"
+
+    id = Column(Integer, primary_key=True, index=True)
+    year = Column(Integer, nullable=False, index=True)
+    month = Column(Integer, nullable=False, index=True)  # 1-12
+    provider = Column(String(50), nullable=False, index=True)
+
+    total_requests = Column(Integer, default=0)
+    total_tokens = Column(Integer, default=0)
+    total_cost_usd = Column(Numeric(10, 2), default=0.0)
+
+    updated_at = Column(TIMESTAMP, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        Index('idx_monthly_stats_unique', 'year', 'month', 'provider', unique=True),
     )
 
 
