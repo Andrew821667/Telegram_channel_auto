@@ -60,6 +60,28 @@ app.conf.update(
 
 
 # ====================
+# Celery Worker Startup Hook
+# ====================
+
+@app.on_after_configure.connect
+def setup_database_tables(sender, **kwargs):
+    """
+    Инициализация таблиц БД при запуске Celery worker.
+    Создаёт все таблицы если их ещё нет в базе данных.
+    """
+    async def _init_db():
+        from app.models.database import init_db
+        try:
+            await init_db()
+            logger.info("celery_database_initialized")
+        except Exception as e:
+            logger.error("celery_database_init_error", error=str(e))
+
+    # Запускаем инициализацию БД
+    asyncio.run(_init_db())
+
+
+# ====================
 # Утилитарные функции
 # ====================
 

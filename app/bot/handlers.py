@@ -1759,6 +1759,14 @@ async def setup_bot_commands():
 
 async def start_bot():
     """Запустить бота."""
+    # Инициализация базы данных (создаём таблицы если их нет)
+    from app.models.database import init_db
+    try:
+        await init_db()
+        logger.info("database_initialized")
+    except Exception as e:
+        logger.error("database_init_error", error=str(e))
+
     # Регистрируем middleware для БД сессий
     dp.message.middleware(DbSessionMiddleware())
     dp.callback_query.middleware(DbSessionMiddleware())
