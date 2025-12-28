@@ -191,8 +191,10 @@ class TelegramChannelFetcher:
                     continue
 
                 # Пропускаем очень старые сообщения (старше 7 дней)
-                if message.date and message.date < datetime.now() - timedelta(days=7):
-                    continue
+                if message.date:
+                    message_date = message.date.replace(tzinfo=None)
+                    if message_date < datetime.utcnow() - timedelta(days=7):
+                        continue
 
                 # Формируем URL сообщения
                 message_url = f"https://t.me/{channel_username}/{message.id}"
