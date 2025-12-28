@@ -60,6 +60,28 @@ app.conf.update(
 
 
 # ====================
+# Celery Worker Startup Hook
+# ====================
+
+@app.on_after_configure.connect
+def setup_database_tables(sender, **kwargs):
+    """
+    Инициализация таблиц БД при запуске Celery worker.
+    Создаёт все таблицы если их ещё нет в базе данных.
+    """
+    async def _init_db():
+        from app.models.database import init_db
+        try:
+            await init_db()
+            logger.info("celery_database_initialized")
+        except Exception as e:
+            logger.error("celery_database_init_error", error=str(e))
+
+    # Запускаем инициализацию БД
+    asyncio.run(_init_db())
+
+
+# ====================
 # Утилитарные функции
 # ====================
 
@@ -106,6 +128,63 @@ async def notify_admin(message: str, bot=None):
 # Задачи
 # ====================
 
+async def send_fetch_statistics(stats: dict):
+    """
+    Отправить детальную статистику сбора новостей администратору.
+
+    Args:
+        stats: Словарь с количеством новостей по источникам
+    """
+    try:
+        from app.bot.handlers import get_bot
+        from app.config import settings
+
+        total_articles = sum(stats.values())
+        source_count = len(stats)
+
+        # Формируем детальное сообщение
+        message = "📊 <b>Статистика сбора новостей</b>\n\n"
+
+        message += f"📰 <b>Всего собрано:</b> {total_articles} статей\n"
+        message += f"📡 <b>Источников обработано:</b> {source_count}\n\n"
+
+        if stats:
+            message += "📋 <b>По источникам:</b>\n"
+            # Сортируем по количеству (от большего к меньшему)
+            sorted_stats = sorted(stats.items(), key=lambda x: x[1], reverse=True)
+
+            for source_name, count in sorted_stats:
+                if count > 0:
+                    message += f"  ✅ <b>{source_name}:</b> {count} шт.\n"
+                else:
+                    message += f"  ⚠️ <b>{source_name}:</b> нет новых\n"
+
+            # Топ-3 источника
+            top_sources = sorted_stats[:3]
+            if top_sources and top_sources[0][1] > 0:
+                message += f"\n🏆 <b>Топ-3 источника:</b>\n"
+                for i, (source_name, count) in enumerate(top_sources, 1):
+                    if count > 0:
+                        message += f"  {i}. {source_name} ({count})\n"
+        else:
+            message += "⚠️ <i>Новости не найдены</i>\n"
+
+        message += f"\n⏱️ <i>Время сбора: {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}</i>"
+
+        bot = get_bot()
+        await bot.send_message(
+            chat_id=settings.telegram_admin_id,
+            text=message,
+            parse_mode="HTML"
+        )
+
+        logger.info("fetch_statistics_sent", total=total_articles, sources=source_count)
+
+    except Exception as e:
+        logger.error("send_fetch_statistics_error", error=str(e))
+        # Не падаем если статистика не отправилась
+
+
 @app.task(max_retries=3, autoretry_for=(Exception,), retry_backoff=60, retry_backoff_max=600)
 def fetch_news_task():
     """
@@ -139,6 +218,10 @@ def fetch_news_task():
         try:
             async with SessionLocal() as session:
                 stats = await fetch_news(session)
+
+            # Отправляем статистику админу
+            await send_fetch_statistics(stats)
+
             return stats
         finally:
             # Закрываем engine ДО выхода из asyncio.run()

@@ -163,6 +163,10 @@ secrets/
 *.key
 credentials.json
 
+# Telegram session files
+*.session
+*.session-journal
+
 # Celery beat schedule
 celerybeat-schedule.db
 

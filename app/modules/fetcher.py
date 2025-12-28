@@ -290,9 +290,67 @@ class NewsFetcher:
 
         return None
 
+    def _is_relevant_article(self, title: str, content: str) -> bool:
+        """
+        Проверить релевантность статьи по ключевым словам AI + legal.
+
+        Args:
+            title: Заголовок статьи
+            content: Содержание статьи
+
+        Returns:
+            True если статья релевантна теме AI + юриспруденция/бизнес
+        """
+        # Объединяем title и content для поиска
+        text = f"{title} {content}".lower()
+
+        # Ключевые слова AI (русские и английские)
+        ai_keywords = [
+            # Русские
+            "искусственный интеллект", "ии", "нейросет", "машинное обучение",
+            "chatgpt", "gpt", "openai", "claude", "gemini", "llm", "нейронн",
+            "автоматизац", "роботизац", "ml ", "ai ", "deep learning",
+            # Английские
+            "artificial intelligence", "machine learning", "neural network",
+            "automation", "robotics", "nlp", "computer vision"
+        ]
+
+        # Ключевые слова legal/business (русские и английские)
+        legal_business_keywords = [
+            # Русские - юридические
+            "право", "суд", "юрист", "закон", "договор", "правов", "юридическ",
+            "compliance", "комплаенс", "регулиров", "нормативн", "судебн",
+            # Русские - бизнес
+            "бизнес", "компан", "корпорат", "управлен", "риск", "безопасност",
+            "данных", "персональн", "gdpr", "конфиденциальн",
+            # Английские
+            "legal", "law", "court", "lawyer", "attorney", "contract",
+            "regulation", "legaltech", "business", "corporate", "governance",
+            "compliance", "risk", "data protection", "privacy"
+        ]
+
+        # Проверяем наличие хотя бы одного AI keyword
+        has_ai = any(keyword in text for keyword in ai_keywords)
+
+        # Проверяем наличие хотя бы одного legal/business keyword
+        has_legal_or_business = any(keyword in text for keyword in legal_business_keywords)
+
+        # Релевантна если есть И ai И (legal ИЛИ business)
+        is_relevant = has_ai and has_legal_or_business
+
+        if not is_relevant:
+            logger.debug(
+                "article_filtered_irrelevant",
+                title=title[:100],
+                has_ai=has_ai,
+                has_legal_or_business=has_legal_or_business
+            )
+
+        return is_relevant
+
     async def fetch_rss_feed(self, source: Source) -> List[Dict[str, Any]]:
         """
-        Получить новости из RSS источника.
+        Получить новости из RSS источника с фильтрацией по AI + legal/business.
 
         Args:
             source: Объект источника из БД
@@ -301,6 +359,7 @@ class NewsFetcher:
             Список словарей с новостями
         """
         articles = []
+        filtered_count = 0
 
         logger.info("fetching_rss", source_name=source.name, url=source.url)
 
@@ -325,6 +384,17 @@ class NewsFetcher:
                 if full_content:
                     article_data["content"] = full_content
 
+                # 🔍 ФИЛЬТРАЦИЯ: Проверяем релевантность по AI + legal/business
+                if not self._is_relevant_article(article_data["title"], article_data["content"]):
+                    filtered_count += 1
+                    logger.info(
+                        "article_filtered",
+                        source=source.name,
+                        title=article_data["title"][:80],
+                        reason="not_ai_legal_business"
+                    )
+                    continue
+
                 articles.append(article_data)
 
             except Exception as e:
@@ -338,7 +408,9 @@ class NewsFetcher:
         logger.info(
             "rss_fetch_complete",
             source_name=source.name,
-            articles_count=len(articles)
+            total_entries=len(feed.entries[:settings.fetcher_max_articles_per_source]),
+            filtered_out=filtered_count,
+            articles_accepted=len(articles)
         )
 
         return articles
@@ -588,6 +660,30 @@ Search only for recent news. Return maximum 10 articles."""
                 perplexity_articles_en = await self.fetch_perplexity_news("en")
                 saved_perplexity_en = await self.save_articles(perplexity_articles_en)
                 stats["Perplexity Search EN"] = saved_perplexity_en
+
+            # 🆕 Telegram Channels (если включен)
+            if settings.telegram_fetch_enabled and settings.telegram_api_id and settings.telegram_api_hash:
+                from app.modules.telegram_fetcher import fetch_telegram_news
+
+                telegram_stats, telegram_articles = await fetch_telegram_news()
+                saved_telegram = await self.save_articles(telegram_articles)
+
+                # Добавляем статистику по каждому каналу
+                for channel_name, count in telegram_stats.items():
+                    # count - это сколько было собрано ДО сохранения
+                    # Но нам нужно знать сколько реально сохранилось
+                    # Поэтому просто используем общий счетчик
+                    pass
+
+                # Общая статистика по Telegram
+                stats["Telegram Channels"] = saved_telegram
+
+                # Детальная статистика по каналам (для логов)
+                logger.info(
+                    "telegram_detailed_stats",
+                    channels_stats=telegram_stats,
+                    total_saved=saved_telegram
+                )
 
         # Дополнительные RSS источники из БД
         result = await self.db.execute(

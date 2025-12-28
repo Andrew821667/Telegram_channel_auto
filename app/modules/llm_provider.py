@@ -3,10 +3,11 @@ LLM Provider module
 Unified interface for different LLM providers (OpenAI, Perplexity).
 """
 
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 from openai import AsyncOpenAI
 import httpx
 import structlog
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 
@@ -31,7 +32,11 @@ class LLMProvider:
         self,
         messages: List[Dict[str, str]],
         temperature: float = None,
-        max_tokens: int = None
+        max_tokens: int = None,
+        operation: str = "completion",
+        db: Optional[AsyncSession] = None,
+        article_id: Optional[int] = None,
+        draft_id: Optional[int] = None
     ) -> str:
         """
         Generate completion using selected provider.
@@ -40,14 +45,18 @@ class LLMProvider:
             messages: List of message dicts with 'role' and 'content'
             temperature: Temperature for generation (default from settings)
             max_tokens: Max tokens (default from settings)
+            operation: Operation type for tracking (ranking, draft_generation, etc)
+            db: Database session for usage tracking (optional)
+            article_id: Article ID for tracking (optional)
+            draft_id: Draft ID for tracking (optional)
 
         Returns:
             Generated text
         """
         if self.provider == "openai":
-            return await self._generate_openai(messages, temperature, max_tokens)
+            return await self._generate_openai(messages, temperature, max_tokens, operation, db, article_id, draft_id)
         elif self.provider == "perplexity":
-            return await self._generate_perplexity(messages, temperature, max_tokens)
+            return await self._generate_perplexity(messages, temperature, max_tokens, operation, db, article_id, draft_id)
         else:
             raise ValueError(f"Unknown provider: {self.provider}")
 
@@ -55,7 +64,11 @@ class LLMProvider:
         self,
         messages: List[Dict[str, str]],
         temperature: float = None,
-        max_tokens: int = None
+        max_tokens: int = None,
+        operation: str = "completion",
+        db: Optional[AsyncSession] = None,
+        article_id: Optional[int] = None,
+        draft_id: Optional[int] = None
     ) -> str:
         """Generate completion using OpenAI API."""
         if self._openai_client is None:
@@ -70,6 +83,21 @@ class LLMProvider:
             )
 
             result = response.choices[0].message.content.strip()
+
+            # Track API usage
+            if db is not None:
+                from app.modules.api_usage_tracker import track_api_usage
+                await track_api_usage(
+                    db=db,
+                    provider="openai",
+                    model=settings.openai_model_analysis,
+                    operation=operation,
+                    prompt_tokens=response.usage.prompt_tokens,
+                    completion_tokens=response.usage.completion_tokens,
+                    article_id=article_id,
+                    draft_id=draft_id
+                )
+
             logger.info("openai_completion_generated",
                        model=settings.openai_model_analysis,
                        tokens=response.usage.total_tokens)
@@ -83,7 +111,11 @@ class LLMProvider:
         self,
         messages: List[Dict[str, str]],
         temperature: float = None,
-        max_tokens: int = None
+        max_tokens: int = None,
+        operation: str = "completion",
+        db: Optional[AsyncSession] = None,
+        article_id: Optional[int] = None,
+        draft_id: Optional[int] = None
     ) -> str:
         """Generate completion using Perplexity API."""
         url = "https://api.perplexity.ai/chat/completions"
@@ -123,17 +155,47 @@ class LLMProvider:
                 data = response.json()
                 result = data["choices"][0]["message"]["content"].strip()
 
+                # Track API usage
+                usage = data.get("usage", {})
+                if db is not None and usage:
+                    from app.modules.api_usage_tracker import track_api_usage
+                    await track_api_usage(
+                        db=db,
+                        provider="perplexity",
+                        model=settings.perplexity_model,
+                        operation=operation,
+                        prompt_tokens=usage.get("prompt_tokens", 0),
+                        completion_tokens=usage.get("completion_tokens", 0),
+                        article_id=article_id,
+                        draft_id=draft_id
+                    )
+
                 logger.info("perplexity_completion_generated",
                            model=settings.perplexity_model,
-                           tokens=data.get("usage", {}).get("total_tokens"))
+                           tokens=usage.get("total_tokens"))
                 return result
 
         except httpx.HTTPStatusError as e:
-            logger.error("perplexity_http_error",
-                        status_code=e.response.status_code,
-                        error=str(e),
-                        response_text=e.response.text)
-            raise
+            # Автоматический fallback на OpenAI при ошибках авторизации или rate limit
+            if e.response.status_code in [401, 429]:
+                logger.warning("perplexity_fallback_to_openai",
+                             status_code=e.response.status_code,
+                             reason="API key issue or rate limit - automatically switching to OpenAI",
+                             error=str(e))
+                # Используем OpenAI как fallback
+                return await self._generate_openai(messages, temperature, max_tokens, operation, db, article_id, draft_id)
+            else:
+                logger.error("perplexity_http_error",
+                            status_code=e.response.status_code,
+                            error=str(e),
+                            response_text=e.response.text)
+                raise
+        except httpx.TimeoutException as e:
+            logger.warning("perplexity_timeout_fallback",
+                         error=str(e),
+                         reason="Timeout - automatically switching to OpenAI")
+            # Fallback на OpenAI при timeout
+            return await self._generate_openai(messages, temperature, max_tokens, operation, db, article_id, draft_id)
         except Exception as e:
             logger.error("perplexity_generation_error", error=str(e))
             raise

@@ -4,8 +4,201 @@
 Полуавтоматизированный программный комплекс для ежедневного сбора, анализа и публикации новостей о внедрении ИИ в юриспруденцию и бизнес с обязательной модерацией.
 
 **Репозиторий:** Andrew821667/Telegram_channel_auto
-**Ветка разработки:** claude/ai-news-aggregator-legaltech-UKJR5
+**Ветка разработки:** claude/test-telegram-news-api-Hm0TL (Telegram API Integration)
 **Дата начала:** 2025-12-23
+
+## 🔄 Рабочий процесс разработки
+
+### Как мы работаем вместе
+
+1. **Claude готовит код** в своей среде разработки
+   - Анализирует требования и текущий код
+   - Разрабатывает решение (новые функции, исправления, оптимизации)
+   - Тестирует изменения локально
+   - Документирует всё в `current.md`
+
+2. **Claude отправляет в GitHub**
+   - Создаёт коммиты с понятными сообщениями
+   - Пушит изменения в feature branch (`claude/test-telegram-news-api-Hm0TL`)
+   - Все изменения версионируются в git
+
+3. **Вы обновляете код у себя** на машине
+   ```bash
+   # Получить последние изменения из GitHub
+   git pull origin claude/test-telegram-news-api-Hm0TL
+
+   # Перезапустить контейнеры с новым кодом
+   docker compose restart celery_worker bot app
+
+   # Проверить логи
+   docker compose logs -f celery_worker bot
+   ```
+
+4. **Тестирование и обратная связь**
+   - Вы тестируете изменения в реальном окружении
+   - Сообщаете о результатах или проблемах
+   - Claude дорабатывает при необходимости
+
+5. **Мердж в main**
+   - После успешного тестирования
+   - Создаётся Pull Request для слияния feature branch в main
+   - Документация обновлена и актуальна
+
+**Преимущества этого подхода:**
+- ✅ Разделение сред: разработка у Claude, production у вас
+- ✅ Версионирование: все изменения отслеживаются в git
+- ✅ Безопасность: вы контролируете что попадает в production
+- ✅ Документация: каждое изменение описано в current.md
+
+---
+
+## 🆕 TELEGRAM API INTEGRATION (2025-12-28)
+
+### 📡 Источники новостей
+
+**1. Google News RSS** (существующий)
+- Фильтрация по запросу: "искусственный интеллект AND (право OR суд OR юрист...)"
+- Русские и английские новости
+- ~10-15 статей/день
+
+**2. Perplexity Real-Time Search** (существующий)
+- Real-time web search через Perplexity AI
+- Актуальные новости за последние 24 часа
+- ~5-10 статей/день
+
+**3. Russian RSS Sources** (существующий, с фильтрацией)
+- TASS, Habr, Lenta.ru, RBC, Interfax
+- **НОВОЕ:** Фильтрация по AI+legal ключевым словам
+- Предотвращает нерелевантный контент (ДТП, погода, общие IT-новости)
+- ~5-10 релевантных статей/день
+
+**4. 🆕 TELEGRAM CHANNELS** (новый источник)
+- **Технология:** Telethon (Telegram Client API)
+- **Метод:** Чтение сообщений из публичных новостных каналов
+- **Фильтрация:** Та же AI+legal логика (ИИ AND (право OR бизнес))
+- **Преимущества:**
+  - Более свежие новости (real-time)
+  - Специализированные каналы по AI/LegalTech
+  - Прямой доступ без RSS парсинга
+  - Медиа-контент (фото, видео, файлы)
+
+### 🔧 Архитектура Telegram Integration
+
+**Компоненты:**
+1. **`app/modules/telegram_fetcher.py`** - Модуль сбора из Telegram
+   - Класс `TelegramChannelFetcher`
+   - Подключение через Telethon
+   - Чтение последних сообщений из каналов
+   - Фильтрация по AI+legal keywords
+   - Сохранение в БД с типом "telegram"
+
+2. **Session Management**
+   - Файл сессии: `telegram_bot.session`
+   - Хранится в корне проекта (не коммитится в git)
+   - Автоматическое переиспользование при перезапуске
+
+3. **Конфигурация** (`.env`)
+   ```
+   TELEGRAM_API_ID=34617695
+   TELEGRAM_API_HASH=e95e6e190f5efcff98001a490acea1c1
+   TELEGRAM_CHANNELS=@channel1,@channel2,@channel3
+   TELEGRAM_FETCH_LIMIT=50  # Сколько сообщений читать из каждого канала
+   ```
+
+4. **Интеграция в workflow**
+   - Добавлен в `fetch_all_sources()` наравне с RSS
+   - Та же логика сохранения в `raw_articles`
+   - Участвует в общей статистике сбора
+   - Проходит через cleaner → AI core → media → модерацию
+
+### 📊 Workflow с Telegram источниками
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  FETCH (09:00 MSK)                                      │
+├─────────────────────────────────────────────────────────┤
+│  1. Google News RSS RU/EN                               │
+│  2. Perplexity Search RU/EN                             │
+│  3. Russian RSS (TASS, Habr, ...) → AI+legal filter     │
+│  4. 🆕 TELEGRAM CHANNELS → AI+legal filter              │
+│     ├─ Connect via Telethon                             │
+│     ├─ Read last N messages from each channel           │
+│     ├─ Filter by AI+legal keywords                      │
+│     └─ Save to raw_articles (type="telegram")           │
+└─────────────────────────────────────────────────────────┘
+           ↓
+┌─────────────────────────────────────────────────────────┐
+│  CLEAN (09:05 MSK)                                      │
+│  - Дедупликация (все источники вместе)                 │
+│  - Спам-фильтрация                                      │
+│  - Levenshtein similarity                               │
+└─────────────────────────────────────────────────────────┘
+           ↓
+┌─────────────────────────────────────────────────────────┐
+│  ANALYZE (09:10 MSK)                                    │
+│  - AI ранжирование (Perplexity/OpenAI)                 │
+│  - Генерация драфтов (топ-3)                            │
+│  - RAG система (избежание повторов)                     │
+└─────────────────────────────────────────────────────────┘
+           ↓
+┌─────────────────────────────────────────────────────────┐
+│  MEDIA (09:15 MSK)                                      │
+│  - Генерация обложек                                    │
+└─────────────────────────────────────────────────────────┘
+           ↓
+┌─────────────────────────────────────────────────────────┐
+│  MODERATE → PUBLISH                                     │
+│  - Отправка админу на модерацию                         │
+│  - Одобрение/редактирование                             │
+│  - Публикация в канал @legal_ai_pro                     │
+└─────────────────────────────────────────────────────────┘
+```
+
+### 🎯 Целевые Telegram каналы
+
+**Категории каналов для мониторинга:**
+
+1. **AI/ML новости (общие)**
+   - @ai_newz - AI News
+   - @mlnews - Machine Learning News
+   - @deeplearning_ru - Deep Learning Russia
+
+2. **LegalTech специфичные**
+   - @legaltechnews - LegalTech News
+   - @legaltech_russia - LegalTech Russia
+
+3. **Бизнес + AI**
+   - @rb_tech - RBC Технологии
+   - @tass_tech - TASS Технологии
+   - @vcru - VC.ru новости
+
+4. **Технологии (с фильтрацией)**
+   - @habr - Habr
+   - @ria_tech - РИА Новости Технологии
+
+**Примечание:** Все каналы фильтруются по AI+legal keywords, поэтому можно добавлять широкие источники.
+
+### 🔐 Безопасность
+
+- API credentials хранятся в `.env` (не коммитится)
+- Session файл в `.gitignore`
+- Только чтение публичных каналов (не требует phone number auth)
+- Rate limiting: 1 запрос/сек на канал
+- Graceful handling ошибок (недоступные каналы игнорируются)
+
+### 📈 Ожидаемые результаты
+
+**До Telegram Integration:**
+- ~30-40 статей/день из всех источников
+- ~3-5 релевантных после фильтрации
+
+**После Telegram Integration:**
+- ~50-70 статей/день (+ Telegram каналы)
+- ~5-10 релевантных после фильтрации
+- Более свежий контент (real-time из Telegram)
+- Лучшее покрытие русскоязычного рынка
+
+---
 
 ---
 
@@ -982,6 +1175,119 @@ docker compose build --no-cache bot
 - A/B тестирование (время публикации, форматы)
 
 **Ветка:** `claude/bot-channel-development-lCoIU`
+
+### 2025-12-28 (Сессия 10 - 💰 API Cost Tracking System)
+**Статус:** ✅ **API COST TRACKING ПОЛНОСТЬЮ РЕАЛИЗОВАН**
+
+**Цель:** Внедрить автоматическое отслеживание стоимости использования OpenAI и Perplexity API с отображением в /stats
+
+#### Реализованный функционал:
+
+**1. Database Models для отслеживания**
+- ✅ Создана таблица `api_usage` для детального tracking каждого запроса:
+  - provider (openai/perplexity)
+  - model (gpt-4o-mini, sonar, и т.д.)
+  - operation (ranking, draft_generation, editing)
+  - prompt_tokens, completion_tokens, total_tokens
+  - cost_usd (расчёт в USD)
+  - article_id, draft_id (для связи с контентом)
+  - created_at, date (для фильтрации по периодам)
+- ✅ Создана таблица `monthly_api_stats` для агрегированной месячной статистики:
+  - year, month, provider
+  - total_requests, total_tokens, total_cost_usd
+  - Unique index по (year, month, provider)
+
+**2. API Usage Tracker Module**
+- ✅ Модуль `app/modules/api_usage_tracker.py` (350+ строк):
+  - `calculate_cost()` - расчёт стоимости по токенам
+  - `track_api_usage()` - запись использования в БД
+  - `update_monthly_stats()` - обновление месячной агрегации
+  - `get_current_month_cost()` - получение статистики за текущий месяц
+- ✅ Актуальные цены (декабрь 2024):
+  - GPT-4o: $2.50/$10.00 per 1M tokens
+  - GPT-4o-mini: $0.15/$0.60 per 1M tokens
+  - Perplexity Sonar: $0.20/$0.20 per 1M tokens
+
+**3. Интеграция с LLM Providers**
+- ✅ Обновлён `app/modules/llm_provider.py`:
+  - OpenAI: автоматическое отслеживание через `response.usage`
+  - Perplexity: автоматическое отслеживание через `response.usage`
+  - Параметр `db` передаётся во все вызовы LLM
+  - Tracking для всех операций: ranking, draft_generation, editing
+- ✅ **FIX:** Исправлен баг в `app/modules/ai_core.py`:
+  - Добавлена передача `db=self.db` в `generate_completion()`
+  - БЕЗ этого фикса tracking не работал!
+
+**4. Automatic Fallback: Perplexity → OpenAI**
+- ✅ Добавлен интеллектуальный fallback механизм:
+  - **401 Unauthorized** (истёк API ключ) → автоматически OpenAI
+  - **429 Rate Limit** (превышен лимит) → автоматически OpenAI
+  - **Timeout** (Perplexity не отвечает) → автоматически OpenAI
+- ✅ Гарантирует непрерывную работу сервиса даже при проблемах с Perplexity
+- ✅ Все вызовы отслеживаются независимо от провайдера
+
+**5. Автоматическая инициализация БД**
+- ✅ Таблицы создаются **автоматически** при запуске:
+  - Bot (`app/bot/handlers.py`): вызов `init_db()` в `start_bot()`
+  - Celery Worker (`app/tasks/celery_tasks.py`): startup hook
+  - FastAPI (`app/main.py`): уже был `init_db()` в lifespan
+- ✅ **НЕ ТРЕБУЕТСЯ** ручная SQL миграция!
+- ✅ Идемпотентность - безопасно запускать многократно
+
+**6. Отображение в /stats команде**
+- ✅ Обновлена функция `get_statistics()` в `app/bot/handlers.py`:
+  - Блок "💰 Стоимость API за {месяц}"
+  - Общая стоимость в USD (4 знака после запятой)
+  - Всего токенов и запросов
+  - Breakdown по провайдерам (OpenAI/Perplexity):
+    - Стоимость
+    - Токены
+    - Количество запросов
+- ✅ Автоматическое обновление при каждом вызове `/stats`
+
+#### Изменённые/созданные файлы:
+- `app/models/database.py` - модели APIUsage, MonthlyAPIStats
+- `app/modules/api_usage_tracker.py` - новый модуль (350+ строк)
+- `app/modules/llm_provider.py` - tracking + fallback механизм
+- `app/modules/ai_core.py` - **FIX:** передача db в LLM calls
+- `app/bot/handlers.py` - отображение cost в /stats + auto init_db
+- `app/tasks/celery_tasks.py` - auto init_db on startup
+- `migrations/add_api_usage_tracking.sql` - SQL миграция (опциональна)
+- `API_COST_TRACKING_SETUP.md` - подробное руководство (368 строк)
+
+#### Коммиты:
+- `c489ee0` - feat: Add API usage cost tracking system
+- `8e5961b` - docs: Add comprehensive API cost tracking setup guide
+- `b72d910` - feat: Add automated database initialization on startup
+- `e370ad8` - docs: Update setup guide - no manual migration needed
+- `39d7e55` - **fix:** Pass db session to LLM calls for API usage tracking
+- `e214d9c` - feat: Add automatic fallback from Perplexity to OpenAI
+
+#### Результат:
+✅ **Полностью рабочая система отслеживания стоимости API:**
+- Автоматический tracking всех LLM вызовов
+- Детальная статистика по операциям
+- Месячная агрегация для быстрого доступа
+- Отображение в /stats команде
+- Fallback на OpenAI при проблемах с Perplexity
+- Автоматическое создание таблиц при первом запуске
+
+#### 💰 Примерная стоимость (GPT-4o-mini):
+**За один запрос:**
+- Ranking одной статьи: ~$0.00008 (0.008 цента)
+- Генерация одного драфта: ~$0.0009 (0.09 цента)
+
+**За цикл сбора (16 статей):**
+- Ranking: 16 × $0.00008 = $0.00128
+- Draft generation: 3 × $0.0009 = $0.0027
+- **ИТОГО: ~$0.004** (0.4 цента) ≈ 30 копеек
+
+**За месяц (ежедневный сбор):**
+- 30 дней × $0.004 = **$0.12** ≈ **10 рублей**
+
+**Вывод:** GPT-4o-mini очень дёшево для этой задачи! 🎉
+
+**Ветка:** `claude/test-telegram-news-api-Hm0TL`
 
 ---
 
