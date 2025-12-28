@@ -267,7 +267,7 @@ class MonthlyAPIStats(Base):
 
     total_requests = Column(Integer, default=0)
     total_tokens = Column(Integer, default=0)
-    total_cost_usd = Column(Numeric(10, 2), default=0.0)
+    total_cost_usd = Column(Numeric(10, 6), default=0.0)
 
     updated_at = Column(TIMESTAMP, default=datetime.utcnow, onupdate=datetime.utcnow)
 
