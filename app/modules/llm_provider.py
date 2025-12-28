@@ -176,11 +176,26 @@ class LLMProvider:
                 return result
 
         except httpx.HTTPStatusError as e:
-            logger.error("perplexity_http_error",
-                        status_code=e.response.status_code,
-                        error=str(e),
-                        response_text=e.response.text)
-            raise
+            # Автоматический fallback на OpenAI при ошибках авторизации или rate limit
+            if e.response.status_code in [401, 429]:
+                logger.warning("perplexity_fallback_to_openai",
+                             status_code=e.response.status_code,
+                             reason="API key issue or rate limit - automatically switching to OpenAI",
+                             error=str(e))
+                # Используем OpenAI как fallback
+                return await self._generate_openai(messages, temperature, max_tokens, operation, db, article_id, draft_id)
+            else:
+                logger.error("perplexity_http_error",
+                            status_code=e.response.status_code,
+                            error=str(e),
+                            response_text=e.response.text)
+                raise
+        except httpx.TimeoutException as e:
+            logger.warning("perplexity_timeout_fallback",
+                         error=str(e),
+                         reason="Timeout - automatically switching to OpenAI")
+            # Fallback на OpenAI при timeout
+            return await self._generate_openai(messages, temperature, max_tokens, operation, db, article_id, draft_id)
         except Exception as e:
             logger.error("perplexity_generation_error", error=str(e))
             raise
