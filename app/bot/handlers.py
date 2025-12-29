@@ -1438,6 +1438,9 @@ async def get_statistics(db: AsyncSession) -> str:
             stats_text += f"│  ├─ Токенов: {data['tokens']:,}\n"
             stats_text += f"│  └─ Запросов: {data['requests']}\n"
 
+    # Ссылка на проверку баланса Perplexity
+    stats_text += "\n🔗 <a href='https://www.perplexity.ai/account/api/billing'>Проверить баланс Perplexity API</a>\n"
+
     # Добавляем статистику AI анализа
     stats_text += "\n━━━━━━━━━━━━━━━━\n\n"
     stats_text += "🤖 <b>AI Анализ аналитики</b>\n\n"
@@ -2000,7 +2003,7 @@ VIEWS И FORWARDS:
 
         ai_response, usage_stats = await call_openai_chat(
             messages=[{"role": "user", "content": prompt}],
-            model="gpt-4o-mini",  # Используем GPT-4o-mini (в 16 раз дешевле чем GPT-4o)
+            model="gpt-4o",  # Используем GPT-4o для качественного анализа и рекомендаций
             temperature=0.7,
             max_tokens=2000,
             db=db,
