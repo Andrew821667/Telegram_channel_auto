@@ -619,7 +619,7 @@ def collect_telegram_metrics_task():
     logger.info("collect_telegram_metrics_task_started")
 
     async def collect_metrics():
-        from app.models.database import get_db, Publication
+        from app.models.database import get_db, Publication, PersonalPost
         from sqlalchemy import select
         from datetime import datetime, timedelta
         from telethon import TelegramClient
@@ -701,24 +701,112 @@ def collect_telegram_metrics_task():
                         errors_count += 1
                         continue
 
-                # Сохраняем изменения
+                # Сохраняем изменения для публикаций
                 await db.commit()
 
                 logger.info(
-                    "collect_telegram_metrics_task_completed",
+                    "publications_metrics_collected",
                     total_publications=len(publications),
                     updated=updated_count,
                     errors=errors_count
                 )
 
+                # Собираем метрики для личных постов
+                personal_posts_result = await db.execute(
+                    select(PersonalPost)
+                    .where(
+                        PersonalPost.published == True,
+                        PersonalPost.telegram_message_id.isnot(None),
+                        PersonalPost.published_at >= date_from
+                    )
+                    .order_by(PersonalPost.published_at.desc())
+                )
+                personal_posts = personal_posts_result.scalars().all()
+
+                personal_updated_count = 0
+                personal_errors_count = 0
+
+                for post in personal_posts:
+                    try:
+                        # Получаем информацию о сообщении из Telegram
+                        message = await client.get_messages(
+                            entity=settings.telegram_channel_id,
+                            ids=post.telegram_message_id
+                        )
+
+                        if message:
+                            # Обновляем views и reactions
+                            old_views = post.views_count or 0
+                            old_reactions = post.reactions_count or 0
+
+                            post.views_count = message.views or 0
+
+                            # Подсчитываем реакции
+                            reactions_total = 0
+                            if message.reactions and message.reactions.results:
+                                for reaction in message.reactions.results:
+                                    reactions_total += reaction.count
+
+                            post.reactions_count = reactions_total
+
+                            # Логируем только если значения изменились
+                            if post.views_count != old_views or post.reactions_count != old_reactions:
+                                logger.info(
+                                    "personal_post_metrics_updated",
+                                    post_id=post.id,
+                                    message_id=post.telegram_message_id,
+                                    views=post.views_count,
+                                    reactions=post.reactions_count,
+                                    views_delta=post.views_count - old_views,
+                                    reactions_delta=post.reactions_count - old_reactions
+                                )
+                                personal_updated_count += 1
+
+                    except Exception as e:
+                        logger.warning(
+                            "collect_personal_post_metrics_error",
+                            post_id=post.id,
+                            message_id=post.telegram_message_id,
+                            error=str(e)
+                        )
+                        personal_errors_count += 1
+                        continue
+
+                # Сохраняем изменения для личных постов
+                await db.commit()
+
+                logger.info(
+                    "personal_posts_metrics_collected",
+                    total_personal_posts=len(personal_posts),
+                    updated=personal_updated_count,
+                    errors=personal_errors_count
+                )
+
                 # Отключаемся от Telegram
                 await client.disconnect()
 
+                logger.info(
+                    "collect_telegram_metrics_task_completed",
+                    total_publications=len(publications),
+                    publications_updated=updated_count,
+                    publications_errors=errors_count,
+                    total_personal_posts=len(personal_posts),
+                    personal_posts_updated=personal_updated_count,
+                    personal_posts_errors=personal_errors_count
+                )
+
                 return {
                     "status": "success",
-                    "total_publications": len(publications),
-                    "updated": updated_count,
-                    "errors": errors_count
+                    "publications": {
+                        "total": len(publications),
+                        "updated": updated_count,
+                        "errors": errors_count
+                    },
+                    "personal_posts": {
+                        "total": len(personal_posts),
+                        "updated": personal_updated_count,
+                        "errors": personal_errors_count
+                    }
                 }
 
         except Exception as e:

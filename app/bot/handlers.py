@@ -1396,6 +1396,20 @@ async def get_statistics(db: AsyncSession) -> str:
         select(func.count(PostDraft.id)).where(PostDraft.status == 'pending_review')
     )
 
+    # Статистика личных постов
+    personal_posts_count = await db.scalar(select(func.count(PersonalPost.id)))
+    personal_published_count = await db.scalar(
+        select(func.count(PersonalPost.id)).where(PersonalPost.published == True)
+    )
+
+    # Статистика views/reactions для личных постов
+    personal_views_sum = await db.scalar(
+        select(func.sum(PersonalPost.views_count)).where(PersonalPost.published == True)
+    ) or 0
+    personal_reactions_sum = await db.scalar(
+        select(func.sum(PersonalPost.reactions_count)).where(PersonalPost.published == True)
+    ) or 0
+
     # Получаем стоимость API за текущий месяц
     api_cost_data = await get_current_month_cost(db)
 
@@ -1410,6 +1424,15 @@ async def get_statistics(db: AsyncSession) -> str:
 📝 Всего драфтов: {drafts_count}
 ✅ Опубликовано: {publications_count}
 ⏳ Ожидают модерации: {pending_count}
+
+━━━━━━━━━━━━━━━━
+
+✍️ <b>Личные заметки</b>
+
+📔 Всего заметок: {personal_posts_count}
+📤 Опубликовано: {personal_published_count}
+👁 Всего просмотров: {personal_views_sum:,}
+👍 Всего реакций: {personal_reactions_sum}
 
 ━━━━━━━━━━━━━━━━
 
@@ -2946,6 +2969,9 @@ async def callback_view_post(callback: CallbackQuery, db: AsyncSession):
         post_text += f"🏷 Теги: {', '.join(post.tags[:5])}\n"
     if post.published:
         post_text += f"✅ <b>Опубликовано</b> {post.published_at.strftime('%d.%m.%Y')}\n"
+        # Показываем статистику если есть
+        if post.views_count or post.reactions_count:
+            post_text += f"📊 Статистика: 👁 {post.views_count or 0} просмотров, 👍 {post.reactions_count or 0} реакций\n"
 
     post_text += f"\n{'─' * 30}\n\n"
     post_text += f"{post.content}\n"
