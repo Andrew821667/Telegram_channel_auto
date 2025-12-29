@@ -4,9 +4,15 @@
 Использует Telethon API для конвертации username в numeric ID.
 """
 
+import sys
+import os
+
+# Добавляем корневую директорию в PYTHONPATH
+sys.path.insert(0, '/app')
+
 import asyncio
 from telethon import TelegramClient
-from config import settings
+from app.config import settings
 
 
 async def get_channel_numeric_id():
