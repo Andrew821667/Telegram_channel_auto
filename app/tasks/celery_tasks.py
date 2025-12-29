@@ -359,12 +359,13 @@ def generate_media_task():
     return f"Generated {count} covers"
 
 
-@app.task()
+@app.task(max_retries=2, autoretry_for=(Exception,), retry_backoff=120)
 def send_drafts_to_admin_task():
     """
     Задача отправки драфтов администратору на модерацию.
 
-    Запуск: ежедневно в 09:25 MSK (через 25 минут после fetch)
+    Запускается независимо от основного workflow через 25 минут после старта.
+    Имеет retry механизм для надёжности.
     """
     try:
         logger.info("send_drafts_to_admin_task_started")
@@ -393,6 +394,9 @@ def send_drafts_to_admin_task():
                 expire_on_commit=False,
             )
 
+            sent_count = 0
+            error_count = 0
+
             try:
                 async with SessionLocal() as session:
                     # Получаем ВСЕ драфты в статусе pending_review (без фильтра по дате)
@@ -404,31 +408,51 @@ def send_drafts_to_admin_task():
                     )
                     drafts = list(result.scalars().all())
 
+                    logger.info("drafts_found", count=len(drafts))
+
                     if not drafts:
-                        await notify_admin("📭 Нет новых драфтов сегодня.", bot=bot)
+                        await notify_admin("📭 Нет новых драфтов для модерации.", bot=bot)
                         return 0
 
-                    # Отправляем уведомление
+                    # Отправляем уведомление о количестве драфтов
                     await notify_admin(
                         f"📝 <b>Новые драфты готовы к модерации!</b>\n\n"
-                        f"Количество: {len(drafts)}\n"
-                        f"Используйте /drafts для просмотра.",
+                        f"Количество: {len(drafts)}\n\n"
+                        f"Сейчас начну отправку...",
                         bot=bot
                     )
 
                     # Отправляем каждый драфт (ограничиваем настройкой publisher_max_posts_per_day)
                     max_drafts = min(len(drafts), settings.publisher_max_posts_per_day)
-                    for index, draft in enumerate(drafts[:max_drafts], start=1):
-                        await send_draft_for_review(
-                            settings.telegram_admin_id,
-                            draft,
-                            session,
-                            bot=bot,
-                            draft_number=index  # Порядковый номер за день
-                        )
-                        await asyncio.sleep(1)  # Rate limiting
+                    logger.info("sending_drafts", total=len(drafts), max_to_send=max_drafts)
 
-                    return max_drafts
+                    for index, draft in enumerate(drafts[:max_drafts], start=1):
+                        try:
+                            await send_draft_for_review(
+                                settings.telegram_admin_id,
+                                draft,
+                                session,
+                                bot=bot,
+                                draft_number=index  # Порядковый номер за день
+                            )
+                            sent_count += 1
+                            logger.info("draft_sent", draft_id=draft.id, index=index)
+                            await asyncio.sleep(1)  # Rate limiting
+                        except Exception as e:
+                            error_count += 1
+                            logger.error("draft_send_error", draft_id=draft.id, error=str(e), index=index)
+                            # Продолжаем отправку следующих драфтов даже если один упал
+
+                    # Финальное уведомление
+                    if sent_count > 0:
+                        await notify_admin(
+                            f"✅ <b>Отправка завершена!</b>\n\n"
+                            f"Отправлено: {sent_count} из {max_drafts}\n"
+                            f"Ошибок: {error_count}",
+                            bot=bot
+                        )
+
+                    return sent_count
             finally:
                 # Закрываем Bot сессию перед закрытием engine
                 await bot.session.close()
@@ -441,9 +465,28 @@ def send_drafts_to_admin_task():
         return f"Sent {count} drafts to admin"
 
     except Exception as exc:
-        logger.error("send_drafts_to_admin_task_error", error=str(exc))
-        # Не делаем retry для этой задачи
-        return "Error sending drafts"
+        logger.error("send_drafts_to_admin_task_error", error=str(exc), exc_info=True)
+
+        # Отправляем уведомление об ошибке
+        async def send_error():
+            from aiogram import Bot
+            bot = Bot(token=settings.telegram_bot_token)
+            try:
+                await notify_admin(
+                    f"❌ <b>Ошибка отправки драфтов!</b>\n\n"
+                    f"Ошибка: {str(exc)}\n\n"
+                    f"Используйте /drafts для ручного просмотра.",
+                    bot=bot
+                )
+            finally:
+                await bot.session.close()
+
+        try:
+            run_async(send_error())
+        except:
+            pass
+
+        raise  # Retry если есть лимит retries
 
 
 @app.task(name="daily_workflow_task")
@@ -456,30 +499,34 @@ def daily_workflow_task():
     2. clean_news_task
     3. analyze_articles_task
     4. generate_media_task
-    5. send_drafts_to_admin_task
+    5. send_drafts_to_admin_task (независимо от результата предыдущих)
 
     Запуск: ежедневно в 09:00 MSK
     """
-    from celery import chain
+    from celery import chain, group
 
     logger.info("daily_workflow_task_started")
 
     try:
-        # Создаем цепочку задач для последовательного выполнения
-        # Используем .si() (immutable signature) вместо .s() потому что
-        # задачи не принимают результат предыдущей задачи как аргумент
-        workflow = chain(
+        # Создаем цепочку основных задач
+        main_workflow = chain(
             fetch_news_task.si(),
             clean_news_task.si(),
             analyze_articles_task.si(),
             generate_media_task.si(),
-            send_drafts_to_admin_task.si()
         )
 
-        # Запускаем цепочку
-        result = workflow.apply_async()
+        # Запускаем основную цепочку
+        result = main_workflow.apply_async()
 
-        logger.info("daily_workflow_task_chain_started", task_id=result.id)
+        # Независимо запускаем отправку драфтов с задержкой 25 минут
+        # Это гарантирует что даже если основной workflow упадёт,
+        # драфты всё равно будут отправлены если они есть в БД
+        send_drafts_to_admin_task.apply_async(countdown=25 * 60)
+
+        logger.info("daily_workflow_task_chain_started",
+                   main_workflow_id=result.id,
+                   drafts_scheduled=True)
 
         # Отправляем уведомление о запуске
         async def send_notification():
