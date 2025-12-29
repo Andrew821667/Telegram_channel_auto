@@ -621,6 +621,102 @@ class AICore:
             raise
 
 
+async def call_openai_chat(
+    messages: List[Dict[str, str]],
+    model: str = "gpt-4o",
+    temperature: float = 0.7,
+    max_tokens: int = 2000,
+    db: Optional[AsyncSession] = None,
+    operation: str = "ai_analysis"
+) -> Tuple[str, Dict[str, Any]]:
+    """
+    Прямой вызов OpenAI Chat API для аналитики.
+
+    Args:
+        messages: Список сообщений для GPT (формат [{"role": "user", "content": "..."}])
+        model: Модель GPT (по умолчанию gpt-4o)
+        temperature: Температура генерации (0-2)
+        max_tokens: Максимум токенов в ответе
+        db: Database session для логирования (опционально)
+        operation: Тип операции (для логов)
+
+    Returns:
+        Tuple[str, Dict]: (Ответ от GPT-4, статистика использования)
+    """
+    try:
+        client = AsyncOpenAI(api_key=settings.openai_api_key)
+
+        response = await client.chat.completions.create(
+            model=model,
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens
+        )
+
+        result = response.choices[0].message.content
+
+        # Расчет стоимости
+        # Pricing определяется по модели:
+        # GPT-4o: Input $2.50/1M, Output $10.00/1M
+        # GPT-4o-mini: Input $0.150/1M, Output $0.600/1M (в 16 раз дешевле!)
+        prompt_tokens = response.usage.prompt_tokens
+        completion_tokens = response.usage.completion_tokens
+        total_tokens = response.usage.total_tokens
+
+        # Определяем цены в зависимости от модели
+        if "gpt-4o-mini" in model.lower():
+            input_price_per_1m = 0.150
+            output_price_per_1m = 0.600
+        elif "gpt-4o" in model.lower():
+            input_price_per_1m = 2.50
+            output_price_per_1m = 10.00
+        else:
+            # Дефолтные цены для других моделей
+            input_price_per_1m = 2.50
+            output_price_per_1m = 10.00
+
+        cost_usd = (
+            (prompt_tokens / 1_000_000 * input_price_per_1m) +
+            (completion_tokens / 1_000_000 * output_price_per_1m)
+        )
+
+        usage_stats = {
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": total_tokens,
+            "cost_usd": round(cost_usd, 6)
+        }
+
+        logger.info(
+            "openai_chat_call",
+            model=model,
+            operation=operation,
+            **usage_stats
+        )
+
+        # Логируем в БД если передана сессия
+        if db:
+            from app.models.database import APIUsage
+
+            api_log = APIUsage(
+                provider="openai",
+                model=model,
+                operation=operation,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                total_tokens=total_tokens,
+                cost_usd=cost_usd
+            )
+            db.add(api_log)
+            await db.commit()
+
+        return result, usage_stats
+
+    except Exception as e:
+        logger.error("openai_chat_error", error=str(e), model=model)
+        raise
+
+
 async def process_articles_with_ai(db_session: AsyncSession, provider: str = None) -> Dict[str, Any]:
     """
     Удобная функция для запуска AI обработки статей.

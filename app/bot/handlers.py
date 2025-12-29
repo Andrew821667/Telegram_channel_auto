@@ -1407,6 +1407,10 @@ async def get_statistics(db: AsyncSession) -> str:
     # Получаем стоимость API за текущий месяц
     api_cost_data = await get_current_month_cost(db)
 
+    # Получаем статистику AI анализа
+    analytics = AnalyticsService(db)
+    ai_stats = await analytics.get_ai_analysis_stats()
+
     stats_text = f"""
 📊 <b>Статистика системы</b>
 
@@ -1434,6 +1438,38 @@ async def get_statistics(db: AsyncSession) -> str:
             stats_text += f"│  ├─ Токенов: {data['tokens']:,}\n"
             stats_text += f"│  └─ Запросов: {data['requests']}\n"
 
+    # Ссылка на проверку баланса Perplexity
+    stats_text += "\n🔗 <a href='https://www.perplexity.ai/account/api/billing'>Проверить баланс Perplexity API</a>\n"
+
+    # Добавляем статистику AI анализа
+    stats_text += "\n━━━━━━━━━━━━━━━━\n\n"
+    stats_text += "🤖 <b>AI Анализ аналитики</b>\n\n"
+
+    if ai_stats['month']['count'] > 0 or ai_stats['year']['count'] > 0:
+        stats_text += f"<b>За текущий месяц:</b>\n"
+        stats_text += f"├─ Запросов: {ai_stats['month']['count']}\n"
+        stats_text += f"├─ Токенов: {ai_stats['month']['total_tokens']:,}\n"
+        stats_text += f"└─ Стоимость: ${ai_stats['month']['total_cost_usd']:.4f}\n"
+
+        # Разбивка по моделям за месяц
+        if ai_stats['month']['by_model']:
+            for model, data in ai_stats['month']['by_model'].items():
+                model_name = model.replace('gpt-', 'GPT-').upper()
+                stats_text += f"   └─ {model_name}: {data['count']} запросов, ${data['cost_usd']:.4f}\n"
+
+        stats_text += f"\n<b>За текущий год:</b>\n"
+        stats_text += f"├─ Запросов: {ai_stats['year']['count']}\n"
+        stats_text += f"├─ Токенов: {ai_stats['year']['total_tokens']:,}\n"
+        stats_text += f"└─ Стоимость: ${ai_stats['year']['total_cost_usd']:.2f}\n"
+
+        # Разбивка по моделям за год
+        if ai_stats['year']['by_model']:
+            for model, data in ai_stats['year']['by_model'].items():
+                model_name = model.replace('gpt-', 'GPT-').upper()
+                stats_text += f"   └─ {model_name}: {data['count']} запросов, ${data['cost_usd']:.2f}\n"
+    else:
+        stats_text += "Анализы ещё не запускались\n"
+
     stats_text += f"\n📅 Обновлено: {datetime.now().strftime('%d.%m.%Y %H:%M')}\n"
 
     return stats_text
@@ -1450,7 +1486,11 @@ def format_analytics_report(
     sources: List[Dict],
     weekday_stats: Dict,
     vector_stats: Optional[Dict],
-    source_recommendations: Optional[List[Dict]] = None
+    source_recommendations: Optional[List[Dict]] = None,
+    views_stats: Optional[Dict] = None,
+    best_time: Optional[Dict] = None,
+    trending_topics: Optional[List[Dict]] = None,
+    alerts: Optional[List[Dict]] = None
 ) -> str:
     """
     Форматировать красивый отчёт аналитики.
@@ -1624,6 +1664,59 @@ def format_analytics_report(
         if not source_recommendations:
             report += "✅ Все источники работают хорошо!\n"
 
+    # Views и Forwards статистика
+    # Просмотры и форварды (Telegram metrics)
+    report += "\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+    report += "📈 <b>Просмотры и Форварды:</b>\n\n"
+
+    if views_stats and views_stats.get('total_views', 0) > 0:
+        report += f"├─ 👁️ Всего просмотров: {views_stats['total_views']:,}\n"
+        report += f"├─ 📤 Всего форвардов: {views_stats['total_forwards']:,}\n"
+        report += f"├─ 📊 Avg просмотров/пост: {views_stats['avg_views']}\n"
+        report += f"├─ 📊 Avg форвардов/пост: {views_stats['avg_forwards']}\n"
+        report += f"├─ 🔥 Макс просмотров: {views_stats['max_views']:,}\n"
+        report += f"├─ 🔥 Макс форвардов: {views_stats['max_forwards']:,}\n"
+        report += f"└─ 🌊 Viral coefficient: {views_stats['viral_coefficient']}%\n"
+    else:
+        report += "⚠️ <b>Данные недоступны</b>\n"
+        report += "├─ Метрики из Telegram еще не собраны\n"
+        report += "├─ Celery задача запускается каждые 6 часов\n"
+        report += "├─ Следующий запуск: 00:00 / 06:00 / 12:00 / 18:00 MSK\n"
+        report += "└─ Или проверьте логи: docker compose logs celery_worker | grep collect_telegram_metrics\n"
+
+    # A/B тестирование времени публикации
+    report += "\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+    report += "⏰ <b>Лучшее время для публикации:</b>\n\n"
+
+    if best_time and best_time.get('best_hour') is not None:
+        report += f"🎯 {best_time['recommendation']}\n"
+        report += f"├─ Engagement rate: {best_time['best_engagement_rate']}%\n"
+        report += f"└─ На основе анализа за 30 дней\n"
+    else:
+        report += "⚠️ <b>Недостаточно данных</b>\n"
+        report += "└─ Требуется хотя бы 1 публикация с views для анализа\n"
+
+    # Трендовые темы
+    report += "\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+    report += "🔥 <b>Трендовые темы:</b>\n\n"
+
+    if trending_topics:
+        for i, topic in enumerate(trending_topics[:5], 1):
+            report += f"{i}. <b>{topic['topic']}</b>\n"
+            report += f"   ├─ Упоминаний: {topic['mentions']}\n"
+            report += f"   └─ Relevance: {topic['relevance_score']}%\n"
+    else:
+        report += "⚠️ <b>Не найдено</b>\n"
+        report += "└─ Требуется больше публикаций с детальным контентом\n"
+
+    # Алерты и предупреждения
+    if alerts:
+        report += "\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        report += "🚨 <b>Алерты и предупреждения:</b>\n\n"
+        for alert in alerts:
+            report += f"{alert['message']}\n"
+            report += f"   └─ {alert['details']}\n\n"
+
     report += "\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
     report += f"📅 Обновлено: {datetime.now().strftime('%d.%m.%Y %H:%M')}\n"
 
@@ -1648,6 +1741,9 @@ async def cmd_analytics(message: Message, db: AsyncSession):
         ],
         [
             InlineKeyboardButton(text="📅 Всё время", callback_data="analytics:all"),
+        ],
+        [
+            InlineKeyboardButton(text="🤖 AI Анализ", callback_data="show_ai_analysis_menu"),
         ]
     ])
 
@@ -1658,11 +1754,65 @@ async def cmd_analytics(message: Message, db: AsyncSession):
     )
 
 
+@router.callback_query(F.data == "show_ai_analysis_menu")
+async def callback_show_ai_analysis_menu(callback: CallbackQuery):
+    """Показать меню выбора периода для AI анализа."""
+    await callback.answer()
+
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="🤖 7 дней", callback_data="ai_analysis:7"),
+            InlineKeyboardButton(text="🤖 30 дней", callback_data="ai_analysis:30"),
+        ],
+        [
+            InlineKeyboardButton(text="« Назад", callback_data="back_to_analytics_menu"),
+        ]
+    ])
+
+    await callback.message.edit_text(
+        "🤖 <b>AI Анализ и Рекомендации</b>\n\n"
+        "Выберите период для анализа:\n\n"
+        "GPT-4 проанализирует все метрики и даст конкретные рекомендации "
+        "по улучшению engagement, контент-стратегии и оптимизации источников.",
+        parse_mode="HTML",
+        reply_markup=keyboard
+    )
+
+
+@router.callback_query(F.data == "back_to_analytics_menu")
+async def callback_back_to_analytics_menu(callback: CallbackQuery):
+    """Вернуться к меню аналитики."""
+    await callback.answer()
+
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="📅 7 дней", callback_data="analytics:7"),
+            InlineKeyboardButton(text="📅 30 дней", callback_data="analytics:30"),
+        ],
+        [
+            InlineKeyboardButton(text="📅 Всё время", callback_data="analytics:all"),
+        ],
+        [
+            InlineKeyboardButton(text="🤖 AI Анализ", callback_data="show_ai_analysis_menu"),
+        ]
+    ])
+
+    await callback.message.edit_text(
+        "📊 <b>Выберите период для аналитики:</b>",
+        parse_mode="HTML",
+        reply_markup=keyboard
+    )
+
+
 @router.callback_query(F.data.startswith("analytics:"))
 async def callback_analytics(callback: CallbackQuery, db: AsyncSession):
     """Отобразить аналитику за период."""
 
-    await callback.answer("Собираю аналитику...")
+    await callback.answer()
 
     if not await check_admin(callback.from_user.id):
         await callback.message.answer("⛔ У вас нет доступа")
@@ -1672,12 +1822,19 @@ async def callback_analytics(callback: CallbackQuery, db: AsyncSession):
         period = callback.data.split(":")[1]
         days = int(period) if period != "all" else 9999
 
+        # Показываем loading сообщение
+        loading_msg = await callback.message.answer(
+            "⏳ <b>Собираю аналитику...</b>\n\n"
+            "Анализирую публикации, метрики и источники...",
+            parse_mode="HTML"
+        )
+
         logger.info("analytics_requested", period=period, days=days, user_id=callback.from_user.id)
 
         # Создаём сервис аналитики
         analytics = AnalyticsService(db)
 
-        # Собираем все данные
+        # Собираем все данные (базовые + новые)
         stats = await analytics.get_period_stats(days)
         top_posts = await analytics.get_top_posts(3, days)
         worst_posts = await analytics.get_worst_posts(3, days)
@@ -1685,6 +1842,12 @@ async def callback_analytics(callback: CallbackQuery, db: AsyncSession):
         weekday_stats = await analytics.get_weekday_stats(min(days, 30))  # Максимум 30 дней для статистики по дням
         vector_stats = await analytics.get_vector_db_stats()
         source_recommendations = await analytics.get_source_recommendations(min(days, 30))
+
+        # НОВЫЕ методы аналитики
+        views_stats = await analytics.get_views_and_forwards_stats(days)
+        best_time = await analytics.get_best_publish_time(min(days, 30))
+        trending_topics = await analytics.get_trending_topics(days, top_n=5)
+        alerts = await analytics.get_performance_alerts(days)
 
         # Форматируем отчёт
         report = format_analytics_report(
@@ -1694,9 +1857,16 @@ async def callback_analytics(callback: CallbackQuery, db: AsyncSession):
             sources=sources,
             weekday_stats=weekday_stats,
             vector_stats=vector_stats,
-            source_recommendations=source_recommendations
+            source_recommendations=source_recommendations,
+            views_stats=views_stats,
+            best_time=best_time,
+            trending_topics=trending_topics,
+            alerts=alerts
         )
 
+
+        # Удаляем loading сообщение
+        await loading_msg.delete()
 
         # Telegram ограничивает сообщения до 4096 символов
         # Если отчёт длинный - разбиваем на части
@@ -1724,8 +1894,253 @@ async def callback_analytics(callback: CallbackQuery, db: AsyncSession):
 
     except Exception as e:
         logger.error("analytics_error", error=str(e), period=callback.data)
+        # Удаляем loading сообщение если оно существует
+        try:
+            await loading_msg.delete()
+        except:
+            pass
         await callback.message.answer(
             "❌ Произошла ошибка при сборе аналитики. Попробуйте позже.",
+            parse_mode="HTML"
+        )
+
+
+@router.callback_query(F.data.startswith("ai_analysis:"))
+async def callback_ai_analysis(callback: CallbackQuery, db: AsyncSession):
+    """AI-анализ аналитики с рекомендациями от GPT-4."""
+
+    await callback.answer()
+
+    if not await check_admin(callback.from_user.id):
+        await callback.message.answer("⛔ У вас нет доступа")
+        return
+
+    try:
+        period = callback.data.split(":")[1]
+        days = int(period) if period != "all" else 30  # Ограничиваем для AI анализа
+
+        loading_msg = await callback.message.answer(
+            "🤖 <b>AI Анализ запущен...</b>\n\n"
+            "⏳ Собираю данные и анализирую метрики...\n"
+            "⏳ Отправляю запрос к GPT-4...",
+            parse_mode="HTML"
+        )
+
+        logger.info("ai_analysis_requested", period=period, days=days, user_id=callback.from_user.id)
+
+        # Собираем данные аналитики
+        analytics = AnalyticsService(db)
+
+        stats = await analytics.get_period_stats(days)
+        top_posts = await analytics.get_top_posts(3, days)
+        worst_posts = await analytics.get_worst_posts(3, days)
+        sources = await analytics.get_source_stats(days)
+        views_stats = await analytics.get_views_and_forwards_stats(days)
+        best_time = await analytics.get_best_publish_time(min(days, 30))
+        trending_topics = await analytics.get_trending_topics(days, top_n=5)
+        alerts = await analytics.get_performance_alerts(days)
+        source_recommendations = await analytics.get_source_recommendations(min(days, 30))
+
+        # Формируем данные для GPT
+        analytics_data = f"""
+ПЕРИОД АНАЛИЗА: {days} дней
+
+ОСНОВНЫЕ МЕТРИКИ:
+- Публикаций: {stats['total_publications']}
+- Одобрено драфтов: {stats['approved_drafts']} из {stats['total_drafts']} ({stats['approval_rate']:.1f}%)
+- Engagement rate: {stats['engagement_rate']:.1f}%
+- Avg quality score: {stats['avg_quality_score']}
+
+РЕАКЦИИ:
+- Полезно: {stats['reactions']['useful']}
+- Важно: {stats['reactions']['important']}
+- Спорно: {stats['reactions']['controversial']}
+- Банально: {stats['reactions']['banal']}
+- Плохое качество: {stats['reactions']['poor_quality']}
+
+VIEWS И FORWARDS:
+- Всего просмотров: {views_stats.get('total_views', 0)}
+- Avg просмотров/пост: {views_stats.get('avg_views', 0)}
+- Всего форвардов: {views_stats.get('total_forwards', 0)}
+- Viral coefficient: {views_stats.get('viral_coefficient', 0)}%
+
+ЛУЧШЕЕ ВРЕМЯ ПУБЛИКАЦИИ:
+{best_time.get('recommendation', 'Нет данных')}
+
+ТРЕНДОВЫЕ ТЕМЫ:
+{chr(10).join([f"- {t['topic']} ({t['mentions']} упоминаний)" for t in trending_topics[:5]]) if trending_topics else 'Нет данных'}
+
+ТОП-3 ПОСТА:
+{chr(10).join([f"- {p['title'][:60]}... (quality: {p['quality_score']})" for p in top_posts[:3]]) if top_posts else 'Нет данных'}
+
+ХУДШИЕ ПОСТЫ:
+{chr(10).join([f"- {p['title'][:60]}... (quality: {p['quality_score']})" for p in worst_posts[:3]]) if worst_posts else 'Нет данных'}
+
+ПРОБЛЕМНЫЕ ИСТОЧНИКИ:
+{chr(10).join([f"- {s['source_name']}: {s['recommendation']}" for s in source_recommendations[:3]]) if source_recommendations else 'Нет проблем'}
+
+АЛЕРТЫ:
+{chr(10).join([f"[{a['severity'].upper()}] {a['message']}" for a in alerts]) if alerts else 'Нет алертов'}
+"""
+
+        # Вызываем GPT-4 для анализа
+        from app.modules.ai_core import call_openai_chat
+
+        prompt = f"""Ты - эксперт по аналитике Telegram каналов и контент-маркетингу.
+
+Проанализируй следующие данные аналитики канала @legal_ai_pro (новости о внедрении ИИ в юриспруденцию и бизнес):
+
+{analytics_data}
+
+Дай детальный анализ и конкретные рекомендации:
+
+1. **АНАЛИЗ СИТУАЦИИ** (2-3 предложения):
+   - Общая оценка производительности канала
+   - Ключевые проблемы и возможности
+
+2. **ПРИОРИТЕТНЫЕ РЕКОМЕНДАЦИИ** (топ-3, нумерованный список):
+   - Конкретные действия для улучшения метрик
+   - Фокус на engagement, quality score, и viral coefficient
+
+3. **КОНТЕНТ-СТРАТЕГИЯ**:
+   - Какие темы работают лучше всего (на основе trending topics)
+   - Рекомендации по улучшению худших постов
+   - Как повысить viral coefficient
+
+4. **ИСТОЧНИКИ КОНТЕНТА**:
+   - Какие источники стоит оптимизировать/отключить
+   - Рекомендации по поиску новых источников
+
+5. **ТАЙМИНГ ПУБЛИКАЦИЙ**:
+   - Оптимальное время на основе данных
+   - Рекомендации по частоте публикаций
+
+Формат ответа: структурированный, с эмодзи, конкретными цифрами и actionable советами. Не более 800 слов."""
+
+        ai_response, usage_stats = await call_openai_chat(
+            messages=[{"role": "user", "content": prompt}],
+            model="gpt-4o",  # Используем GPT-4o для качественного анализа и рекомендаций
+            temperature=0.7,
+            max_tokens=2000,
+            db=db,
+            operation="ai_analysis"
+        )
+
+        # Получаем общую статистику AI анализов
+        ai_stats = await analytics.get_ai_analysis_stats()
+
+        # Форматируем ответ
+        report = f"""🤖 <b>AI АНАЛИЗ АНАЛИТИКИ</b>
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+{ai_response}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+<i>Анализ выполнен GPT-4 на основе данных за {days} дней</i>
+📅 {datetime.now().strftime('%d.%m.%Y %H:%M')}
+
+💰 <b>Стоимость анализа:</b>
+📊 Токенов: {usage_stats['total_tokens']:,} (prompt: {usage_stats['prompt_tokens']:,}, completion: {usage_stats['completion_tokens']:,})
+💵 Стоимость: ${usage_stats['cost_usd']:.4f}
+
+📈 <b>Общая статистика AI анализов:</b>
+• За месяц: {ai_stats['month']['count']} запросов, {ai_stats['month']['total_tokens']:,} токенов, ${ai_stats['month']['total_cost_usd']:.2f}
+• За год: {ai_stats['year']['count']} запросов, {ai_stats['year']['total_tokens']:,} токенов, ${ai_stats['year']['total_cost_usd']:.2f}"""
+
+        # Удаляем loading сообщение
+        await loading_msg.delete()
+
+        # Отправляем ответ (может быть длинным, поэтому разбиваем если нужно)
+        if len(report) > 4096:
+            # Разбиваем на части
+            parts = report.split("━━━━━━━━━━━━━━━━━━━━━━━━━━")
+            for i, part in enumerate(parts):
+                if part.strip():
+                    await callback.message.answer(
+                        part if i == 0 else "━━━━━━━━━━━━━━━━━━━━━━━━━━" + part,
+                        parse_mode="HTML",
+                        disable_web_page_preview=True
+                    )
+        else:
+            await callback.message.answer(report, parse_mode="HTML", disable_web_page_preview=True)
+
+        logger.info("ai_analysis_sent", period=period, response_length=len(ai_response))
+
+    except Exception as e:
+        logger.error("ai_analysis_error", error=str(e), period=callback.data)
+        # Удаляем loading сообщение если оно существует
+        try:
+            await loading_msg.delete()
+        except:
+            pass
+        await callback.message.answer(
+            "❌ Произошла ошибка при AI анализе. Попробуйте позже.\n\n"
+            f"Ошибка: {str(e)}",
+            parse_mode="HTML"
+        )
+
+
+@router.message(Command("alerts"))
+async def cmd_alerts(message: Message, db: AsyncSession):
+    """Проверить алерты и предупреждения о проблемах."""
+
+    if not await check_admin(message.from_user.id):
+        await message.answer("⛔ У вас нет доступа к этой команде")
+        return
+
+    await message.answer("🔍 Проверяю метрики...")
+
+    try:
+        analytics = AnalyticsService(db)
+
+        # Проверяем за последние 7 дней
+        alerts = await analytics.get_performance_alerts(days=7)
+
+        if not alerts:
+            await message.answer(
+                "✅ <b>Всё в порядке!</b>\n\n"
+                "Проблем не обнаружено. Система работает нормально.",
+                parse_mode="HTML"
+            )
+        else:
+            # Формируем отчёт с алертами
+            report = "🚨 <b>Обнаружены проблемы:</b>\n\n"
+
+            # Группируем по severity
+            critical = [a for a in alerts if a.get('severity') == 'critical']
+            warnings = [a for a in alerts if a.get('severity') == 'warning']
+            info = [a for a in alerts if a.get('severity') == 'info']
+
+            if critical:
+                report += "🔴 <b>КРИТИЧЕСКИЕ:</b>\n"
+                for alert in critical:
+                    report += f"{alert['message']}\n"
+                    report += f"   └─ {alert['details']}\n\n"
+
+            if warnings:
+                report += "⚠️ <b>ПРЕДУПРЕЖДЕНИЯ:</b>\n"
+                for alert in warnings:
+                    report += f"{alert['message']}\n"
+                    report += f"   └─ {alert['details']}\n\n"
+
+            if info:
+                report += "💡 <b>ИНФОРМАЦИЯ:</b>\n"
+                for alert in info:
+                    report += f"{alert['message']}\n"
+                    report += f"   └─ {alert['details']}\n\n"
+
+            report += f"\n📅 Проверено: {datetime.now().strftime('%d.%m.%Y %H:%M')}"
+
+            await message.answer(report, parse_mode="HTML")
+
+        logger.info("alerts_checked", user_id=message.from_user.id, alerts_count=len(alerts))
+
+    except Exception as e:
+        logger.error("alerts_error", error=str(e))
+        await message.answer(
+            "❌ Произошла ошибка при проверке алертов. Попробуйте позже.",
             parse_mode="HTML"
         )
 
@@ -1741,6 +2156,7 @@ async def setup_bot_commands():
         BotCommand(command="drafts", description="📝 Новые драфты"),
         BotCommand(command="fetch", description="🔄 Запустить сбор новостей"),
         BotCommand(command="analytics", description="📊 Аналитика канала"),
+        BotCommand(command="alerts", description="🚨 Проверить проблемы"),
         BotCommand(command="stats", description="📈 Статистика системы"),
         BotCommand(command="help", description="❓ Помощь"),
     ]
