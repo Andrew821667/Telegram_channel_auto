@@ -102,16 +102,10 @@ async def cmd_drafts(message: Message, db: AsyncSession):
     if not await check_admin(message.from_user.id):
         return
 
-    # Получаем драфты в статусе pending_review, созданные СЕГОДНЯ
-    from datetime import date
-    today_start = datetime.combine(date.today(), datetime.min.time())
-
+    # Получаем ВСЕ драфты в статусе pending_review (без фильтра по дате)
     result = await db.execute(
         select(PostDraft)
-        .where(
-            PostDraft.status == 'pending_review',
-            PostDraft.created_at >= today_start
-        )
+        .where(PostDraft.status == 'pending_review')
         .order_by(PostDraft.created_at.desc())
     )
     drafts = list(result.scalars().all())
@@ -785,29 +779,36 @@ async def callback_cancel_edit(callback: CallbackQuery, state: FSMContext):
     await callback.answer("Отменено")
 
 
-@router.callback_query(F.data.startswith("back_to_draft:"))
-async def callback_back_to_draft(callback: CallbackQuery, db: AsyncSession):
-    """Обработчик кнопки 'Назад' - возвращает к драфту."""
-    await callback.answer()
+@router.callback_query(F.data.startswith("cancel:"))
+async def callback_cancel_action(callback: CallbackQuery, db: AsyncSession):
+    """Обработчик кнопки 'Отмена' в диалогах подтверждения (publish/reject)."""
+    await callback.answer("Отменено")
 
     if not await check_admin(callback.from_user.id):
-        await callback.message.answer("⛔️ Нет прав доступа")
         return
 
     draft_id = int(callback.data.split(":")[1])
 
-    # Получаем драфт
-    result = await db.execute(
-        select(PostDraft).where(PostDraft.id == draft_id)
+    # Возвращаем исходную клавиатуру драфта (отменяем действие)
+    await callback.message.edit_reply_markup(
+        reply_markup=get_draft_review_keyboard(draft_id)
     )
-    draft = result.scalar_one_or_none()
 
-    if not draft:
-        await callback.message.answer(f"❌ Драфт #{draft_id} не найден")
+
+@router.callback_query(F.data.startswith("back_to_draft:"))
+async def callback_back_to_draft(callback: CallbackQuery, db: AsyncSession):
+    """Обработчик кнопки 'Назад' - возвращает исходную клавиатуру драфта."""
+    await callback.answer("Отменено")
+
+    if not await check_admin(callback.from_user.id):
         return
 
-    # Отправляем драфт заново
-    await send_draft_for_review(callback.message.chat.id, draft, db)
+    draft_id = int(callback.data.split(":")[1])
+
+    # Возвращаем исходную клавиатуру драфта (не отправляем новое сообщение!)
+    await callback.message.edit_reply_markup(
+        reply_markup=get_draft_review_keyboard(draft_id)
+    )
 
 
 # ====================
@@ -821,16 +822,10 @@ async def callback_show_drafts(callback: CallbackQuery, db: AsyncSession):
         await callback.answer("⛔️ Нет прав доступа", show_alert=True)
         return
 
-    # Получаем драфты в статусе pending_review, созданные СЕГОДНЯ
-    from datetime import date
-    today_start = datetime.combine(date.today(), datetime.min.time())
-
+    # Получаем ВСЕ драфты в статусе pending_review (без фильтра по дате)
     result = await db.execute(
         select(PostDraft)
-        .where(
-            PostDraft.status == 'pending_review',
-            PostDraft.created_at >= today_start
-        )
+        .where(PostDraft.status == 'pending_review')
         .order_by(PostDraft.created_at.desc())
     )
     drafts = list(result.scalars().all())

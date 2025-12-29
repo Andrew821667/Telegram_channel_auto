@@ -395,17 +395,11 @@ def send_drafts_to_admin_task():
 
             try:
                 async with SessionLocal() as session:
-                    # Получаем драфты в статусе pending_review, созданные СЕГОДНЯ
-                    # Фильтруем по началу текущего дня (00:00 UTC), чтобы отправлялись только свежие драфты
-                    from datetime import date
-                    today_start = datetime.combine(date.today(), datetime.min.time())  # 00:00 UTC сегодня
-
+                    # Получаем ВСЕ драфты в статусе pending_review (без фильтра по дате)
+                    # Это предотвращает timezone проблемы (UTC vs MSK)
                     result = await session.execute(
                         select(PostDraft)
-                        .where(
-                            PostDraft.status == 'pending_review',
-                            PostDraft.created_at >= today_start
-                        )
+                        .where(PostDraft.status == 'pending_review')
                         .order_by(PostDraft.created_at.desc())
                     )
                     drafts = list(result.scalars().all())
