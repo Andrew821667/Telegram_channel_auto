@@ -1949,12 +1949,17 @@ VIEWS И FORWARDS:
 
 Формат ответа: структурированный, с эмодзи, конкретными цифрами и actionable советами. Не более 800 слов."""
 
-        ai_response = await call_openai_chat(
+        ai_response, usage_stats = await call_openai_chat(
             messages=[{"role": "user", "content": prompt}],
             model="gpt-4o",  # Используем GPT-4 для качественного анализа
             temperature=0.7,
-            max_tokens=2000
+            max_tokens=2000,
+            db=db,
+            operation="ai_analysis"
         )
+
+        # Получаем общую статистику AI анализов
+        ai_stats = await analytics.get_ai_analysis_stats()
 
         # Форматируем ответ
         report = f"""🤖 <b>AI АНАЛИЗ АНАЛИТИКИ</b>
@@ -1966,7 +1971,15 @@ VIEWS И FORWARDS:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 <i>Анализ выполнен GPT-4 на основе данных за {days} дней</i>
-📅 {datetime.now().strftime('%d.%m.%Y %H:%M')}"""
+📅 {datetime.now().strftime('%d.%m.%Y %H:%M')}
+
+💰 <b>Стоимость анализа:</b>
+📊 Токенов: {usage_stats['total_tokens']:,} (prompt: {usage_stats['prompt_tokens']:,}, completion: {usage_stats['completion_tokens']:,})
+💵 Стоимость: ${usage_stats['cost_usd']:.4f}
+
+📈 <b>Общая статистика AI анализов:</b>
+• За месяц: {ai_stats['month']['count']} запросов, {ai_stats['month']['total_tokens']:,} токенов, ${ai_stats['month']['total_cost_usd']:.2f}
+• За год: {ai_stats['year']['count']} запросов, {ai_stats['year']['total_tokens']:,} токенов, ${ai_stats['year']['total_cost_usd']:.2f}"""
 
         # Отправляем ответ (может быть длинным, поэтому разбиваем если нужно)
         if len(report) > 4096:

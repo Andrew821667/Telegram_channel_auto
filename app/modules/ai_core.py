@@ -625,8 +625,10 @@ async def call_openai_chat(
     messages: List[Dict[str, str]],
     model: str = "gpt-4o",
     temperature: float = 0.7,
-    max_tokens: int = 2000
-) -> str:
+    max_tokens: int = 2000,
+    db: Optional[AsyncSession] = None,
+    operation: str = "ai_analysis"
+) -> Tuple[str, Dict[str, Any]]:
     """
     Прямой вызов OpenAI Chat API для аналитики.
 
@@ -635,9 +637,11 @@ async def call_openai_chat(
         model: Модель GPT (по умолчанию gpt-4o)
         temperature: Температура генерации (0-2)
         max_tokens: Максимум токенов в ответе
+        db: Database session для логирования (опционально)
+        operation: Тип операции (для логов)
 
     Returns:
-        Ответ от GPT-4
+        Tuple[str, Dict]: (Ответ от GPT-4, статистика использования)
     """
     try:
         client = AsyncOpenAI(api_key=settings.openai_api_key)
@@ -651,15 +655,50 @@ async def call_openai_chat(
 
         result = response.choices[0].message.content
 
+        # Расчет стоимости
+        # GPT-4o pricing (на декабрь 2024):
+        # - Input: $2.50 / 1M tokens
+        # - Output: $10.00 / 1M tokens
+        prompt_tokens = response.usage.prompt_tokens
+        completion_tokens = response.usage.completion_tokens
+        total_tokens = response.usage.total_tokens
+
+        cost_usd = (
+            (prompt_tokens / 1_000_000 * 2.50) +
+            (completion_tokens / 1_000_000 * 10.00)
+        )
+
+        usage_stats = {
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": total_tokens,
+            "cost_usd": round(cost_usd, 6)
+        }
+
         logger.info(
             "openai_chat_call",
             model=model,
-            prompt_tokens=response.usage.prompt_tokens,
-            completion_tokens=response.usage.completion_tokens,
-            total_tokens=response.usage.total_tokens
+            operation=operation,
+            **usage_stats
         )
 
-        return result
+        # Логируем в БД если передана сессия
+        if db:
+            from app.models.database import APIUsage
+
+            api_log = APIUsage(
+                provider="openai",
+                model=model,
+                operation=operation,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                total_tokens=total_tokens,
+                cost_usd=cost_usd
+            )
+            db.add(api_log)
+            await db.commit()
+
+        return result, usage_stats
 
     except Exception as e:
         logger.error("openai_chat_error", error=str(e), model=model)

@@ -950,3 +950,61 @@ class AnalyticsService:
                 "max_forwards": 0,
                 "viral_coefficient": 0
             }
+
+    async def get_ai_analysis_stats(self) -> Dict:
+        """Статистика использования AI анализа (токены и стоимость)."""
+        try:
+            from datetime import date
+            from dateutil.relativedelta import relativedelta
+
+            today = date.today()
+            month_start = date(today.year, today.month, 1)
+            year_start = date(today.year, 1, 1)
+
+            # Статистика за текущий месяц
+            query_month = text("""
+                SELECT
+                    COUNT(*) as count,
+                    SUM(total_tokens) as total_tokens,
+                    SUM(cost_usd) as total_cost
+                FROM api_usage
+                WHERE operation = 'ai_analysis'
+                AND date >= :month_start
+            """)
+
+            result_month = await self.db.execute(query_month, {"month_start": month_start})
+            row_month = result_month.fetchone()
+
+            # Статистика за текущий год
+            query_year = text("""
+                SELECT
+                    COUNT(*) as count,
+                    SUM(total_tokens) as total_tokens,
+                    SUM(cost_usd) as total_cost
+                FROM api_usage
+                WHERE operation = 'ai_analysis'
+                AND date >= :year_start
+            """)
+
+            result_year = await self.db.execute(query_year, {"year_start": year_start})
+            row_year = result_year.fetchone()
+
+            return {
+                "month": {
+                    "count": row_month.count or 0,
+                    "total_tokens": row_month.total_tokens or 0,
+                    "total_cost_usd": float(row_month.total_cost or 0)
+                },
+                "year": {
+                    "count": row_year.count or 0,
+                    "total_tokens": row_year.total_tokens or 0,
+                    "total_cost_usd": float(row_year.total_cost or 0)
+                }
+            }
+
+        except Exception as e:
+            logger.error("get_ai_analysis_stats_error", error=str(e))
+            return {
+                "month": {"count": 0, "total_tokens": 0, "total_cost_usd": 0},
+                "year": {"count": 0, "total_tokens": 0, "total_cost_usd": 0}
+            }
