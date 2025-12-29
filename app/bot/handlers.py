@@ -1754,6 +1754,542 @@ async def cmd_analytics(message: Message, db: AsyncSession):
     )
 
 
+@router.message(Command("settings"))
+async def cmd_settings(message: Message, db: AsyncSession):
+    """Системные настройки."""
+
+    if not await check_admin(message.from_user.id):
+        await message.answer("⛔ У вас нет доступа к этой команде")
+        return
+
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📰 Источники новостей", callback_data="settings:sources")],
+        [InlineKeyboardButton(text="🤖 Модели LLM", callback_data="settings:llm")],
+        [InlineKeyboardButton(text="🎨 Генерация изображений (DALL-E)", callback_data="settings:dalle")],
+        [InlineKeyboardButton(text="📅 Автопубликация", callback_data="settings:autopublish")],
+        [InlineKeyboardButton(text="🔔 Уведомления", callback_data="settings:alerts")],
+        [InlineKeyboardButton(text="🎯 Фильтрация и качество", callback_data="settings:quality")],
+        [InlineKeyboardButton(text="💰 Бюджет API", callback_data="settings:budget")],
+    ])
+
+    await message.answer(
+        "⚙️ <b>Системные настройки</b>\n\n"
+        "Все параметры сохраняются в базе данных и применяются автоматически.\n\n"
+        "Выберите категорию:",
+        parse_mode="HTML",
+        reply_markup=keyboard
+    )
+
+
+@router.callback_query(F.data == "settings:sources")
+async def callback_settings_sources(callback: CallbackQuery, db: AsyncSession):
+    """Настройки источников новостей."""
+    await callback.answer()
+
+    from app.modules.settings_manager import get_category_settings
+
+    # Получаем текущее состояние источников
+    sources = await get_category_settings("sources", db)
+
+    # Формируем клавиатуру с галочками
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+
+    source_config = {
+        "google_news_ru": "Google News RSS (RU)",
+        "google_news_en": "Google News RSS (EN)",
+        "habr": "Habr - Новости",
+        "perplexity_ru": "Perplexity Search (RU)",
+        "perplexity_en": "Perplexity Search (EN)",
+        "telegram_channels": "Telegram каналы",
+    }
+
+    buttons = []
+    for key, name in source_config.items():
+        is_enabled = sources.get(f"sources.{key}.enabled", True)
+        icon = "✅" if is_enabled else "☐"
+        buttons.append([
+            InlineKeyboardButton(
+                text=f"{icon} {name}",
+                callback_data=f"toggle_source:{key}"
+            )
+        ])
+
+    buttons.append([InlineKeyboardButton(text="« Назад", callback_data="back_to_settings")])
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
+
+    await callback.message.edit_text(
+        "📰 <b>Источники новостей</b>\n\n"
+        "Нажмите на источник чтобы включить/выключить его.\n"
+        "Изменения применяются мгновенно.\n\n"
+        "✅ - включен\n"
+        "☐ - выключен",
+        parse_mode="HTML",
+        reply_markup=keyboard
+    )
+
+
+@router.callback_query(F.data.startswith("toggle_source:"))
+async def callback_toggle_source(callback: CallbackQuery, db: AsyncSession):
+    """Переключить источник."""
+    source_key = callback.data.split(":")[1]
+
+    from app.modules.settings_manager import get_setting, set_setting
+
+    # Получаем текущее значение
+    setting_key = f"sources.{source_key}.enabled"
+    current_value = await get_setting(setting_key, db, default=True)
+
+    # Переключаем
+    new_value = not current_value
+    await set_setting(setting_key, new_value, db)
+
+    # Обновляем UI
+    await callback.answer(f"{'✅ Включен' if new_value else '☐ Выключен'}")
+    await callback_settings_sources(callback, db)
+
+
+@router.callback_query(F.data == "back_to_settings")
+async def callback_back_to_settings(callback: CallbackQuery, db: AsyncSession):
+    """Вернуться в главное меню настроек."""
+    await callback.answer()
+
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📰 Источники новостей", callback_data="settings:sources")],
+        [InlineKeyboardButton(text="🤖 Модели LLM", callback_data="settings:llm")],
+        [InlineKeyboardButton(text="🎨 Генерация изображений (DALL-E)", callback_data="settings:dalle")],
+        [InlineKeyboardButton(text="📅 Автопубликация", callback_data="settings:autopublish")],
+        [InlineKeyboardButton(text="🔔 Уведомления", callback_data="settings:alerts")],
+        [InlineKeyboardButton(text="🎯 Фильтрация и качество", callback_data="settings:quality")],
+        [InlineKeyboardButton(text="💰 Бюджет API", callback_data="settings:budget")],
+    ])
+
+    await callback.message.edit_text(
+        "⚙️ <b>Системные настройки</b>\n\n"
+        "Все параметры сохраняются в базе данных и применяются автоматически.\n\n"
+        "Выберите категорию:",
+        parse_mode="HTML",
+        reply_markup=keyboard
+    )
+
+
+@router.callback_query(F.data == "settings:llm")
+async def callback_settings_llm(callback: CallbackQuery, db: AsyncSession):
+    """Настройки моделей LLM."""
+    from app.modules.settings_manager import get_setting
+
+    current_analysis = await get_setting("llm.analysis.model", db, default="gpt-4o")
+    current_draft = await get_setting("llm.draft_generation.model", db, default="sonar")
+    current_ranking = await get_setting("llm.ranking.model", db, default="gpt-4o-mini")
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=f"🔍 Анализ: {current_analysis}", callback_data="llm_select:analysis")],
+        [InlineKeyboardButton(text=f"✍️ Генерация драфтов: {current_draft}", callback_data="llm_select:draft_generation")],
+        [InlineKeyboardButton(text=f"📊 Ранжирование: {current_ranking}", callback_data="llm_select:ranking")],
+        [InlineKeyboardButton(text="« Назад", callback_data="back_to_settings")],
+    ])
+
+    await callback.message.edit_text(
+        "🤖 <b>Модели LLM</b>\n\n"
+        "Настройте модели для разных операций:\n\n"
+        "• <b>Анализ</b> - AI анализ статей и метрик\n"
+        "• <b>Генерация драфтов</b> - создание текстов постов\n"
+        "• <b>Ранжирование</b> - scoring и сортировка статей\n\n"
+        "Нажмите на операцию для выбора модели:",
+        parse_mode="HTML",
+        reply_markup=keyboard
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("llm_select:"))
+async def callback_llm_select(callback: CallbackQuery, db: AsyncSession):
+    """Выбор модели LLM для операции."""
+    operation = callback.data.split(":")[1]
+
+    operation_names = {
+        "analysis": "Анализ",
+        "draft_generation": "Генерация драфтов",
+        "ranking": "Ранжирование"
+    }
+
+    # Available models
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="GPT-4o (самая умная)", callback_data=f"llm_set:{operation}:gpt-4o")],
+        [InlineKeyboardButton(text="GPT-4o-mini (быстрая)", callback_data=f"llm_set:{operation}:gpt-4o-mini")],
+        [InlineKeyboardButton(text="Perplexity Sonar (для поиска)", callback_data=f"llm_set:{operation}:sonar")],
+        [InlineKeyboardButton(text="« Назад", callback_data="settings:llm")],
+    ])
+
+    await callback.message.edit_text(
+        f"🤖 <b>Выбор модели для: {operation_names.get(operation, operation)}</b>\n\n"
+        "Доступные модели:\n\n"
+        "• <b>GPT-4o</b> - самая продвинутая, точная, дорогая (~$15/1M токенов)\n"
+        "• <b>GPT-4o-mini</b> - быстрая, дешевая (~$0.15/1M токенов)\n"
+        "• <b>Perplexity Sonar</b> - для поиска и генерации новостей\n\n"
+        "Текущая модель будет обновлена для всех новых операций.",
+        parse_mode="HTML",
+        reply_markup=keyboard
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("llm_set:"))
+async def callback_llm_set(callback: CallbackQuery, db: AsyncSession):
+    """Установить модель LLM."""
+    _, operation, model = callback.data.split(":")
+    from app.modules.settings_manager import set_setting
+
+    setting_key = f"llm.{operation}.model"
+    await set_setting(setting_key, model, db)
+
+    await callback.answer(f"✅ Модель обновлена: {model}")
+    await callback_settings_llm(callback, db)
+
+
+@router.callback_query(F.data == "settings:dalle")
+async def callback_settings_dalle(callback: CallbackQuery, db: AsyncSession):
+    """Настройки DALL-E генерации изображений."""
+    from app.modules.settings_manager import get_dalle_config
+
+    config = await get_dalle_config(db)
+
+    enabled_icon = "✅" if config["enabled"] else "☐"
+    auto_icon = "✅" if config["auto_generate"] else "☐"
+    ask_icon = "✅" if config["ask_on_review"] else "☐"
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=f"{enabled_icon} Включить DALL-E", callback_data="toggle:dalle.enabled")],
+        [InlineKeyboardButton(text=f"🎨 Модель: {config['model']}", callback_data="dalle_model_select")],
+        [InlineKeyboardButton(text=f"💎 Качество: {config['quality']}", callback_data="dalle_quality_select")],
+        [InlineKeyboardButton(text=f"📐 Размер: {config['size']}", callback_data="dalle_size_select")],
+        [InlineKeyboardButton(text=f"{auto_icon} Авто-генерация для всех постов", callback_data="toggle:dalle.auto_generate")],
+        [InlineKeyboardButton(text=f"{ask_icon} Спрашивать при модерации", callback_data="toggle:dalle.ask_on_review")],
+        [InlineKeyboardButton(text="« Назад", callback_data="back_to_settings")],
+    ])
+
+    await callback.message.edit_text(
+        "🎨 <b>Генерация изображений (DALL-E)</b>\n\n"
+        f"Статус: {'🟢 Включено' if config['enabled'] else '🔴 Выключено'}\n\n"
+        "• <b>Модель</b> - DALL-E 2 или DALL-E 3\n"
+        "• <b>Качество</b> - standard (дешевле) или hd (детальнее)\n"
+        "• <b>Размер</b> - 1024x1024, 1792x1024, 1024x1792\n"
+        "• <b>Авто-генерация</b> - создавать для каждого поста\n"
+        "• <b>Спрашивать</b> - запрос при модерации\n\n"
+        "💰 Стоимость: ~$0.04-0.12 за изображение",
+        parse_mode="HTML",
+        reply_markup=keyboard
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("toggle:"))
+async def callback_toggle_setting(callback: CallbackQuery, db: AsyncSession):
+    """Переключить булевую настройку."""
+    setting_key = callback.data.split(":")[1]
+    from app.modules.settings_manager import get_setting, set_setting
+
+    current_value = await get_setting(setting_key, db, default=False)
+    new_value = not current_value
+    await set_setting(setting_key, new_value, db)
+
+    await callback.answer(f"{'✅ Включено' if new_value else '☐ Выключено'}")
+
+    # Redirect back to appropriate menu
+    if setting_key.startswith("dalle."):
+        await callback_settings_dalle(callback, db)
+    elif setting_key.startswith("auto_publish."):
+        await callback_settings_autopublish(callback, db)
+    elif setting_key.startswith("alerts."):
+        await callback_settings_alerts(callback, db)
+    elif setting_key.startswith("budget."):
+        await callback_settings_budget(callback, db)
+
+
+@router.callback_query(F.data == "dalle_model_select")
+async def callback_dalle_model_select(callback: CallbackQuery, db: AsyncSession):
+    """Выбор модели DALL-E."""
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="DALL-E 3 (лучшее качество)", callback_data="dalle_set:model:dall-e-3")],
+        [InlineKeyboardButton(text="DALL-E 2 (дешевле)", callback_data="dalle_set:model:dall-e-2")],
+        [InlineKeyboardButton(text="« Назад", callback_data="settings:dalle")],
+    ])
+
+    await callback.message.edit_text(
+        "🎨 <b>Выбор модели DALL-E</b>\n\n"
+        "• <b>DALL-E 3</b> - лучшее качество, детализация (~$0.04-0.12)\n"
+        "• <b>DALL-E 2</b> - базовое качество, дешевле (~$0.02)\n\n"
+        "Выберите модель:",
+        parse_mode="HTML",
+        reply_markup=keyboard
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "dalle_quality_select")
+async def callback_dalle_quality_select(callback: CallbackQuery, db: AsyncSession):
+    """Выбор качества DALL-E."""
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="HD (высокое качество)", callback_data="dalle_set:quality:hd")],
+        [InlineKeyboardButton(text="Standard (базовое)", callback_data="dalle_set:quality:standard")],
+        [InlineKeyboardButton(text="« Назад", callback_data="settings:dalle")],
+    ])
+
+    await callback.message.edit_text(
+        "💎 <b>Качество изображений</b>\n\n"
+        "• <b>HD</b> - высокая детализация (в 2x дороже)\n"
+        "• <b>Standard</b> - базовое качество\n\n"
+        "Выберите качество:",
+        parse_mode="HTML",
+        reply_markup=keyboard
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "dalle_size_select")
+async def callback_dalle_size_select(callback: CallbackQuery, db: AsyncSession):
+    """Выбор размера изображения DALL-E."""
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="1024x1024 (квадрат)", callback_data="dalle_set:size:1024x1024")],
+        [InlineKeyboardButton(text="1792x1024 (горизонт)", callback_data="dalle_set:size:1792x1024")],
+        [InlineKeyboardButton(text="1024x1792 (вертикаль)", callback_data="dalle_set:size:1024x1792")],
+        [InlineKeyboardButton(text="« Назад", callback_data="settings:dalle")],
+    ])
+
+    await callback.message.edit_text(
+        "📐 <b>Размер изображения</b>\n\n"
+        "• <b>1024x1024</b> - квадратный формат\n"
+        "• <b>1792x1024</b> - горизонтальный (для постов)\n"
+        "• <b>1024x1792</b> - вертикальный (для stories)\n\n"
+        "Выберите размер:",
+        parse_mode="HTML",
+        reply_markup=keyboard
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("dalle_set:"))
+async def callback_dalle_set(callback: CallbackQuery, db: AsyncSession):
+    """Установить параметр DALL-E."""
+    _, param, value = callback.data.split(":")
+    from app.modules.settings_manager import set_setting
+
+    setting_key = f"dalle.{param}"
+    await set_setting(setting_key, value, db)
+
+    await callback.answer(f"✅ {param.capitalize()} обновлен: {value}")
+    await callback_settings_dalle(callback, db)
+
+
+@router.callback_query(F.data == "settings:autopublish")
+async def callback_settings_autopublish(callback: CallbackQuery, db: AsyncSession):
+    """Настройки автопубликации."""
+    from app.modules.settings_manager import get_auto_publish_config
+
+    config = await get_auto_publish_config(db)
+
+    enabled_icon = "✅" if config["enabled"] else "☐"
+    weekdays_icon = "✅" if config["weekdays_only"] else "☐"
+    holidays_icon = "✅" if config["skip_holidays"] else "☐"
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=f"{enabled_icon} Включить автопубликацию", callback_data="toggle:auto_publish.enabled")],
+        [InlineKeyboardButton(text=f"⏰ Режим: {config['mode']}", callback_data="autopublish_mode_select")],
+        [InlineKeyboardButton(text=f"📊 Макс. постов/день: {config['max_per_day']}", callback_data="autopublish_max_select")],
+        [InlineKeyboardButton(text=f"{weekdays_icon} Только в будни", callback_data="toggle:auto_publish.weekdays_only")],
+        [InlineKeyboardButton(text=f"{holidays_icon} Пропускать праздники", callback_data="toggle:auto_publish.skip_holidays")],
+        [InlineKeyboardButton(text="« Назад", callback_data="back_to_settings")],
+    ])
+
+    mode_desc = {
+        "best_time": "Лучшее время (AI выбирает)",
+        "schedule": "По расписанию",
+        "even": "Равномерно в течение дня"
+    }
+
+    await callback.message.edit_text(
+        "📅 <b>Автопубликация</b>\n\n"
+        f"Статус: {'🟢 Включено' if config['enabled'] else '🔴 Выключено'}\n"
+        f"Режим: {mode_desc.get(config['mode'], config['mode'])}\n\n"
+        "• <b>Режим</b> - когда публиковать посты\n"
+        "• <b>Макс. постов/день</b> - лимит публикаций\n"
+        "• <b>Только в будни</b> - не публиковать в выходные\n"
+        "• <b>Пропускать праздники</b> - не публиковать в праздники\n\n"
+        "⚠️ Посты всё равно проходят модерацию!",
+        parse_mode="HTML",
+        reply_markup=keyboard
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "autopublish_mode_select")
+async def callback_autopublish_mode_select(callback: CallbackQuery, db: AsyncSession):
+    """Выбор режима автопубликации."""
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⏰ Лучшее время (AI)", callback_data="autopublish_set:mode:best_time")],
+        [InlineKeyboardButton(text="📅 По расписанию", callback_data="autopublish_set:mode:schedule")],
+        [InlineKeyboardButton(text="⏳ Равномерно", callback_data="autopublish_set:mode:even")],
+        [InlineKeyboardButton(text="« Назад", callback_data="settings:autopublish")],
+    ])
+
+    await callback.message.edit_text(
+        "⏰ <b>Режим автопубликации</b>\n\n"
+        "• <b>Лучшее время</b> - AI анализирует метрики и выбирает\n"
+        "  оптимальное время на основе engagement\n\n"
+        "• <b>По расписанию</b> - фиксированное время (9:00, 14:00, 18:00)\n\n"
+        "• <b>Равномерно</b> - распределить равномерно в течение дня\n\n"
+        "Выберите режим:",
+        parse_mode="HTML",
+        reply_markup=keyboard
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "autopublish_max_select")
+async def callback_autopublish_max_select(callback: CallbackQuery, db: AsyncSession):
+    """Выбор максимального количества постов в день."""
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="1 пост/день", callback_data="autopublish_set:max_per_day:1")],
+        [InlineKeyboardButton(text="2 поста/день", callback_data="autopublish_set:max_per_day:2")],
+        [InlineKeyboardButton(text="3 поста/день", callback_data="autopublish_set:max_per_day:3")],
+        [InlineKeyboardButton(text="5 постов/день", callback_data="autopublish_set:max_per_day:5")],
+        [InlineKeyboardButton(text="« Назад", callback_data="settings:autopublish")],
+    ])
+
+    await callback.message.edit_text(
+        "📊 <b>Максимум постов в день</b>\n\n"
+        "Сколько постов разрешено публиковать автоматически в день?\n\n"
+        "Рекомендация: 2-3 поста для качественного контента.\n\n"
+        "Выберите лимит:",
+        parse_mode="HTML",
+        reply_markup=keyboard
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("autopublish_set:"))
+async def callback_autopublish_set(callback: CallbackQuery, db: AsyncSession):
+    """Установить параметр автопубликации."""
+    _, param, value = callback.data.split(":")
+    from app.modules.settings_manager import set_setting
+
+    setting_key = f"auto_publish.{param}"
+    # Convert to int if it's max_per_day
+    if param == "max_per_day":
+        value = int(value)
+
+    await set_setting(setting_key, value, db)
+
+    await callback.answer(f"✅ Обновлено: {value}")
+    await callback_settings_autopublish(callback, db)
+
+
+@router.callback_query(F.data == "settings:alerts")
+async def callback_settings_alerts(callback: CallbackQuery, db: AsyncSession):
+    """Настройки уведомлений."""
+    from app.modules.settings_manager import get_category_settings
+
+    alerts = await get_category_settings("alerts", db)
+
+    low_eng_icon = "✅" if alerts.get("alerts.low_engagement.enabled", True) else "☐"
+    viral_icon = "✅" if alerts.get("alerts.viral_post.enabled", True) else "☐"
+    low_appr_icon = "✅" if alerts.get("alerts.low_approval.enabled", True) else "☐"
+    fetch_err_icon = "✅" if alerts.get("alerts.fetch_errors.enabled", True) else "☐"
+    api_lim_icon = "✅" if alerts.get("alerts.api_limits.enabled", True) else "☐"
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=f"{low_eng_icon} Падение engagement", callback_data="toggle:alerts.low_engagement.enabled")],
+        [InlineKeyboardButton(text=f"  └ Порог: {alerts.get('alerts.low_engagement.threshold', 20)}%", callback_data="alert_threshold:low_engagement")],
+        [InlineKeyboardButton(text=f"{viral_icon} Viral пост", callback_data="toggle:alerts.viral_post.enabled")],
+        [InlineKeyboardButton(text=f"  └ Порог: {alerts.get('alerts.viral_post.threshold', 100)} просм.", callback_data="alert_threshold:viral_post")],
+        [InlineKeyboardButton(text=f"{low_appr_icon} Низкий approval rate", callback_data="toggle:alerts.low_approval.enabled")],
+        [InlineKeyboardButton(text=f"  └ Порог: {alerts.get('alerts.low_approval.threshold', 30)}%", callback_data="alert_threshold:low_approval")],
+        [InlineKeyboardButton(text=f"{fetch_err_icon} Ошибки сбора новостей", callback_data="toggle:alerts.fetch_errors.enabled")],
+        [InlineKeyboardButton(text=f"{api_lim_icon} Лимиты API", callback_data="toggle:alerts.api_limits.enabled")],
+        [InlineKeyboardButton(text="« Назад", callback_data="back_to_settings")],
+    ])
+
+    await callback.message.edit_text(
+        "🔔 <b>Уведомления и алерты</b>\n\n"
+        "Настройте когда получать уведомления:\n\n"
+        "• <b>Падение engagement</b> - если views/subscribers < порога\n"
+        "• <b>Viral пост</b> - если пост набрал много просмотров\n"
+        "• <b>Низкий approval</b> - если отклонено много статей\n"
+        "• <b>Ошибки сбора</b> - проблемы с источниками\n"
+        "• <b>Лимиты API</b> - приближение к лимитам\n\n"
+        "Нажмите для включения/отключения или настройки порогов:",
+        parse_mode="HTML",
+        reply_markup=keyboard
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "settings:quality")
+async def callback_settings_quality(callback: CallbackQuery, db: AsyncSession):
+    """Настройки фильтрации и качества."""
+    from app.modules.settings_manager import get_category_settings
+
+    quality = await get_category_settings("quality", db)
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=f"⭐ Мин. quality score: {quality.get('quality.min_score', 0.6)}", callback_data="quality_param:min_score")],
+        [InlineKeyboardButton(text=f"📝 Мин. длина текста: {quality.get('quality.min_content_length', 300)}", callback_data="quality_param:min_content_length")],
+        [InlineKeyboardButton(text=f"🔄 Порог схожести: {quality.get('quality.similarity_threshold', 0.85)}", callback_data="quality_param:similarity_threshold")],
+        [InlineKeyboardButton(text=f"🌐 Языки: {', '.join(quality.get('quality.languages', ['ru', 'en']))}", callback_data="quality_param:languages")],
+        [InlineKeyboardButton(text="« Назад", callback_data="back_to_settings")],
+    ])
+
+    await callback.message.edit_text(
+        "🎯 <b>Фильтрация и качество</b>\n\n"
+        "Настройки автоматической фильтрации статей:\n\n"
+        "• <b>Quality score</b> - минимальный балл AI (0.0-1.0)\n"
+        "• <b>Длина текста</b> - минимум символов в статье\n"
+        "• <b>Порог схожести</b> - фильтр дубликатов (0.0-1.0)\n"
+        "• <b>Языки</b> - разрешённые языки контента\n\n"
+        "⚠️ Слишком строгие фильтры могут пропускать мало статей!",
+        parse_mode="HTML",
+        reply_markup=keyboard
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "settings:budget")
+async def callback_settings_budget(callback: CallbackQuery, db: AsyncSession):
+    """Настройки бюджета API."""
+    from app.modules.settings_manager import get_category_settings
+
+    budget = await get_category_settings("budget", db)
+
+    stop_icon = "✅" if budget.get("budget.stop_on_exceed", False) else "☐"
+    switch_icon = "✅" if budget.get("budget.switch_to_cheap", True) else "☐"
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=f"💰 Макс. бюджет/месяц: ${budget.get('budget.max_per_month', 10)}", callback_data="budget_param:max_per_month")],
+        [InlineKeyboardButton(text=f"⚠️ Предупреждение при: ${budget.get('budget.warning_threshold', 8)}", callback_data="budget_param:warning_threshold")],
+        [InlineKeyboardButton(text=f"{stop_icon} Остановить при превышении", callback_data="toggle:budget.stop_on_exceed")],
+        [InlineKeyboardButton(text=f"{switch_icon} Переключиться на дешевые модели", callback_data="toggle:budget.switch_to_cheap")],
+        [InlineKeyboardButton(text="« Назад", callback_data="back_to_settings")],
+    ])
+
+    await callback.message.edit_text(
+        "💰 <b>Бюджет API</b>\n\n"
+        "Контроль расходов на OpenAI API:\n\n"
+        "• <b>Макс. бюджет</b> - лимит в $ на месяц\n"
+        "• <b>Предупреждение</b> - когда отправить алерт\n"
+        "• <b>Остановить</b> - прекратить работу при превышении\n"
+        "• <b>Переключиться</b> - использовать дешевые модели\n\n"
+        f"📊 Текущий расход: отслеживается в БД\n"
+        "💡 Рекомендуется включить 'Переключиться на дешевые модели'",
+        parse_mode="HTML",
+        reply_markup=keyboard
+    )
+    await callback.answer()
+
+
 @router.callback_query(F.data == "show_ai_analysis_menu")
 async def callback_show_ai_analysis_menu(callback: CallbackQuery):
     """Показать меню выбора периода для AI анализа."""

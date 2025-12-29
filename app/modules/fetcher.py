@@ -636,54 +636,76 @@ Search only for recent news. Return maximum 10 articles."""
         Returns:
             Словарь с количеством статей по источникам
         """
+        from app.modules.settings_manager import is_source_enabled
+
         stats = {}
 
         # Google News RSS (русский)
-        if settings.fetcher_enabled:
+        if settings.fetcher_enabled and await is_source_enabled("google_news_ru", self.db):
+            logger.info("fetching_source", source="google_news_ru", enabled=True)
             articles_ru = await self.fetch_google_news_rss("ru")
             saved_ru = await self.save_articles(articles_ru)
             stats["Google News RU"] = saved_ru
+        else:
+            logger.info("source_disabled", source="google_news_ru")
 
-            # Google News RSS (английский)
+        # Google News RSS (английский)
+        if settings.fetcher_enabled and await is_source_enabled("google_news_en", self.db):
+            logger.info("fetching_source", source="google_news_en", enabled=True)
             articles_en = await self.fetch_google_news_rss("en")
             saved_en = await self.save_articles(articles_en)
             stats["Google News EN"] = saved_en
+        else:
+            logger.info("source_disabled", source="google_news_en")
 
-            # Perplexity Real-Time Search (если включен)
-            if settings.perplexity_search_enabled:
-                # Русские новости через Perplexity
-                perplexity_articles_ru = await self.fetch_perplexity_news("ru")
-                saved_perplexity_ru = await self.save_articles(perplexity_articles_ru)
-                stats["Perplexity Search RU"] = saved_perplexity_ru
+        # Perplexity Real-Time Search (русский)
+        if settings.perplexity_search_enabled and await is_source_enabled("perplexity_ru", self.db):
+            logger.info("fetching_source", source="perplexity_ru", enabled=True)
+            perplexity_articles_ru = await self.fetch_perplexity_news("ru")
+            saved_perplexity_ru = await self.save_articles(perplexity_articles_ru)
+            stats["Perplexity Search RU"] = saved_perplexity_ru
+        else:
+            logger.info("source_disabled", source="perplexity_ru")
 
-                # Английские новости через Perplexity
-                perplexity_articles_en = await self.fetch_perplexity_news("en")
-                saved_perplexity_en = await self.save_articles(perplexity_articles_en)
-                stats["Perplexity Search EN"] = saved_perplexity_en
+        # Perplexity Real-Time Search (английский)
+        if settings.perplexity_search_enabled and await is_source_enabled("perplexity_en", self.db):
+            logger.info("fetching_source", source="perplexity_en", enabled=True)
+            perplexity_articles_en = await self.fetch_perplexity_news("en")
+            saved_perplexity_en = await self.save_articles(perplexity_articles_en)
+            stats["Perplexity Search EN"] = saved_perplexity_en
+        else:
+            logger.info("source_disabled", source="perplexity_en")
 
-            # 🆕 Telegram Channels (если включен)
-            if settings.telegram_fetch_enabled and settings.telegram_api_id and settings.telegram_api_hash:
-                from app.modules.telegram_fetcher import fetch_telegram_news
+        # 🆕 Telegram Channels (если включен)
+        if (settings.telegram_fetch_enabled and
+            settings.telegram_api_id and
+            settings.telegram_api_hash and
+            await is_source_enabled("telegram_channels", self.db)):
+            logger.info("fetching_source", source="telegram_channels", enabled=True)
 
-                telegram_stats, telegram_articles = await fetch_telegram_news()
-                saved_telegram = await self.save_articles(telegram_articles)
+            from app.modules.telegram_fetcher import fetch_telegram_news
 
-                # Добавляем статистику по каждому каналу
-                for channel_name, count in telegram_stats.items():
-                    # count - это сколько было собрано ДО сохранения
-                    # Но нам нужно знать сколько реально сохранилось
-                    # Поэтому просто используем общий счетчик
-                    pass
+            telegram_stats, telegram_articles = await fetch_telegram_news()
+            saved_telegram = await self.save_articles(telegram_articles)
 
-                # Общая статистика по Telegram
-                stats["Telegram Channels"] = saved_telegram
+            # Добавляем статистику по каждому каналу
+            for channel_name, count in telegram_stats.items():
+                # count - это сколько было собрано ДО сохранения
+                # Но нам нужно знать сколько реально сохранилось
+                # Поэтому просто используем общий счетчик
+                pass
 
-                # Детальная статистика по каналам (для логов)
-                logger.info(
-                    "telegram_detailed_stats",
-                    channels_stats=telegram_stats,
-                    total_saved=saved_telegram
-                )
+            # Общая статистика по Telegram
+            stats["Telegram Channels"] = saved_telegram
+
+            # Детальная статистика по каналам (для логов)
+            logger.info(
+                "telegram_detailed_stats",
+                channels_stats=telegram_stats,
+                total_saved=saved_telegram
+            )
+        else:
+            logger.info("source_disabled", source="telegram_channels")
 
         # Дополнительные RSS источники из БД
         result = await self.db.execute(
