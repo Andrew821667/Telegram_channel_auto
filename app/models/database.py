@@ -350,6 +350,30 @@ class PersonalPost(Base):
     )
 
 
+class PostComment(Base):
+    """Комментарии к личным постам (рефлексия и развитие идей)."""
+
+    __tablename__ = "post_comments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    post_id = Column(Integer, nullable=False, index=True)  # FK to personal_posts.id
+    user_id = Column(BigInteger, nullable=False)  # Telegram user ID
+
+    # Контент комментария
+    content = Column(Text, nullable=False)
+
+    # Метаданные
+    comment_type = Column(String(50), default='reflection')  # reflection, idea, question, update
+
+    # Timestamps
+    created_at = Column(TIMESTAMP, default=datetime.utcnow, index=True)
+    updated_at = Column(TIMESTAMP, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        Index('idx_post_comments_post', 'post_id', 'created_at'),
+    )
+
+
 # ====================
 # Database Connection
 # ====================

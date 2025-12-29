@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.models.database import (
     PostDraft, Publication, RawArticle,
-    FeedbackLabel, PersonalPost, get_db
+    FeedbackLabel, PersonalPost, PostComment, get_db
 )
 from app.bot.keyboards import (
     get_draft_review_keyboard,
@@ -2425,6 +2425,7 @@ class PersonalPostStates(StatesGroup):
     waiting_ai_feedback = State()
     waiting_voice = State()
     waiting_edit_text = State()
+    waiting_comment = State()
 
 
 @router.callback_query(F.data == "post_manual")
@@ -2959,6 +2960,18 @@ async def callback_view_post(callback: CallbackQuery, db: AsyncSession):
     else:
         buttons.append([InlineKeyboardButton(text="📤 Опубликовать снова", callback_data=f"publish_post:{post.id}")])
 
+    # Подсчитываем комментарии
+    comments_result = await db.execute(
+        select(PostComment).where(PostComment.post_id == post.id)
+    )
+    comments_count = len(list(comments_result.scalars().all()))
+
+    comments_text = f"💬 Комментарии ({comments_count})" if comments_count > 0 else "💬 Добавить комментарий"
+
+    buttons.append([
+        InlineKeyboardButton(text=comments_text, callback_data=f"view_comments:{post.id}")
+    ])
+
     buttons.append([
         InlineKeyboardButton(text="✏️ Редактировать", callback_data=f"edit_post:{post.id}"),
         InlineKeyboardButton(text="🗑 Удалить", callback_data=f"delete_post:{post.id}")
@@ -3063,6 +3076,187 @@ async def callback_delete_post(callback: CallbackQuery, db: AsyncSession):
         await callback_list_personal_posts(callback, db)
     else:
         await callback.answer("❌ Не удалось удалить", show_alert=True)
+
+
+@router.callback_query(F.data.startswith("view_comments:"))
+async def callback_view_comments(callback: CallbackQuery, db: AsyncSession):
+    """Показать комментарии к заметке."""
+    post_id = int(callback.data.split(":")[1])
+
+    # Получаем заметку
+    result = await db.execute(
+        select(PersonalPost).where(
+            PersonalPost.id == post_id,
+            PersonalPost.user_id == callback.from_user.id
+        )
+    )
+    post = result.scalar_one_or_none()
+
+    if not post:
+        await callback.answer("❌ Заметка не найдена", show_alert=True)
+        return
+
+    # Получаем комментарии
+    comments_result = await db.execute(
+        select(PostComment)
+        .where(PostComment.post_id == post.id)
+        .order_by(PostComment.created_at.asc())
+    )
+    comments = list(comments_result.scalars().all())
+
+    # Формируем текст
+    text = f"💬 <b>Комментарии к заметке</b>\n\n"
+    text += f"<b>Заметка:</b> {post.title or post.content[:50]}...\n"
+    text += f"{'─' * 30}\n\n"
+
+    if comments:
+        for idx, comment in enumerate(comments, 1):
+            date_str = comment.created_at.strftime("%d.%m %H:%M")
+            comment_icon = {
+                "reflection": "🤔",
+                "idea": "💡",
+                "question": "❓",
+                "update": "📝"
+            }.get(comment.comment_type, "💬")
+
+            text += f"{comment_icon} <b>#{idx}</b> ({date_str})\n"
+            text += f"{comment.content}\n\n"
+    else:
+        text += "<i>Комментариев пока нет</i>\n\n"
+
+    # Кнопки
+    buttons = [
+        [InlineKeyboardButton(text="➕ Добавить комментарий", callback_data=f"add_comment:{post.id}")],
+        [InlineKeyboardButton(text="« К заметке", callback_data=f"view_post:{post.id}")]
+    ]
+
+    await callback.message.edit_text(
+        text,
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("add_comment:"))
+async def callback_add_comment(callback: CallbackQuery, state: FSMContext, db: AsyncSession):
+    """Начать добавление комментария."""
+    post_id = int(callback.data.split(":")[1])
+
+    # Проверяем что заметка существует
+    result = await db.execute(
+        select(PersonalPost).where(
+            PersonalPost.id == post_id,
+            PersonalPost.user_id == callback.from_user.id
+        )
+    )
+    post = result.scalar_one_or_none()
+
+    if not post:
+        await callback.answer("❌ Заметка не найдена", show_alert=True)
+        return
+
+    # Сохраняем post_id в FSM
+    await state.update_data(commenting_post_id=post_id)
+    await state.set_state(PersonalPostStates.waiting_comment)
+
+    # Показываем типы комментариев
+    buttons = [
+        [InlineKeyboardButton(text="🤔 Рефлексия", callback_data=f"comment_type:reflection:{post_id}")],
+        [InlineKeyboardButton(text="💡 Идея", callback_data=f"comment_type:idea:{post_id}")],
+        [InlineKeyboardButton(text="❓ Вопрос", callback_data=f"comment_type:question:{post_id}")],
+        [InlineKeyboardButton(text="📝 Обновление", callback_data=f"comment_type:update:{post_id}")],
+        [InlineKeyboardButton(text="« Отмена", callback_data=f"view_comments:{post_id}")]
+    ]
+
+    await callback.message.edit_text(
+        "💬 <b>Добавить комментарий</b>\n\n"
+        "Выберите тип комментария:",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("comment_type:"))
+async def callback_comment_type(callback: CallbackQuery, state: FSMContext):
+    """Выбран тип комментария."""
+    parts = callback.data.split(":")
+    comment_type = parts[1]
+    post_id = int(parts[2])
+
+    # Сохраняем тип комментария
+    await state.update_data(comment_type=comment_type)
+
+    type_names = {
+        "reflection": "🤔 Рефлексия",
+        "idea": "💡 Идея",
+        "question": "❓ Вопрос",
+        "update": "📝 Обновление"
+    }
+
+    await callback.message.edit_text(
+        f"{type_names.get(comment_type, 'Комментарий')}\n\n"
+        f"Напишите ваш комментарий:",
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+
+@router.message(PersonalPostStates.waiting_comment)
+async def process_comment(message: Message, state: FSMContext, db: AsyncSession):
+    """Обработать текст комментария."""
+    # Получаем данные из FSM
+    data = await state.get_data()
+    post_id = data.get("commenting_post_id")
+    comment_type = data.get("comment_type", "reflection")
+
+    if not post_id:
+        await message.answer("❌ Ошибка: не найден ID заметки")
+        await state.clear()
+        return
+
+    # Создаём комментарий
+    comment = PostComment(
+        post_id=post_id,
+        user_id=message.from_user.id,
+        content=message.text,
+        comment_type=comment_type
+    )
+
+    db.add(comment)
+    await db.commit()
+
+    logger.info(
+        "comment_added",
+        post_id=post_id,
+        comment_id=comment.id,
+        comment_type=comment_type,
+        user_id=message.from_user.id
+    )
+
+    # Очищаем FSM
+    await state.clear()
+
+    # Показываем комментарии
+    buttons = [
+        [InlineKeyboardButton(text="💬 К комментариям", callback_data=f"view_comments:{post_id}")],
+        [InlineKeyboardButton(text="« К заметке", callback_data=f"view_post:{post_id}")]
+    ]
+
+    type_icons = {
+        "reflection": "🤔",
+        "idea": "💡",
+        "question": "❓",
+        "update": "📝"
+    }
+
+    await message.answer(
+        f"✅ <b>Комментарий добавлен!</b>\n\n"
+        f"{type_icons.get(comment_type, '💬')} {message.text}",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
+    )
 
 
 @router.callback_query(F.data.startswith("edit_post:"))
