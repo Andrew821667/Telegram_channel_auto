@@ -2994,10 +2994,26 @@ async def callback_publish_post(callback: CallbackQuery, db: AsyncSession):
     try:
         from app.config import settings
         import html
+        import re
+
+        # Очищаем текст от служебной информации
+        clean_content = post.content
+
+        # Убираем заголовки с служебными словами
+        service_headers = [
+            r'^#+\s*(Редактирование|Заметка|Черновик|Draft|Note|Edit).*?\n+',
+            r'^\*\*\s*(Редактирование|Заметка|Черновик|Draft|Note|Edit).*?\*\*\n+',
+            r'^(Редактирование|Заметка|Черновик):\s*\n+',
+        ]
+        for pattern in service_headers:
+            clean_content = re.sub(pattern, '', clean_content, flags=re.IGNORECASE | re.MULTILINE)
+
+        # Убираем лишние пустые строки в начале
+        clean_content = clean_content.lstrip('\n ')
 
         # Форматируем пост для публикации
         # Экранируем HTML символы для безопасности
-        publish_text = html.escape(post.content)
+        publish_text = html.escape(clean_content)
 
         # Добавляем теги если есть
         if post.tags:
