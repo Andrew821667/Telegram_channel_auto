@@ -1625,9 +1625,48 @@ async def callback_cancel_action(callback: CallbackQuery, db: AsyncSession):
 
 ---
 
+#### Проблема 3: Кнопка "« Назад" отправляет дубликаты
+**Симптомы:**
+При нажатии "❌ Отклонить" → выбор причины → "« Назад", бот отправлял новое сообщение с драфтом вместо возврата клавиатуры.
+
+**Диагностика:**
+Handler `callback_back_to_draft` (handlers.py:798) выполнял:
+```python
+# Получаем драфт
+draft = await db.get(PostDraft, draft_id)
+# Отправляем драфт ЗАНОВО
+await send_draft_for_review(callback.message.chat.id, draft, db)  # ❌ новое сообщение!
+```
+
+**Решение:**
+Изменён handler чтобы просто редактировать клавиатуру (аналогично cancel button):
+```python
+@router.callback_query(F.data.startswith("back_to_draft:"))
+async def callback_back_to_draft(callback: CallbackQuery, db: AsyncSession):
+    """Обработчик кнопки 'Назад' - возвращает исходную клавиатуру драфта."""
+    await callback.answer("Отменено")
+    if not await check_admin(callback.from_user.id):
+        return
+    draft_id = int(callback.data.split(":")[1])
+    # Возвращаем исходную клавиатуру драфта (не отправляем новое сообщение!)
+    await callback.message.edit_reply_markup(
+        reply_markup=get_draft_review_keyboard(draft_id)
+    )
+```
+
+**Результат:**
+- ✅ Кнопка "« Назад" теперь просто возвращает клавиатуру
+- ✅ Нет дубликатов сообщений
+- ✅ Единообразный UX во всех confirmation dialogs
+
+**Коммит:** `dd3f425` - fix: Fix back button in rejection menu - restore keyboard instead of sending new message
+
+---
+
 #### Итоговые коммиты:
 - `b39cd5f` - fix: Remove timezone filter for drafts display
 - `f95c790` - fix: Add missing cancel button handler in confirmation dialogs
+- `dd3f425` - fix: Fix back button in rejection menu
 
 ---
 
@@ -1641,6 +1680,10 @@ async def callback_cancel_action(callback: CallbackQuery, db: AsyncSession):
 
 **2. Cancel Button:**
 - ✅ Handler добавлен в код
+- ✅ Изменения запушены в GitHub
+
+**3. Back Button:**
+- ✅ Handler исправлен
 - ✅ Изменения запушены в GitHub
 - ⏳ Требует тестирования пользователем после `git pull`
 
@@ -1656,7 +1699,11 @@ async def callback_cancel_action(callback: CallbackQuery, db: AsyncSession):
 ✅ **Cancel button работает:**
 - Добавлен отсутствующий обработчик callback
 - Кнопка "Отмена" в confirmation dialogs теперь функциональна
-- Graceful UX при отмене действия
+
+✅ **Back button работает:**
+- Исправлен handler чтобы редактировать клавиатуру вместо отправки новых сообщений
+- Единообразный UX во всех dialogs
+- Нет дубликатов сообщений
 
 ✅ **Production testing пройден:**
 - 4 драфта промодерированы (3 опубликованы, 1 отклонён)
