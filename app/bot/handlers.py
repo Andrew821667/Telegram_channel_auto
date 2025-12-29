@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.models.database import (
     PostDraft, Publication, RawArticle,
-    FeedbackLabel, get_db
+    FeedbackLabel, PersonalPost, get_db
 )
 from app.bot.keyboards import (
     get_draft_review_keyboard,
@@ -2403,6 +2403,12 @@ async def process_manual_post(message: Message, state: FSMContext, db: AsyncSess
 
         tags_str = ", ".join(post.tags[:5]) if post.tags else "нет"
 
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📤 Опубликовать сейчас", callback_data=f"publish_post:{post.id}")],
+            [InlineKeyboardButton(text="📝 Посмотреть заметку", callback_data=f"view_post:{post.id}")],
+            [InlineKeyboardButton(text="« Главное меню", callback_data="back_to_main_menu")],
+        ])
+
         await message.answer(
             f"✅ <b>Заметка сохранена!</b>\n\n"
             f"📊 Категория: {post.category or 'не определена'}\n"
@@ -2410,7 +2416,7 @@ async def process_manual_post(message: Message, state: FSMContext, db: AsyncSess
             f"😊 Настроение: {post.sentiment or 'neutral'}\n\n"
             f"ID: {post.id}",
             parse_mode="HTML",
-            reply_markup=get_main_menu_keyboard()
+            reply_markup=keyboard
         )
 
     except Exception as e:
@@ -2539,6 +2545,12 @@ async def callback_ai_post_save(callback: CallbackQuery, state: FSMContext, db: 
 
         tags_str = ", ".join(post.tags[:5]) if post.tags else "нет"
 
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📤 Опубликовать сейчас", callback_data=f"publish_post:{post.id}")],
+            [InlineKeyboardButton(text="📝 Посмотреть заметку", callback_data=f"view_post:{post.id}")],
+            [InlineKeyboardButton(text="« Главное меню", callback_data="back_to_main_menu")],
+        ])
+
         await callback.message.answer(
             f"✅ <b>Заметка сохранена!</b>\n\n"
             f"📊 Категория: {post.category or 'не определена'}\n"
@@ -2546,7 +2558,7 @@ async def callback_ai_post_save(callback: CallbackQuery, state: FSMContext, db: 
             f"🤖 Модель: {model_used}\n\n"
             f"ID: {post.id}",
             parse_mode="HTML",
-            reply_markup=get_main_menu_keyboard()
+            reply_markup=keyboard
         )
 
     except Exception as e:
@@ -2701,13 +2713,19 @@ async def callback_voice_save_raw(callback: CallbackQuery, state: FSMContext, db
 
         tags_str = ", ".join(post.tags[:5]) if post.tags else "нет"
 
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📤 Опубликовать сейчас", callback_data=f"publish_post:{post.id}")],
+            [InlineKeyboardButton(text="📝 Посмотреть заметку", callback_data=f"view_post:{post.id}")],
+            [InlineKeyboardButton(text="« Главное меню", callback_data="back_to_main_menu")],
+        ])
+
         await callback.message.answer(
             f"✅ <b>Заметка из голосового сохранена!</b>\n\n"
             f"📊 Категория: {post.category or 'не определена'}\n"
             f"🏷 Теги: {tags_str}\n\n"
             f"ID: {post.id}",
             parse_mode="HTML",
-            reply_markup=get_main_menu_keyboard()
+            reply_markup=keyboard
         )
 
     except Exception as e:
@@ -2799,25 +2817,170 @@ async def callback_list_personal_posts(callback: CallbackQuery, db: AsyncSession
         )
         return
 
-    # Формируем список
-    posts_list = "📚 <b>Ваши заметки</b>\n\n"
+    # Формируем кликабельный список
+    posts_list = "📚 <b>Ваши заметки (дневник)</b>\n\n"
+    posts_list += "<i>Нажмите на заметку чтобы открыть:</i>\n\n"
+
+    buttons = []
     for i, post in enumerate(posts, 1):
-        date_str = post.created_at.strftime("%d.%m.%Y %H:%M")
-        title = post.title or post.content[:50] + "..."
+        date_str = post.created_at.strftime("%d.%m %H:%M")
+        title = post.title or post.content[:40] + "..."
         method_icon = {"manual": "✍️", "ai_assisted": "🤖", "voice": "🎤"}.get(post.creation_method, "📝")
+        published_icon = "✅" if post.published else ""
 
-        posts_list += f"{i}. {method_icon} {date_str}\n   {title}\n\n"
+        buttons.append([
+            InlineKeyboardButton(
+                text=f"{method_icon} {published_icon} {date_str}: {title}",
+                callback_data=f"view_post:{post.id}"
+            )
+        ])
 
-    posts_list += f"<i>Всего заметок: {len(posts)}</i>"
+    buttons.append([InlineKeyboardButton(text="✍️ Создать новую", callback_data="create_personal_post")])
+    buttons.append([InlineKeyboardButton(text="« Назад", callback_data="show_personal_posts")])
 
     await callback.message.edit_text(
-        posts_list,
+        posts_list + f"\n<i>Всего заметок: {len(posts)}</i>",
         parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="✍️ Создать новую", callback_data="create_personal_post")],
-            [InlineKeyboardButton(text="« Назад", callback_data="show_personal_posts")],
-        ])
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
     )
+
+
+@router.callback_query(F.data.startswith("view_post:"))
+async def callback_view_post(callback: CallbackQuery, db: AsyncSession):
+    """Просмотр отдельной заметки."""
+    await callback.answer()
+
+    post_id = int(callback.data.split(":")[1])
+
+    # Получаем заметку
+    result = await db.execute(
+        select(PersonalPost).where(
+            PersonalPost.id == post_id,
+            PersonalPost.user_id == callback.from_user.id
+        )
+    )
+    post = result.scalar_one_or_none()
+
+    if not post:
+        await callback.answer("❌ Заметка не найдена", show_alert=True)
+        return
+
+    # Формируем текст
+    date_str = post.created_at.strftime("%d.%m.%Y %H:%M")
+    method_names = {"manual": "Вручную", "ai_assisted": "С помощью AI", "voice": "Голосом"}
+    method = method_names.get(post.creation_method, post.creation_method)
+
+    post_text = f"📝 <b>Заметка #{post.id}</b>\n"
+    post_text += f"📅 {date_str}\n"
+    post_text += f"🔧 Метод: {method}\n"
+
+    if post.category:
+        post_text += f"📂 Категория: {post.category}\n"
+    if post.tags:
+        post_text += f"🏷 Теги: {', '.join(post.tags[:5])}\n"
+    if post.published:
+        post_text += f"✅ <b>Опубликовано</b> {post.published_at.strftime('%d.%m.%Y')}\n"
+
+    post_text += f"\n{'─' * 30}\n\n"
+    post_text += f"{post.content}\n"
+    post_text += f"\n{'─' * 30}\n"
+
+    # Кнопки
+    buttons = []
+
+    if not post.published:
+        buttons.append([InlineKeyboardButton(text="📤 Опубликовать", callback_data=f"publish_post:{post.id}")])
+    else:
+        buttons.append([InlineKeyboardButton(text="✅ Уже опубликовано", callback_data="noop")])
+
+    buttons.append([
+        InlineKeyboardButton(text="✏️ Редактировать", callback_data=f"edit_post:{post.id}"),
+        InlineKeyboardButton(text="🗑 Удалить", callback_data=f"delete_post:{post.id}")
+    ])
+    buttons.append([InlineKeyboardButton(text="« К списку", callback_data="list_personal_posts")])
+
+    await callback.message.edit_text(
+        post_text,
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
+    )
+
+
+@router.callback_query(F.data.startswith("publish_post:"))
+async def callback_publish_post(callback: CallbackQuery, db: AsyncSession):
+    """Опубликовать личную заметку в канал."""
+    await callback.answer()
+
+    post_id = int(callback.data.split(":")[1])
+
+    # Получаем заметку
+    result = await db.execute(
+        select(PersonalPost).where(
+            PersonalPost.id == post_id,
+            PersonalPost.user_id == callback.from_user.id,
+            PersonalPost.published == False
+        )
+    )
+    post = result.scalar_one_or_none()
+
+    if not post:
+        await callback.answer("❌ Заметка не найдена или уже опубликована", show_alert=True)
+        return
+
+    # Публикуем в канал
+    try:
+        from app.config import settings
+
+        # Форматируем пост для публикации
+        publish_text = post.content
+
+        # Добавляем теги если есть
+        if post.tags:
+            publish_text += f"\n\n🏷 {' '.join(['#' + tag.replace(' ', '_') for tag in post.tags[:5]])}"
+
+        # Публикуем
+        message = await callback.bot.send_message(
+            chat_id=settings.channel_id,
+            text=publish_text,
+            parse_mode="HTML"
+        )
+
+        # Обновляем статус
+        post.published = True
+        post.published_at = datetime.utcnow()
+        post.telegram_message_id = message.message_id
+        await db.commit()
+
+        await callback.answer("✅ Опубликовано!", show_alert=True)
+
+        # Обновляем просмотр заметки
+        await callback_view_post(callback, db)
+
+    except Exception as e:
+        logger.error("post_publication_error", error=str(e), post_id=post_id)
+        await callback.answer(f"❌ Ошибка публикации: {str(e)}", show_alert=True)
+
+
+@router.callback_query(F.data.startswith("delete_post:"))
+async def callback_delete_post(callback: CallbackQuery, db: AsyncSession):
+    """Удалить заметку."""
+    post_id = int(callback.data.split(":")[1])
+
+    from app.modules.personal_posts_manager import delete_post
+
+    success = await delete_post(post_id, callback.from_user.id, db)
+
+    if success:
+        await callback.answer("🗑 Заметка удалена", show_alert=True)
+        await callback_list_personal_posts(callback, db)
+    else:
+        await callback.answer("❌ Не удалось удалить", show_alert=True)
+
+
+@router.callback_query(F.data == "noop")
+async def callback_noop(callback: CallbackQuery):
+    """No operation - просто ответ на callback."""
+    await callback.answer()
 
 
 @router.callback_query(F.data == "back_to_main_menu")
