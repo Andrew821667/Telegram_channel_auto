@@ -178,7 +178,20 @@ def get_main_menu_keyboard() -> InlineKeyboardMarkup:
     Returns:
         InlineKeyboardMarkup с главными командами
     """
+    from aiogram.types import WebAppInfo
+    import os
+
     builder = InlineKeyboardBuilder()
+
+    # Mini App button (if URL is configured)
+    mini_app_url = os.getenv("MINI_APP_URL")
+    if mini_app_url:
+        builder.row(
+            InlineKeyboardButton(
+                text="🚀 Открыть Mini App",
+                web_app=WebAppInfo(url=mini_app_url)
+            )
+        )
 
     builder.row(
         InlineKeyboardButton(
