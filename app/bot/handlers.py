@@ -2953,10 +2953,11 @@ async def callback_view_post(callback: CallbackQuery, db: AsyncSession):
     # Кнопки
     buttons = []
 
+    # Кнопка публикации всегда активна (можно публиковать повторно)
     if not post.published:
         buttons.append([InlineKeyboardButton(text="📤 Опубликовать", callback_data=f"publish_post:{post.id}")])
     else:
-        buttons.append([InlineKeyboardButton(text="✅ Уже опубликовано", callback_data="noop")])
+        buttons.append([InlineKeyboardButton(text="📤 Опубликовать снова", callback_data=f"publish_post:{post.id}")])
 
     buttons.append([
         InlineKeyboardButton(text="✏️ Редактировать", callback_data=f"edit_post:{post.id}"),
@@ -2973,22 +2974,24 @@ async def callback_view_post(callback: CallbackQuery, db: AsyncSession):
 
 @router.callback_query(F.data.startswith("publish_post:"))
 async def callback_publish_post(callback: CallbackQuery, db: AsyncSession):
-    """Опубликовать личную заметку в канал."""
+    """Опубликовать личную заметку в канал (можно публиковать повторно)."""
     post_id = int(callback.data.split(":")[1])
 
-    # Получаем заметку
+    # Получаем заметку (без проверки published - разрешаем повторную публикацию)
     result = await db.execute(
         select(PersonalPost).where(
             PersonalPost.id == post_id,
-            PersonalPost.user_id == callback.from_user.id,
-            PersonalPost.published == False
+            PersonalPost.user_id == callback.from_user.id
         )
     )
     post = result.scalar_one_or_none()
 
     if not post:
-        await callback.answer("❌ Заметка не найдена или уже опубликована", show_alert=True)
+        await callback.answer("❌ Заметка не найдена", show_alert=True)
         return
+
+    # Проверяем, это первая публикация или повторная
+    is_republish = post.published
 
     # Публикуем в канал
     try:
@@ -3033,7 +3036,9 @@ async def callback_publish_post(callback: CallbackQuery, db: AsyncSession):
         post.telegram_message_id = message.message_id
         await db.commit()
 
-        await callback.answer("✅ Опубликовано!", show_alert=True)
+        # Показываем разное сообщение для первой публикации и повторной
+        success_msg = "✅ Опубликовано снова!" if is_republish else "✅ Опубликовано!"
+        await callback.answer(success_msg, show_alert=True)
 
         # Обновляем просмотр заметки - создаём новый callback data
         callback.data = f"view_post:{post_id}"
