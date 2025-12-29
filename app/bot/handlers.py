@@ -102,16 +102,10 @@ async def cmd_drafts(message: Message, db: AsyncSession):
     if not await check_admin(message.from_user.id):
         return
 
-    # Получаем драфты в статусе pending_review, созданные СЕГОДНЯ
-    from datetime import date
-    today_start = datetime.combine(date.today(), datetime.min.time())
-
+    # Получаем ВСЕ драфты в статусе pending_review (без фильтра по дате)
     result = await db.execute(
         select(PostDraft)
-        .where(
-            PostDraft.status == 'pending_review',
-            PostDraft.created_at >= today_start
-        )
+        .where(PostDraft.status == 'pending_review')
         .order_by(PostDraft.created_at.desc())
     )
     drafts = list(result.scalars().all())
@@ -821,16 +815,10 @@ async def callback_show_drafts(callback: CallbackQuery, db: AsyncSession):
         await callback.answer("⛔️ Нет прав доступа", show_alert=True)
         return
 
-    # Получаем драфты в статусе pending_review, созданные СЕГОДНЯ
-    from datetime import date
-    today_start = datetime.combine(date.today(), datetime.min.time())
-
+    # Получаем ВСЕ драфты в статусе pending_review (без фильтра по дате)
     result = await db.execute(
         select(PostDraft)
-        .where(
-            PostDraft.status == 'pending_review',
-            PostDraft.created_at >= today_start
-        )
+        .where(PostDraft.status == 'pending_review')
         .order_by(PostDraft.created_at.desc())
     )
     drafts = list(result.scalars().all())
