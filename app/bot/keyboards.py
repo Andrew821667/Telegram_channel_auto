@@ -188,6 +188,12 @@ def get_main_menu_keyboard() -> InlineKeyboardMarkup:
     )
     builder.row(
         InlineKeyboardButton(
+            text="✍️ Мои заметки",
+            callback_data="show_personal_posts"
+        )
+    )
+    builder.row(
+        InlineKeyboardButton(
             text="🔄 Запустить сбор",
             callback_data="run_fetch"
         ),

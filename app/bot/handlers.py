@@ -10,7 +10,7 @@ from typing import Optional, Dict, List
 
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.filters import Command, CommandStart
-from aiogram.types import Message, CallbackQuery, FSInputFile, BotCommand
+from aiogram.types import Message, CallbackQuery, FSInputFile, BotCommand, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from sqlalchemy import select
@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.models.database import (
     PostDraft, Publication, RawArticle,
-    FeedbackLabel, get_db
+    FeedbackLabel, PersonalPost, PostComment, get_db
 )
 from app.bot.keyboards import (
     get_draft_review_keyboard,
@@ -885,39 +885,31 @@ async def callback_show_stats(callback: CallbackQuery, db: AsyncSession):
 
 
 @router.callback_query(F.data == "show_settings")
-async def callback_show_settings(callback: CallbackQuery):
+async def callback_show_settings(callback: CallbackQuery, db: AsyncSession):
     """Показать настройки через кнопку."""
     if not await check_admin(callback.from_user.id):
         await callback.answer("⛔️ Нет прав доступа", show_alert=True)
         return
 
-    # Определяем название текущего провайдера
-    provider_name = "OpenAI (GPT-4o-mini)" if _selected_llm_provider == "openai" else "Perplexity (Llama 3.1)"
+    # Используем новую систему настроек
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📰 Источники новостей", callback_data="settings:sources")],
+        [InlineKeyboardButton(text="🤖 Модели LLM", callback_data="settings:llm")],
+        [InlineKeyboardButton(text="🎨 Генерация изображений (DALL-E)", callback_data="settings:dalle")],
+        [InlineKeyboardButton(text="📅 Автопубликация", callback_data="settings:autopublish")],
+        [InlineKeyboardButton(text="🔔 Уведомления", callback_data="settings:alerts")],
+        [InlineKeyboardButton(text="🎯 Фильтрация и качество", callback_data="settings:quality")],
+        [InlineKeyboardButton(text="💰 Бюджет API", callback_data="settings:budget")],
+        [InlineKeyboardButton(text="« Назад", callback_data="back_to_main_menu")],
+    ])
 
-    settings_text = f"""
-⚙️ <b>Настройки системы</b>
-
-📊 Сбор новостей: автоматически в 09:00 MSK
-🤖 AI модель: {provider_name}
-📝 Макс. драфтов/день: 3
-✅ Требуется модерация: Да
-
-Для изменения настроек используйте переменные окружения в .env файле.
-"""
-
-    # Добавляем кнопку выбора LLM
-    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-    from aiogram.utils.keyboard import InlineKeyboardBuilder
-
-    builder = InlineKeyboardBuilder()
-    builder.row(
-        InlineKeyboardButton(
-            text="🤖 Выбрать LLM провайдера",
-            callback_data="show_llm_selection"
-        )
+    await callback.message.edit_text(
+        "⚙️ <b>Системные настройки</b>\n\n"
+        "Все параметры сохраняются в базе данных и применяются автоматически.\n\n"
+        "Выберите категорию:",
+        parse_mode="HTML",
+        reply_markup=keyboard
     )
-
-    await callback.message.answer(settings_text, parse_mode="HTML", reply_markup=builder.as_markup())
     await callback.answer()
 
 
@@ -1404,6 +1396,20 @@ async def get_statistics(db: AsyncSession) -> str:
         select(func.count(PostDraft.id)).where(PostDraft.status == 'pending_review')
     )
 
+    # Статистика личных постов
+    personal_posts_count = await db.scalar(select(func.count(PersonalPost.id)))
+    personal_published_count = await db.scalar(
+        select(func.count(PersonalPost.id)).where(PersonalPost.published == True)
+    )
+
+    # Статистика views/reactions для личных постов
+    personal_views_sum = await db.scalar(
+        select(func.sum(PersonalPost.views_count)).where(PersonalPost.published == True)
+    ) or 0
+    personal_reactions_sum = await db.scalar(
+        select(func.sum(PersonalPost.reactions_count)).where(PersonalPost.published == True)
+    ) or 0
+
     # Получаем стоимость API за текущий месяц
     api_cost_data = await get_current_month_cost(db)
 
@@ -1418,6 +1424,15 @@ async def get_statistics(db: AsyncSession) -> str:
 📝 Всего драфтов: {drafts_count}
 ✅ Опубликовано: {publications_count}
 ⏳ Ожидают модерации: {pending_count}
+
+━━━━━━━━━━━━━━━━
+
+✍️ <b>Личные заметки</b>
+
+📔 Всего заметок: {personal_posts_count}
+📤 Опубликовано: {personal_published_count}
+👁 Всего просмотров: {personal_views_sum:,}
+👍 Всего реакций: {personal_reactions_sum}
 
 ━━━━━━━━━━━━━━━━
 
@@ -1751,6 +1766,1640 @@ async def cmd_analytics(message: Message, db: AsyncSession):
         "📊 <b>Выберите период для аналитики:</b>",
         parse_mode="HTML",
         reply_markup=keyboard
+    )
+
+
+@router.message(Command("settings"))
+async def cmd_settings(message: Message, db: AsyncSession):
+    """Системные настройки."""
+
+    if not await check_admin(message.from_user.id):
+        await message.answer("⛔ У вас нет доступа к этой команде")
+        return
+
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📰 Источники новостей", callback_data="settings:sources")],
+        [InlineKeyboardButton(text="🤖 Модели LLM", callback_data="settings:llm")],
+        [InlineKeyboardButton(text="🎨 Генерация изображений (DALL-E)", callback_data="settings:dalle")],
+        [InlineKeyboardButton(text="📅 Автопубликация", callback_data="settings:autopublish")],
+        [InlineKeyboardButton(text="🔔 Уведомления", callback_data="settings:alerts")],
+        [InlineKeyboardButton(text="🎯 Фильтрация и качество", callback_data="settings:quality")],
+        [InlineKeyboardButton(text="💰 Бюджет API", callback_data="settings:budget")],
+    ])
+
+    await message.answer(
+        "⚙️ <b>Системные настройки</b>\n\n"
+        "Все параметры сохраняются в базе данных и применяются автоматически.\n\n"
+        "Выберите категорию:",
+        parse_mode="HTML",
+        reply_markup=keyboard
+    )
+
+
+@router.callback_query(F.data == "settings:sources")
+async def callback_settings_sources(callback: CallbackQuery, db: AsyncSession):
+    """Настройки источников новостей."""
+    await callback.answer()
+
+    from app.modules.settings_manager import get_category_settings
+
+    # Получаем текущее состояние источников
+    sources = await get_category_settings("sources", db)
+
+    # Формируем клавиатуру с галочками
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+
+    source_config = {
+        "google_news_ru": "Google News RSS (RU)",
+        "google_news_en": "Google News RSS (EN)",
+        "habr": "Habr - Новости",
+        "perplexity_ru": "Perplexity Search (RU)",
+        "perplexity_en": "Perplexity Search (EN)",
+        "telegram_channels": "Telegram каналы",
+    }
+
+    buttons = []
+    for key, name in source_config.items():
+        is_enabled = sources.get(f"sources.{key}.enabled", True)
+        icon = "✅" if is_enabled else "☐"
+        buttons.append([
+            InlineKeyboardButton(
+                text=f"{icon} {name}",
+                callback_data=f"toggle_source:{key}"
+            )
+        ])
+
+    buttons.append([InlineKeyboardButton(text="« Назад", callback_data="back_to_settings")])
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
+
+    await callback.message.edit_text(
+        "📰 <b>Источники новостей</b>\n\n"
+        "Нажмите на источник чтобы включить/выключить его.\n"
+        "Изменения применяются мгновенно.\n\n"
+        "✅ - включен\n"
+        "☐ - выключен",
+        parse_mode="HTML",
+        reply_markup=keyboard
+    )
+
+
+@router.callback_query(F.data.startswith("toggle_source:"))
+async def callback_toggle_source(callback: CallbackQuery, db: AsyncSession):
+    """Переключить источник."""
+    source_key = callback.data.split(":")[1]
+
+    from app.modules.settings_manager import get_setting, set_setting
+
+    # Получаем текущее значение
+    setting_key = f"sources.{source_key}.enabled"
+    current_value = await get_setting(setting_key, db, default=True)
+
+    # Переключаем
+    new_value = not current_value
+    await set_setting(setting_key, new_value, db)
+
+    # Обновляем UI
+    await callback.answer(f"{'✅ Включен' if new_value else '☐ Выключен'}")
+    await callback_settings_sources(callback, db)
+
+
+@router.callback_query(F.data == "back_to_settings")
+async def callback_back_to_settings(callback: CallbackQuery, db: AsyncSession):
+    """Вернуться в главное меню настроек."""
+    await callback.answer()
+
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📰 Источники новостей", callback_data="settings:sources")],
+        [InlineKeyboardButton(text="🤖 Модели LLM", callback_data="settings:llm")],
+        [InlineKeyboardButton(text="🎨 Генерация изображений (DALL-E)", callback_data="settings:dalle")],
+        [InlineKeyboardButton(text="📅 Автопубликация", callback_data="settings:autopublish")],
+        [InlineKeyboardButton(text="🔔 Уведомления", callback_data="settings:alerts")],
+        [InlineKeyboardButton(text="🎯 Фильтрация и качество", callback_data="settings:quality")],
+        [InlineKeyboardButton(text="💰 Бюджет API", callback_data="settings:budget")],
+    ])
+
+    await callback.message.edit_text(
+        "⚙️ <b>Системные настройки</b>\n\n"
+        "Все параметры сохраняются в базе данных и применяются автоматически.\n\n"
+        "Выберите категорию:",
+        parse_mode="HTML",
+        reply_markup=keyboard
+    )
+
+
+@router.callback_query(F.data == "settings:llm")
+async def callback_settings_llm(callback: CallbackQuery, db: AsyncSession):
+    """Настройки моделей LLM."""
+    from app.modules.settings_manager import get_setting
+
+    current_analysis = await get_setting("llm.analysis.model", db, default="gpt-4o")
+    current_draft = await get_setting("llm.draft_generation.model", db, default="sonar")
+    current_ranking = await get_setting("llm.ranking.model", db, default="gpt-4o-mini")
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=f"🔍 Анализ: {current_analysis}", callback_data="llm_select:analysis")],
+        [InlineKeyboardButton(text=f"✍️ Генерация драфтов: {current_draft}", callback_data="llm_select:draft_generation")],
+        [InlineKeyboardButton(text=f"📊 Ранжирование: {current_ranking}", callback_data="llm_select:ranking")],
+        [InlineKeyboardButton(text="« Назад", callback_data="back_to_settings")],
+    ])
+
+    await callback.message.edit_text(
+        "🤖 <b>Модели LLM</b>\n\n"
+        "Настройте модели для разных операций:\n\n"
+        "• <b>Анализ</b> - AI анализ статей и метрик\n"
+        "• <b>Генерация драфтов</b> - создание текстов постов\n"
+        "• <b>Ранжирование</b> - scoring и сортировка статей\n\n"
+        "Нажмите на операцию для выбора модели:",
+        parse_mode="HTML",
+        reply_markup=keyboard
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("llm_select:"))
+async def callback_llm_select(callback: CallbackQuery, db: AsyncSession):
+    """Выбор модели LLM для операции."""
+    from app.modules.settings_manager import get_setting
+
+    operation = callback.data.split(":")[1]
+
+    operation_names = {
+        "analysis": "Анализ",
+        "draft_generation": "Генерация драфтов",
+        "ranking": "Ранжирование"
+    }
+
+    # Получаем текущую модель
+    current_model = await get_setting(f"llm.{operation}.model", db, default="gpt-4o-mini")
+
+    # Available models with checkmarks
+    models = [
+        ("gpt-4o", "GPT-4o (самая умная)"),
+        ("gpt-4o-mini", "GPT-4o-mini (быстрая)"),
+        ("sonar", "Perplexity Sonar (поиск)")
+    ]
+
+    buttons = []
+    for model_key, model_name in models:
+        icon = "✅" if current_model == model_key else "☐"
+        buttons.append([
+            InlineKeyboardButton(
+                text=f"{icon} {model_name}",
+                callback_data=f"llm_set:{operation}:{model_key}"
+            )
+        ])
+
+    buttons.append([InlineKeyboardButton(text="« Назад", callback_data="settings:llm")])
+    keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
+
+    await callback.message.edit_text(
+        f"🤖 <b>Выбор модели для: {operation_names.get(operation, operation)}</b>\n\n"
+        "Доступные модели:\n\n"
+        "• <b>GPT-4o</b> - самая продвинутая, точная, дорогая (~$15/1M токенов)\n"
+        "• <b>GPT-4o-mini</b> - быстрая, дешевая (~$0.15/1M токенов)\n"
+        "• <b>Perplexity Sonar</b> - для поиска и генерации новостей\n\n"
+        "✅ - выбранная модель\n"
+        "Нажмите для изменения:",
+        parse_mode="HTML",
+        reply_markup=keyboard
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("llm_set:"))
+async def callback_llm_set(callback: CallbackQuery, db: AsyncSession):
+    """Установить модель LLM."""
+    _, operation, model = callback.data.split(":")
+    from app.modules.settings_manager import set_setting
+
+    setting_key = f"llm.{operation}.model"
+    await set_setting(setting_key, model, db)
+
+    await callback.answer(f"✅ {model}")
+
+    # Обновляем экран с новыми галочками
+    callback.data = f"llm_select:{operation}"
+    await callback_llm_select(callback, db)
+
+
+@router.callback_query(F.data == "settings:dalle")
+async def callback_settings_dalle(callback: CallbackQuery, db: AsyncSession):
+    """Настройки DALL-E генерации изображений."""
+    from app.modules.settings_manager import get_dalle_config
+
+    config = await get_dalle_config(db)
+
+    enabled_icon = "✅" if config["enabled"] else "☐"
+    auto_icon = "✅" if config["auto_generate"] else "☐"
+    ask_icon = "✅" if config["ask_on_review"] else "☐"
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=f"{enabled_icon} Включить DALL-E", callback_data="toggle:dalle.enabled")],
+        [InlineKeyboardButton(text=f"🎨 Модель: {config['model']}", callback_data="dalle_model_select")],
+        [InlineKeyboardButton(text=f"💎 Качество: {config['quality']}", callback_data="dalle_quality_select")],
+        [InlineKeyboardButton(text=f"📐 Размер: {config['size']}", callback_data="dalle_size_select")],
+        [InlineKeyboardButton(text=f"{auto_icon} Авто-генерация для всех постов", callback_data="toggle:dalle.auto_generate")],
+        [InlineKeyboardButton(text=f"{ask_icon} Спрашивать при модерации", callback_data="toggle:dalle.ask_on_review")],
+        [InlineKeyboardButton(text="« Назад", callback_data="back_to_settings")],
+    ])
+
+    await callback.message.edit_text(
+        "🎨 <b>Генерация изображений (DALL-E)</b>\n\n"
+        f"Статус: {'🟢 Включено' if config['enabled'] else '🔴 Выключено'}\n\n"
+        "• <b>Модель</b> - DALL-E 2 или DALL-E 3\n"
+        "• <b>Качество</b> - standard (дешевле) или hd (детальнее)\n"
+        "• <b>Размер</b> - 1024x1024, 1792x1024, 1024x1792\n"
+        "• <b>Авто-генерация</b> - создавать для каждого поста\n"
+        "• <b>Спрашивать</b> - запрос при модерации\n\n"
+        "💰 Стоимость: ~$0.04-0.12 за изображение",
+        parse_mode="HTML",
+        reply_markup=keyboard
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("toggle:"))
+async def callback_toggle_setting(callback: CallbackQuery, db: AsyncSession):
+    """Переключить булевую настройку."""
+    setting_key = callback.data.split(":")[1]
+    from app.modules.settings_manager import get_setting, set_setting
+
+    current_value = await get_setting(setting_key, db, default=False)
+    new_value = not current_value
+    await set_setting(setting_key, new_value, db)
+
+    await callback.answer(f"{'✅ Включено' if new_value else '☐ Выключено'}")
+
+    # Redirect back to appropriate menu
+    if setting_key.startswith("dalle."):
+        await callback_settings_dalle(callback, db)
+    elif setting_key.startswith("auto_publish."):
+        await callback_settings_autopublish(callback, db)
+    elif setting_key.startswith("alerts."):
+        await callback_settings_alerts(callback, db)
+    elif setting_key.startswith("budget."):
+        await callback_settings_budget(callback, db)
+
+
+@router.callback_query(F.data == "dalle_model_select")
+async def callback_dalle_model_select(callback: CallbackQuery, db: AsyncSession):
+    """Выбор модели DALL-E."""
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="DALL-E 3 (лучшее качество)", callback_data="dalle_set:model:dall-e-3")],
+        [InlineKeyboardButton(text="DALL-E 2 (дешевле)", callback_data="dalle_set:model:dall-e-2")],
+        [InlineKeyboardButton(text="« Назад", callback_data="settings:dalle")],
+    ])
+
+    await callback.message.edit_text(
+        "🎨 <b>Выбор модели DALL-E</b>\n\n"
+        "• <b>DALL-E 3</b> - лучшее качество, детализация (~$0.04-0.12)\n"
+        "• <b>DALL-E 2</b> - базовое качество, дешевле (~$0.02)\n\n"
+        "Выберите модель:",
+        parse_mode="HTML",
+        reply_markup=keyboard
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "dalle_quality_select")
+async def callback_dalle_quality_select(callback: CallbackQuery, db: AsyncSession):
+    """Выбор качества DALL-E."""
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="HD (высокое качество)", callback_data="dalle_set:quality:hd")],
+        [InlineKeyboardButton(text="Standard (базовое)", callback_data="dalle_set:quality:standard")],
+        [InlineKeyboardButton(text="« Назад", callback_data="settings:dalle")],
+    ])
+
+    await callback.message.edit_text(
+        "💎 <b>Качество изображений</b>\n\n"
+        "• <b>HD</b> - высокая детализация (в 2x дороже)\n"
+        "• <b>Standard</b> - базовое качество\n\n"
+        "Выберите качество:",
+        parse_mode="HTML",
+        reply_markup=keyboard
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "dalle_size_select")
+async def callback_dalle_size_select(callback: CallbackQuery, db: AsyncSession):
+    """Выбор размера изображения DALL-E."""
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="1024x1024 (квадрат)", callback_data="dalle_set:size:1024x1024")],
+        [InlineKeyboardButton(text="1792x1024 (горизонт)", callback_data="dalle_set:size:1792x1024")],
+        [InlineKeyboardButton(text="1024x1792 (вертикаль)", callback_data="dalle_set:size:1024x1792")],
+        [InlineKeyboardButton(text="« Назад", callback_data="settings:dalle")],
+    ])
+
+    await callback.message.edit_text(
+        "📐 <b>Размер изображения</b>\n\n"
+        "• <b>1024x1024</b> - квадратный формат\n"
+        "• <b>1792x1024</b> - горизонтальный (для постов)\n"
+        "• <b>1024x1792</b> - вертикальный (для stories)\n\n"
+        "Выберите размер:",
+        parse_mode="HTML",
+        reply_markup=keyboard
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("dalle_set:"))
+async def callback_dalle_set(callback: CallbackQuery, db: AsyncSession):
+    """Установить параметр DALL-E."""
+    _, param, value = callback.data.split(":")
+    from app.modules.settings_manager import set_setting
+
+    setting_key = f"dalle.{param}"
+    await set_setting(setting_key, value, db)
+
+    await callback.answer(f"✅ {param.capitalize()} обновлен: {value}")
+    await callback_settings_dalle(callback, db)
+
+
+@router.callback_query(F.data == "settings:autopublish")
+async def callback_settings_autopublish(callback: CallbackQuery, db: AsyncSession):
+    """Настройки автопубликации."""
+    from app.modules.settings_manager import get_auto_publish_config
+
+    config = await get_auto_publish_config(db)
+
+    enabled_icon = "✅" if config["enabled"] else "☐"
+    weekdays_icon = "✅" if config["weekdays_only"] else "☐"
+    holidays_icon = "✅" if config["skip_holidays"] else "☐"
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=f"{enabled_icon} Включить автопубликацию", callback_data="toggle:auto_publish.enabled")],
+        [InlineKeyboardButton(text=f"⏰ Режим: {config['mode']}", callback_data="autopublish_mode_select")],
+        [InlineKeyboardButton(text=f"📊 Макс. постов/день: {config['max_per_day']}", callback_data="autopublish_max_select")],
+        [InlineKeyboardButton(text=f"{weekdays_icon} Только в будни", callback_data="toggle:auto_publish.weekdays_only")],
+        [InlineKeyboardButton(text=f"{holidays_icon} Пропускать праздники", callback_data="toggle:auto_publish.skip_holidays")],
+        [InlineKeyboardButton(text="« Назад", callback_data="back_to_settings")],
+    ])
+
+    mode_desc = {
+        "best_time": "Лучшее время (AI выбирает)",
+        "schedule": "По расписанию",
+        "even": "Равномерно в течение дня"
+    }
+
+    await callback.message.edit_text(
+        "📅 <b>Автопубликация</b>\n\n"
+        f"Статус: {'🟢 Включено' if config['enabled'] else '🔴 Выключено'}\n"
+        f"Режим: {mode_desc.get(config['mode'], config['mode'])}\n\n"
+        "• <b>Режим</b> - когда публиковать посты\n"
+        "• <b>Макс. постов/день</b> - лимит публикаций\n"
+        "• <b>Только в будни</b> - не публиковать в выходные\n"
+        "• <b>Пропускать праздники</b> - не публиковать в праздники\n\n"
+        "⚠️ Посты всё равно проходят модерацию!",
+        parse_mode="HTML",
+        reply_markup=keyboard
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "autopublish_mode_select")
+async def callback_autopublish_mode_select(callback: CallbackQuery, db: AsyncSession):
+    """Выбор режима автопубликации."""
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⏰ Лучшее время (AI)", callback_data="autopublish_set:mode:best_time")],
+        [InlineKeyboardButton(text="📅 По расписанию", callback_data="autopublish_set:mode:schedule")],
+        [InlineKeyboardButton(text="⏳ Равномерно", callback_data="autopublish_set:mode:even")],
+        [InlineKeyboardButton(text="« Назад", callback_data="settings:autopublish")],
+    ])
+
+    await callback.message.edit_text(
+        "⏰ <b>Режим автопубликации</b>\n\n"
+        "• <b>Лучшее время</b> - AI анализирует метрики и выбирает\n"
+        "  оптимальное время на основе engagement\n\n"
+        "• <b>По расписанию</b> - фиксированное время (9:00, 14:00, 18:00)\n\n"
+        "• <b>Равномерно</b> - распределить равномерно в течение дня\n\n"
+        "Выберите режим:",
+        parse_mode="HTML",
+        reply_markup=keyboard
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "autopublish_max_select")
+async def callback_autopublish_max_select(callback: CallbackQuery, db: AsyncSession):
+    """Выбор максимального количества постов в день."""
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="1 пост/день", callback_data="autopublish_set:max_per_day:1")],
+        [InlineKeyboardButton(text="2 поста/день", callback_data="autopublish_set:max_per_day:2")],
+        [InlineKeyboardButton(text="3 поста/день", callback_data="autopublish_set:max_per_day:3")],
+        [InlineKeyboardButton(text="5 постов/день", callback_data="autopublish_set:max_per_day:5")],
+        [InlineKeyboardButton(text="« Назад", callback_data="settings:autopublish")],
+    ])
+
+    await callback.message.edit_text(
+        "📊 <b>Максимум постов в день</b>\n\n"
+        "Сколько постов разрешено публиковать автоматически в день?\n\n"
+        "Рекомендация: 2-3 поста для качественного контента.\n\n"
+        "Выберите лимит:",
+        parse_mode="HTML",
+        reply_markup=keyboard
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("autopublish_set:"))
+async def callback_autopublish_set(callback: CallbackQuery, db: AsyncSession):
+    """Установить параметр автопубликации."""
+    _, param, value = callback.data.split(":")
+    from app.modules.settings_manager import set_setting
+
+    setting_key = f"auto_publish.{param}"
+    # Convert to int if it's max_per_day
+    if param == "max_per_day":
+        value = int(value)
+
+    await set_setting(setting_key, value, db)
+
+    await callback.answer(f"✅ Обновлено: {value}")
+    await callback_settings_autopublish(callback, db)
+
+
+@router.callback_query(F.data == "settings:alerts")
+async def callback_settings_alerts(callback: CallbackQuery, db: AsyncSession):
+    """Настройки уведомлений."""
+    from app.modules.settings_manager import get_category_settings
+
+    alerts = await get_category_settings("alerts", db)
+
+    low_eng_icon = "✅" if alerts.get("alerts.low_engagement.enabled", True) else "☐"
+    viral_icon = "✅" if alerts.get("alerts.viral_post.enabled", True) else "☐"
+    low_appr_icon = "✅" if alerts.get("alerts.low_approval.enabled", True) else "☐"
+    fetch_err_icon = "✅" if alerts.get("alerts.fetch_errors.enabled", True) else "☐"
+    api_lim_icon = "✅" if alerts.get("alerts.api_limits.enabled", True) else "☐"
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=f"{low_eng_icon} Падение engagement", callback_data="toggle:alerts.low_engagement.enabled")],
+        [InlineKeyboardButton(text=f"  └ Порог: {alerts.get('alerts.low_engagement.threshold', 20)}%", callback_data="alert_threshold:low_engagement")],
+        [InlineKeyboardButton(text=f"{viral_icon} Viral пост", callback_data="toggle:alerts.viral_post.enabled")],
+        [InlineKeyboardButton(text=f"  └ Порог: {alerts.get('alerts.viral_post.threshold', 100)} просм.", callback_data="alert_threshold:viral_post")],
+        [InlineKeyboardButton(text=f"{low_appr_icon} Низкий approval rate", callback_data="toggle:alerts.low_approval.enabled")],
+        [InlineKeyboardButton(text=f"  └ Порог: {alerts.get('alerts.low_approval.threshold', 30)}%", callback_data="alert_threshold:low_approval")],
+        [InlineKeyboardButton(text=f"{fetch_err_icon} Ошибки сбора новостей", callback_data="toggle:alerts.fetch_errors.enabled")],
+        [InlineKeyboardButton(text=f"{api_lim_icon} Лимиты API", callback_data="toggle:alerts.api_limits.enabled")],
+        [InlineKeyboardButton(text="« Назад", callback_data="back_to_settings")],
+    ])
+
+    await callback.message.edit_text(
+        "🔔 <b>Уведомления и алерты</b>\n\n"
+        "Настройте когда получать уведомления:\n\n"
+        "• <b>Падение engagement</b> - если engagement ниже порога\n"
+        "• <b>Viral пост</b> - если пост набрал много просмотров\n"
+        "• <b>Низкий approval</b> - если отклонено много статей\n"
+        "• <b>Ошибки сбора</b> - проблемы с источниками\n"
+        "• <b>Лимиты API</b> - приближение к лимитам\n\n"
+        "Нажмите для включения/отключения или настройки порогов:",
+        parse_mode="HTML",
+        reply_markup=keyboard
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("alert_threshold:"))
+async def callback_alert_threshold(callback: CallbackQuery):
+    """Настройка порогов уведомлений (заглушка)."""
+    alert_type = callback.data.split(":")[1]
+
+    alert_names = {
+        "low_engagement": "Падение engagement",
+        "viral_post": "Viral пост",
+        "low_approval": "Низкий approval rate"
+    }
+
+    await callback.answer(
+        f"⚠️ Настройка порога для '{alert_names.get(alert_type, alert_type)}' будет доступна в следующей версии",
+        show_alert=True
+    )
+
+
+@router.callback_query(F.data.startswith("quality_param:"))
+async def callback_quality_param(callback: CallbackQuery):
+    """Настройка параметров качества (заглушка)."""
+    param = callback.data.split(":")[1]
+
+    param_names = {
+        "min_score": "минимального quality score",
+        "min_content_length": "минимальной длины текста",
+        "similarity_threshold": "порога схожести",
+        "languages": "языков"
+    }
+
+    await callback.answer(
+        f"⚠️ Настройка {param_names.get(param, param)} будет доступна в следующей версии",
+        show_alert=True
+    )
+
+
+@router.callback_query(F.data.startswith("budget_param:"))
+async def callback_budget_param(callback: CallbackQuery):
+    """Настройка параметров бюджета (заглушка)."""
+    param = callback.data.split(":")[1]
+
+    param_names = {
+        "max_per_month": "максимального бюджета",
+        "warning_threshold": "порога предупреждения"
+    }
+
+    await callback.answer(
+        f"⚠️ Настройка {param_names.get(param, param)} будет доступна в следующей версии",
+        show_alert=True
+    )
+
+
+@router.callback_query(F.data == "settings:quality")
+async def callback_settings_quality(callback: CallbackQuery, db: AsyncSession):
+    """Настройки фильтрации и качества."""
+    from app.modules.settings_manager import get_category_settings
+
+    quality = await get_category_settings("quality", db)
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=f"⭐ Мин. quality score: {quality.get('quality.min_score', 0.6)}", callback_data="quality_param:min_score")],
+        [InlineKeyboardButton(text=f"📝 Мин. длина текста: {quality.get('quality.min_content_length', 300)}", callback_data="quality_param:min_content_length")],
+        [InlineKeyboardButton(text=f"🔄 Порог схожести: {quality.get('quality.similarity_threshold', 0.85)}", callback_data="quality_param:similarity_threshold")],
+        [InlineKeyboardButton(text=f"🌐 Языки: {', '.join(quality.get('quality.languages', ['ru', 'en']))}", callback_data="quality_param:languages")],
+        [InlineKeyboardButton(text="« Назад", callback_data="back_to_settings")],
+    ])
+
+    await callback.message.edit_text(
+        "🎯 <b>Фильтрация и качество</b>\n\n"
+        "Настройки автоматической фильтрации статей:\n\n"
+        "• <b>Quality score</b> - минимальный балл AI (0.0-1.0)\n"
+        "• <b>Длина текста</b> - минимум символов в статье\n"
+        "• <b>Порог схожести</b> - фильтр дубликатов (0.0-1.0)\n"
+        "• <b>Языки</b> - разрешённые языки контента\n\n"
+        "⚠️ Слишком строгие фильтры могут пропускать мало статей!",
+        parse_mode="HTML",
+        reply_markup=keyboard
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "settings:budget")
+async def callback_settings_budget(callback: CallbackQuery, db: AsyncSession):
+    """Настройки бюджета API."""
+    from app.modules.settings_manager import get_category_settings
+
+    budget = await get_category_settings("budget", db)
+
+    stop_icon = "✅" if budget.get("budget.stop_on_exceed", False) else "☐"
+    switch_icon = "✅" if budget.get("budget.switch_to_cheap", True) else "☐"
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=f"💰 Макс. бюджет/месяц: ${budget.get('budget.max_per_month', 10)}", callback_data="budget_param:max_per_month")],
+        [InlineKeyboardButton(text=f"⚠️ Предупреждение при: ${budget.get('budget.warning_threshold', 8)}", callback_data="budget_param:warning_threshold")],
+        [InlineKeyboardButton(text=f"{stop_icon} Остановить при превышении", callback_data="toggle:budget.stop_on_exceed")],
+        [InlineKeyboardButton(text=f"{switch_icon} Переключиться на дешевые модели", callback_data="toggle:budget.switch_to_cheap")],
+        [InlineKeyboardButton(text="« Назад", callback_data="back_to_settings")],
+    ])
+
+    await callback.message.edit_text(
+        "💰 <b>Бюджет API</b>\n\n"
+        "Контроль расходов на OpenAI API:\n\n"
+        "• <b>Макс. бюджет</b> - лимит в $ на месяц\n"
+        "• <b>Предупреждение</b> - когда отправить алерт\n"
+        "• <b>Остановить</b> - прекратить работу при превышении\n"
+        "• <b>Переключиться</b> - использовать дешевые модели\n\n"
+        f"📊 Текущий расход: отслеживается в БД\n"
+        "💡 Рекомендуется включить 'Переключиться на дешевые модели'",
+        parse_mode="HTML",
+        reply_markup=keyboard
+    )
+    await callback.answer()
+
+
+# ====================
+# Personal Posts Handlers
+# ====================
+
+@router.callback_query(F.data == "show_personal_posts")
+async def callback_show_personal_posts(callback: CallbackQuery, db: AsyncSession):
+    """Показать меню личных постов."""
+    await callback.answer()
+
+    from app.modules.personal_posts_manager import get_user_posts
+
+    # Получаем последние посты пользователя
+    posts = await get_user_posts(callback.from_user.id, db, limit=5)
+
+    posts_text = ""
+    if posts:
+        posts_text = "\n\n<b>Последние заметки:</b>\n"
+        for post in posts:
+            date_str = post.created_at.strftime("%d.%m.%Y")
+            title = post.title or post.content[:50] + "..."
+            posts_text += f"\n• {date_str}: {title}"
+    else:
+        posts_text = "\n\n<i>У вас пока нет заметок</i>"
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✍️ Создать новую заметку", callback_data="create_personal_post")],
+        [InlineKeyboardButton(text="📚 Все мои заметки", callback_data="list_personal_posts")],
+        [InlineKeyboardButton(text="« Назад", callback_data="back_to_main_menu")],
+    ])
+
+    await callback.message.edit_text(
+        "✍️ <b>Мои заметки</b>\n\n"
+        "Личный дневник работы с AI. Фиксируйте идеи, эксперименты, инсайты.\n"
+        "Заметки автоматически анализируются и связываются с публикациями."
+        f"{posts_text}",
+        parse_mode="HTML",
+        reply_markup=keyboard
+    )
+
+
+@router.callback_query(F.data == "create_personal_post")
+async def callback_create_personal_post(callback: CallbackQuery):
+    """Выбор способа создания поста."""
+    await callback.answer()
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📝 Написать самостоятельно", callback_data="post_manual")],
+        [InlineKeyboardButton(text="🤖 Создать с помощью AI", callback_data="post_ai_assisted")],
+        [InlineKeyboardButton(text="🎤 Надиктовать голосом", callback_data="post_voice")],
+        [InlineKeyboardButton(text="« Назад", callback_data="show_personal_posts")],
+    ])
+
+    await callback.message.edit_text(
+        "✍️ <b>Создать новую заметку</b>\n\n"
+        "Выберите способ создания:\n\n"
+        "• <b>Написать самостоятельно</b> - просто напишите текст\n"
+        "• <b>Создать с AI</b> - опишите идеи, AI сформирует пост\n"
+        "• <b>Надиктовать</b> - отправьте голосовое сообщение\n\n"
+        "Все заметки сохраняются и индексируются для поиска связей.",
+        parse_mode="HTML",
+        reply_markup=keyboard
+    )
+
+
+# FSM States для создания постов
+class PersonalPostStates(StatesGroup):
+    waiting_manual_text = State()
+    waiting_ai_ideas = State()
+    waiting_ai_feedback = State()
+    waiting_voice = State()
+    waiting_edit_text = State()
+    waiting_comment = State()
+
+
+@router.callback_query(F.data == "post_manual")
+async def callback_post_manual(callback: CallbackQuery, state: FSMContext):
+    """Начать создание поста вручную."""
+    await callback.answer()
+
+    await state.set_state(PersonalPostStates.waiting_manual_text)
+
+    await callback.message.edit_text(
+        "📝 <b>Написать заметку</b>\n\n"
+        "Напишите текст вашей заметки. Можно использовать Markdown форматирование.\n\n"
+        "Отправьте текст сообщением, и я сохраню его.",
+        parse_mode="HTML"
+    )
+
+
+@router.message(PersonalPostStates.waiting_manual_text)
+async def process_manual_post(message: Message, state: FSMContext, db: AsyncSession):
+    """Обработать текст ручного поста."""
+    from app.modules.personal_posts_manager import create_personal_post, enrich_post_with_metadata
+
+    content = message.text
+
+    # Показываем индикатор typing
+    await message.bot.send_chat_action(message.chat.id, "typing")
+
+    # Создаём пост
+    post = await create_personal_post(
+        user_id=message.from_user.id,
+        content=content,
+        db=db,
+        creation_method="manual"
+    )
+
+    # Обогащаем метаданными в фоне
+    await message.answer("⏳ Сохраняю и анализирую вашу заметку...")
+
+    try:
+        await enrich_post_with_metadata(post, db)
+
+        tags_str = ", ".join(post.tags[:5]) if post.tags else "нет"
+
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📤 Опубликовать сейчас", callback_data=f"publish_post:{post.id}")],
+            [InlineKeyboardButton(text="📝 Посмотреть заметку", callback_data=f"view_post:{post.id}")],
+            [InlineKeyboardButton(text="« Главное меню", callback_data="back_to_main_menu")],
+        ])
+
+        await message.answer(
+            f"✅ <b>Заметка сохранена!</b>\n\n"
+            f"📊 Категория: {post.category or 'не определена'}\n"
+            f"🏷 Теги: {tags_str}\n"
+            f"😊 Настроение: {post.sentiment or 'neutral'}\n\n"
+            f"ID: {post.id}",
+            parse_mode="HTML",
+            reply_markup=keyboard
+        )
+
+    except Exception as e:
+        logger.error("post_enrichment_failed", error=str(e))
+        await message.answer(
+            f"✅ Заметка сохранена (ID: {post.id})\n\n"
+            "⚠️ Не удалось проанализировать автоматически, но данные сохранены.",
+            reply_markup=get_main_menu_keyboard()
+        )
+
+    await state.clear()
+
+
+@router.callback_query(F.data == "post_ai_assisted")
+async def callback_post_ai_assisted(callback: CallbackQuery, state: FSMContext):
+    """Начать создание поста с AI."""
+    await callback.answer()
+
+    await state.set_state(PersonalPostStates.waiting_ai_ideas)
+    await state.update_data(previous_attempts=[])
+
+    await callback.message.edit_text(
+        "🤖 <b>Создать заметку с помощью AI</b>\n\n"
+        "Опишите свои идеи, мысли или то, о чём хотите написать.\n"
+        "Это может быть просто набор тезисов или вольное описание.\n\n"
+        "AI сформирует из этого структурированную заметку.\n\n"
+        "Отправьте ваши идеи сообщением:",
+        parse_mode="HTML"
+    )
+
+
+@router.message(PersonalPostStates.waiting_ai_ideas)
+async def process_ai_ideas(message: Message, state: FSMContext, db: AsyncSession):
+    """Обработать идеи для AI генерации."""
+    from app.modules.personal_posts_manager import generate_post_with_ai, create_personal_post
+    from app.modules.settings_manager import get_llm_model
+
+    user_input = message.text
+
+    # Показываем индикатор typing
+    await message.bot.send_chat_action(message.chat.id, "typing")
+
+    processing_msg = await message.answer("🤖 AI формирует вашу заметку...")
+
+    try:
+        # Получаем модель из настроек
+        model = await get_llm_model("draft_generation", db)
+
+        # Генерируем пост
+        data = await state.get_data()
+        previous_attempts = data.get("previous_attempts", [])
+
+        generated_content = await generate_post_with_ai(
+            user_input=user_input,
+            model=model,
+            previous_attempts=previous_attempts if previous_attempts else None
+        )
+
+        await processing_msg.delete()
+
+        # Сохраняем сгенерированный контент для следующей итерации
+        await state.update_data(
+            current_content=generated_content,
+            raw_input=user_input,
+            model_used=model
+        )
+        await state.set_state(PersonalPostStates.waiting_ai_feedback)
+
+        # Показываем результат с кнопками
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="✅ Сохранить", callback_data="ai_post_save")],
+            [InlineKeyboardButton(text="🔄 Переделать", callback_data="ai_post_regenerate")],
+            [InlineKeyboardButton(text="❌ Отменить", callback_data="ai_post_cancel")],
+        ])
+
+        await message.answer(
+            f"🤖 <b>Вот что получилось:</b>\n\n"
+            f"{generated_content}\n\n"
+            "Вас устраивает результат?",
+            parse_mode="HTML",
+            reply_markup=keyboard
+        )
+
+    except Exception as e:
+        logger.error("ai_generation_failed", error=str(e))
+        await processing_msg.delete()
+        await message.answer(
+            "❌ Не удалось сгенерировать заметку. Попробуйте ещё раз или напишите вручную.",
+            reply_markup=get_main_menu_keyboard()
+        )
+        await state.clear()
+
+
+@router.callback_query(F.data == "ai_post_save")
+async def callback_ai_post_save(callback: CallbackQuery, state: FSMContext, db: AsyncSession):
+    """Сохранить AI-сгенерированный пост."""
+    await callback.answer()
+
+    from app.modules.personal_posts_manager import create_personal_post, enrich_post_with_metadata
+
+    data = await state.get_data()
+    content = data.get("current_content")
+    raw_input = data.get("raw_input")
+    model_used = data.get("model_used")
+
+    if not content:
+        await callback.message.answer("❌ Ошибка: контент не найден")
+        await state.clear()
+        return
+
+    await callback.message.edit_text("⏳ Сохраняю и анализирую заметку...")
+
+    # Создаём пост
+    post = await create_personal_post(
+        user_id=callback.from_user.id,
+        content=content,
+        db=db,
+        creation_method="ai_assisted",
+        raw_input=raw_input,
+        ai_model_used=model_used
+    )
+
+    # Обогащаем метаданными
+    try:
+        await enrich_post_with_metadata(post, db)
+
+        tags_str = ", ".join(post.tags[:5]) if post.tags else "нет"
+
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📤 Опубликовать сейчас", callback_data=f"publish_post:{post.id}")],
+            [InlineKeyboardButton(text="📝 Посмотреть заметку", callback_data=f"view_post:{post.id}")],
+            [InlineKeyboardButton(text="« Главное меню", callback_data="back_to_main_menu")],
+        ])
+
+        await callback.message.answer(
+            f"✅ <b>Заметка сохранена!</b>\n\n"
+            f"📊 Категория: {post.category or 'не определена'}\n"
+            f"🏷 Теги: {tags_str}\n"
+            f"🤖 Модель: {model_used}\n\n"
+            f"ID: {post.id}",
+            parse_mode="HTML",
+            reply_markup=keyboard
+        )
+
+    except Exception as e:
+        logger.error("post_enrichment_failed", error=str(e))
+        await callback.message.answer(
+            f"✅ Заметка сохранена (ID: {post.id})\n\n"
+            "⚠️ Не удалось проанализировать автоматически.",
+            reply_markup=get_main_menu_keyboard()
+        )
+
+    await state.clear()
+
+
+@router.callback_query(F.data == "ai_post_regenerate")
+async def callback_ai_post_regenerate(callback: CallbackQuery, state: FSMContext):
+    """Переделать AI-сгенерированный пост."""
+    await callback.answer("Отправьте уточнения или новые идеи")
+
+    data = await state.get_data()
+    current_content = data.get("current_content")
+
+    # Добавляем текущую попытку в список предыдущих
+    previous_attempts = data.get("previous_attempts", [])
+    previous_attempts.append(current_content)
+    await state.update_data(previous_attempts=previous_attempts)
+
+    await state.set_state(PersonalPostStates.waiting_ai_ideas)
+
+    await callback.message.edit_text(
+        "🔄 <b>Переделаем заметку</b>\n\n"
+        "Опишите что не понравилось или какие изменения внести.\n"
+        "Можно просто отправить новые идеи.\n\n"
+        "AI учтёт предыдущую версию и создаст новую:",
+        parse_mode="HTML"
+    )
+
+
+@router.callback_query(F.data == "ai_post_cancel")
+async def callback_ai_post_cancel(callback: CallbackQuery, state: FSMContext):
+    """Отменить создание AI поста."""
+    await callback.answer("Отменено")
+    await state.clear()
+
+    await callback.message.edit_text(
+        "❌ Создание заметки отменено.",
+        reply_markup=get_main_menu_keyboard()
+    )
+
+
+@router.callback_query(F.data == "post_voice")
+async def callback_post_voice(callback: CallbackQuery, state: FSMContext):
+    """Начать создание поста голосом."""
+    await callback.answer()
+
+    await state.set_state(PersonalPostStates.waiting_voice)
+
+    await callback.message.edit_text(
+        "🎤 <b>Надиктовать заметку</b>\n\n"
+        "Отправьте голосовое сообщение с вашими мыслями.\n\n"
+        "Я расшифрую его и создам заметку.\n"
+        "После расшифровки вы сможете выбрать:\n"
+        "• Сохранить как есть\n"
+        "• Дать AI отредактировать",
+        parse_mode="HTML"
+    )
+
+
+@router.message(PersonalPostStates.waiting_voice, F.voice)
+async def process_voice_post(message: Message, state: FSMContext, db: AsyncSession):
+    """Обработать голосовое сообщение."""
+    from app.modules.personal_posts_manager import transcribe_voice
+    import os
+    import tempfile
+
+    # Скачиваем голосовое сообщение
+    voice = message.voice
+    file = await message.bot.get_file(voice.file_id)
+
+    # Сохраняем во временный файл
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".ogg") as temp_file:
+        await message.bot.download_file(file.file_path, temp_file.name)
+        audio_path = temp_file.name
+
+    processing_msg = await message.answer("🎧 Расшифровываю голосовое сообщение...")
+
+    try:
+        # Транскрибируем
+        transcribed_text = await transcribe_voice(audio_path)
+
+        # Удаляем временный файл
+        os.unlink(audio_path)
+
+        await processing_msg.delete()
+
+        # Сохраняем транскрипт и предлагаем опции
+        await state.update_data(transcribed_text=transcribed_text)
+        await state.set_state(PersonalPostStates.waiting_ai_feedback)
+
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="✅ Сохранить как есть", callback_data="voice_save_raw")],
+            [InlineKeyboardButton(text="🤖 Улучшить с AI", callback_data="voice_improve_ai")],
+            [InlineKeyboardButton(text="❌ Отменить", callback_data="ai_post_cancel")],
+        ])
+
+        await message.answer(
+            f"🎤 <b>Расшифровка:</b>\n\n"
+            f"{transcribed_text}\n\n"
+            "Что делаем дальше?",
+            parse_mode="HTML",
+            reply_markup=keyboard
+        )
+
+    except Exception as e:
+        logger.error("voice_transcription_failed", error=str(e))
+        os.unlink(audio_path)
+        await processing_msg.delete()
+        await message.answer(
+            "❌ Не удалось расшифровать голосовое сообщение. Попробуйте ещё раз или напишите текстом.",
+            reply_markup=get_main_menu_keyboard()
+        )
+        await state.clear()
+
+
+@router.callback_query(F.data == "voice_save_raw")
+async def callback_voice_save_raw(callback: CallbackQuery, state: FSMContext, db: AsyncSession):
+    """Сохранить расшифровку голоса как есть."""
+    await callback.answer()
+
+    from app.modules.personal_posts_manager import create_personal_post, enrich_post_with_metadata
+
+    data = await state.get_data()
+    content = data.get("transcribed_text")
+
+    if not content:
+        await callback.message.answer("❌ Ошибка: текст не найден")
+        await state.clear()
+        return
+
+    await callback.message.edit_text("⏳ Сохраняю заметку...")
+
+    # Создаём пост
+    post = await create_personal_post(
+        user_id=callback.from_user.id,
+        content=content,
+        db=db,
+        creation_method="voice"
+    )
+
+    # Обогащаем метаданными
+    try:
+        await enrich_post_with_metadata(post, db)
+
+        tags_str = ", ".join(post.tags[:5]) if post.tags else "нет"
+
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📤 Опубликовать сейчас", callback_data=f"publish_post:{post.id}")],
+            [InlineKeyboardButton(text="📝 Посмотреть заметку", callback_data=f"view_post:{post.id}")],
+            [InlineKeyboardButton(text="« Главное меню", callback_data="back_to_main_menu")],
+        ])
+
+        await callback.message.answer(
+            f"✅ <b>Заметка из голосового сохранена!</b>\n\n"
+            f"📊 Категория: {post.category or 'не определена'}\n"
+            f"🏷 Теги: {tags_str}\n\n"
+            f"ID: {post.id}",
+            parse_mode="HTML",
+            reply_markup=keyboard
+        )
+
+    except Exception as e:
+        logger.error("post_enrichment_failed", error=str(e))
+        await callback.message.answer(
+            f"✅ Заметка сохранена (ID: {post.id})",
+            reply_markup=get_main_menu_keyboard()
+        )
+
+    await state.clear()
+
+
+@router.callback_query(F.data == "voice_improve_ai")
+async def callback_voice_improve_ai(callback: CallbackQuery, state: FSMContext, db: AsyncSession):
+    """Улучшить расшифровку голоса с помощью AI."""
+    await callback.answer()
+
+    from app.modules.personal_posts_manager import generate_post_with_ai
+    from app.modules.settings_manager import get_llm_model
+
+    data = await state.get_data()
+    transcribed_text = data.get("transcribed_text")
+
+    if not transcribed_text:
+        await callback.message.answer("❌ Ошибка: текст не найден")
+        await state.clear()
+        return
+
+    await callback.message.edit_text("🤖 AI улучшает вашу заметку...")
+
+    try:
+        model = await get_llm_model("draft_generation", db)
+
+        # Генерируем улучшенную версию
+        improved_content = await generate_post_with_ai(
+            user_input=transcribed_text,
+            model=model
+        )
+
+        # Сохраняем для feedback
+        await state.update_data(
+            current_content=improved_content,
+            raw_input=transcribed_text,
+            model_used=model
+        )
+
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="✅ Сохранить", callback_data="ai_post_save")],
+            [InlineKeyboardButton(text="🔄 Переделать", callback_data="ai_post_regenerate")],
+            [InlineKeyboardButton(text="❌ Отменить", callback_data="ai_post_cancel")],
+        ])
+
+        await callback.message.answer(
+            f"🤖 <b>Улучшенная версия:</b>\n\n"
+            f"{improved_content}\n\n"
+            "Вас устраивает?",
+            parse_mode="HTML",
+            reply_markup=keyboard
+        )
+
+    except Exception as e:
+        logger.error("ai_improvement_failed", error=str(e))
+        await callback.message.answer(
+            "❌ Не удалось улучшить. Сохраните оригинальный текст или попробуйте позже.",
+            reply_markup=get_main_menu_keyboard()
+        )
+        await state.clear()
+
+
+@router.callback_query(F.data == "list_personal_posts")
+async def callback_list_personal_posts(callback: CallbackQuery, db: AsyncSession):
+    """Показать список всех личных постов."""
+    await callback.answer()
+
+    from app.modules.personal_posts_manager import get_user_posts
+
+    posts = await get_user_posts(callback.from_user.id, db, limit=20)
+
+    if not posts:
+        await callback.message.edit_text(
+            "📚 <b>Ваши заметки</b>\n\n"
+            "У вас пока нет сохранённых заметок.\n"
+            "Создайте первую!",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="✍️ Создать заметку", callback_data="create_personal_post")],
+                [InlineKeyboardButton(text="« Назад", callback_data="show_personal_posts")],
+            ])
+        )
+        return
+
+    # Формируем кликабельный список
+    posts_list = "📚 <b>Ваши заметки (дневник)</b>\n\n"
+    posts_list += "<i>Нажмите на заметку чтобы открыть:</i>\n\n"
+
+    buttons = []
+    for i, post in enumerate(posts, 1):
+        date_str = post.created_at.strftime("%d.%m %H:%M")
+        title = post.title or post.content[:40] + "..."
+        method_icon = {"manual": "✍️", "ai_assisted": "🤖", "voice": "🎤"}.get(post.creation_method, "📝")
+        published_icon = "✅" if post.published else ""
+
+        buttons.append([
+            InlineKeyboardButton(
+                text=f"{method_icon} {published_icon} {date_str}: {title}",
+                callback_data=f"view_post:{post.id}"
+            )
+        ])
+
+    buttons.append([InlineKeyboardButton(text="✍️ Создать новую", callback_data="create_personal_post")])
+    buttons.append([InlineKeyboardButton(text="« Назад", callback_data="show_personal_posts")])
+
+    await callback.message.edit_text(
+        posts_list + f"\n<i>Всего заметок: {len(posts)}</i>",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
+    )
+
+
+@router.callback_query(F.data.startswith("view_post:"))
+async def callback_view_post(callback: CallbackQuery, db: AsyncSession):
+    """Просмотр отдельной заметки."""
+    await callback.answer()
+
+    post_id = int(callback.data.split(":")[1])
+
+    # Получаем заметку
+    result = await db.execute(
+        select(PersonalPost).where(
+            PersonalPost.id == post_id,
+            PersonalPost.user_id == callback.from_user.id
+        )
+    )
+    post = result.scalar_one_or_none()
+
+    if not post:
+        await callback.answer("❌ Заметка не найдена", show_alert=True)
+        return
+
+    # Формируем текст
+    date_str = post.created_at.strftime("%d.%m.%Y %H:%M")
+    method_names = {"manual": "Вручную", "ai_assisted": "С помощью AI", "voice": "Голосом"}
+    method = method_names.get(post.creation_method, post.creation_method)
+
+    post_text = f"📝 <b>Заметка #{post.id}</b>\n"
+    post_text += f"📅 {date_str}\n"
+    post_text += f"🔧 Метод: {method}\n"
+
+    if post.category:
+        post_text += f"📂 Категория: {post.category}\n"
+    if post.tags:
+        post_text += f"🏷 Теги: {', '.join(post.tags[:5])}\n"
+    if post.published:
+        post_text += f"✅ <b>Опубликовано</b> {post.published_at.strftime('%d.%m.%Y')}\n"
+        # Показываем статистику если есть
+        if post.views_count or post.reactions_count:
+            post_text += f"📊 Статистика: 👁 {post.views_count or 0} просмотров, 👍 {post.reactions_count or 0} реакций\n"
+
+    post_text += f"\n{'─' * 30}\n\n"
+    post_text += f"{post.content}\n"
+    post_text += f"\n{'─' * 30}\n"
+
+    # Кнопки
+    buttons = []
+
+    # Кнопка публикации всегда активна (можно публиковать повторно)
+    if not post.published:
+        buttons.append([InlineKeyboardButton(text="📤 Опубликовать", callback_data=f"publish_post:{post.id}")])
+    else:
+        buttons.append([InlineKeyboardButton(text="📤 Опубликовать снова", callback_data=f"publish_post:{post.id}")])
+
+    # Подсчитываем комментарии
+    comments_result = await db.execute(
+        select(PostComment).where(PostComment.post_id == post.id)
+    )
+    comments_count = len(list(comments_result.scalars().all()))
+
+    comments_text = f"💬 Комментарии ({comments_count})" if comments_count > 0 else "💬 Добавить комментарий"
+
+    buttons.append([
+        InlineKeyboardButton(text=comments_text, callback_data=f"view_comments:{post.id}")
+    ])
+
+    buttons.append([
+        InlineKeyboardButton(text="✏️ Редактировать", callback_data=f"edit_post:{post.id}"),
+        InlineKeyboardButton(text="🗑 Удалить", callback_data=f"delete_post:{post.id}")
+    ])
+    buttons.append([InlineKeyboardButton(text="« К списку", callback_data="list_personal_posts")])
+
+    await callback.message.edit_text(
+        post_text,
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
+    )
+
+
+@router.callback_query(F.data.startswith("publish_post:"))
+async def callback_publish_post(callback: CallbackQuery, db: AsyncSession):
+    """Опубликовать личную заметку в канал (можно публиковать повторно)."""
+    post_id = int(callback.data.split(":")[1])
+
+    # Получаем заметку (без проверки published - разрешаем повторную публикацию)
+    result = await db.execute(
+        select(PersonalPost).where(
+            PersonalPost.id == post_id,
+            PersonalPost.user_id == callback.from_user.id
+        )
+    )
+    post = result.scalar_one_or_none()
+
+    if not post:
+        await callback.answer("❌ Заметка не найдена", show_alert=True)
+        return
+
+    # Проверяем, это первая публикация или повторная
+    is_republish = post.published
+
+    # Публикуем в канал
+    try:
+        from app.config import settings
+        import html
+        import re
+
+        # Очищаем текст от служебной информации
+        clean_content = post.content
+
+        # Убираем заголовки с служебными словами
+        service_headers = [
+            r'^#+\s*(Редактирование|Заметка|Черновик|Draft|Note|Edit).*?\n+',
+            r'^\*\*\s*(Редактирование|Заметка|Черновик|Draft|Note|Edit).*?\*\*\n+',
+            r'^(Редактирование|Заметка|Черновик):\s*\n+',
+        ]
+        for pattern in service_headers:
+            clean_content = re.sub(pattern, '', clean_content, flags=re.IGNORECASE | re.MULTILINE)
+
+        # Убираем лишние пустые строки в начале
+        clean_content = clean_content.lstrip('\n ')
+
+        # Форматируем пост для публикации
+        # Экранируем HTML символы для безопасности
+        publish_text = html.escape(clean_content)
+
+        # Добавляем теги если есть
+        if post.tags:
+            escaped_tags = [html.escape(tag.replace(' ', '_')) for tag in post.tags[:5]]
+            publish_text += f"\n\n🏷 {' '.join(['#' + tag for tag in escaped_tags])}"
+
+        # Публикуем (теперь безопасно использовать HTML parse mode)
+        message = await callback.bot.send_message(
+            chat_id=settings.telegram_channel_id,
+            text=publish_text,
+            parse_mode="HTML"
+        )
+
+        # Обновляем статус
+        post.published = True
+        post.published_at = datetime.utcnow()
+        post.telegram_message_id = message.message_id
+        await db.commit()
+
+        # Показываем разное сообщение для первой публикации и повторной
+        success_msg = "✅ Опубликовано снова!" if is_republish else "✅ Опубликовано!"
+        await callback.answer(success_msg, show_alert=True)
+
+        # Обновляем просмотр заметки - создаём новый callback data
+        callback.data = f"view_post:{post_id}"
+        await callback_view_post(callback, db)
+
+    except Exception as e:
+        logger.error("post_publication_error", error=str(e), post_id=post_id)
+        await callback.answer(f"❌ Ошибка: {str(e)}", show_alert=True)
+
+
+@router.callback_query(F.data.startswith("delete_post:"))
+async def callback_delete_post(callback: CallbackQuery, db: AsyncSession):
+    """Удалить заметку."""
+    post_id = int(callback.data.split(":")[1])
+
+    from app.modules.personal_posts_manager import delete_post
+
+    success = await delete_post(post_id, callback.from_user.id, db)
+
+    if success:
+        await callback.answer("🗑 Заметка удалена", show_alert=True)
+        await callback_list_personal_posts(callback, db)
+    else:
+        await callback.answer("❌ Не удалось удалить", show_alert=True)
+
+
+@router.callback_query(F.data.startswith("view_comments:"))
+async def callback_view_comments(callback: CallbackQuery, db: AsyncSession):
+    """Показать комментарии к заметке."""
+    post_id = int(callback.data.split(":")[1])
+
+    # Получаем заметку
+    result = await db.execute(
+        select(PersonalPost).where(
+            PersonalPost.id == post_id,
+            PersonalPost.user_id == callback.from_user.id
+        )
+    )
+    post = result.scalar_one_or_none()
+
+    if not post:
+        await callback.answer("❌ Заметка не найдена", show_alert=True)
+        return
+
+    # Получаем комментарии
+    comments_result = await db.execute(
+        select(PostComment)
+        .where(PostComment.post_id == post.id)
+        .order_by(PostComment.created_at.asc())
+    )
+    comments = list(comments_result.scalars().all())
+
+    # Формируем текст
+    text = f"💬 <b>Комментарии к заметке</b>\n\n"
+    text += f"<b>Заметка:</b> {post.title or post.content[:50]}...\n"
+    text += f"{'─' * 30}\n\n"
+
+    if comments:
+        for idx, comment in enumerate(comments, 1):
+            date_str = comment.created_at.strftime("%d.%m %H:%M")
+            comment_icon = {
+                "reflection": "🤔",
+                "idea": "💡",
+                "question": "❓",
+                "update": "📝"
+            }.get(comment.comment_type, "💬")
+
+            text += f"{comment_icon} <b>#{idx}</b> ({date_str})\n"
+            text += f"{comment.content}\n\n"
+    else:
+        text += "<i>Комментариев пока нет</i>\n\n"
+
+    # Кнопки
+    buttons = [
+        [InlineKeyboardButton(text="➕ Добавить комментарий", callback_data=f"add_comment:{post.id}")],
+        [InlineKeyboardButton(text="« К заметке", callback_data=f"view_post:{post.id}")]
+    ]
+
+    await callback.message.edit_text(
+        text,
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("add_comment:"))
+async def callback_add_comment(callback: CallbackQuery, state: FSMContext, db: AsyncSession):
+    """Начать добавление комментария."""
+    post_id = int(callback.data.split(":")[1])
+
+    # Проверяем что заметка существует
+    result = await db.execute(
+        select(PersonalPost).where(
+            PersonalPost.id == post_id,
+            PersonalPost.user_id == callback.from_user.id
+        )
+    )
+    post = result.scalar_one_or_none()
+
+    if not post:
+        await callback.answer("❌ Заметка не найдена", show_alert=True)
+        return
+
+    # Сохраняем post_id в FSM
+    await state.update_data(commenting_post_id=post_id)
+    await state.set_state(PersonalPostStates.waiting_comment)
+
+    # Показываем типы комментариев
+    buttons = [
+        [InlineKeyboardButton(text="🤔 Рефлексия", callback_data=f"comment_type:reflection:{post_id}")],
+        [InlineKeyboardButton(text="💡 Идея", callback_data=f"comment_type:idea:{post_id}")],
+        [InlineKeyboardButton(text="❓ Вопрос", callback_data=f"comment_type:question:{post_id}")],
+        [InlineKeyboardButton(text="📝 Обновление", callback_data=f"comment_type:update:{post_id}")],
+        [InlineKeyboardButton(text="« Отмена", callback_data=f"view_comments:{post_id}")]
+    ]
+
+    await callback.message.edit_text(
+        "💬 <b>Добавить комментарий</b>\n\n"
+        "Выберите тип комментария:",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("comment_type:"))
+async def callback_comment_type(callback: CallbackQuery, state: FSMContext):
+    """Выбран тип комментария."""
+    parts = callback.data.split(":")
+    comment_type = parts[1]
+    post_id = int(parts[2])
+
+    # Сохраняем тип комментария
+    await state.update_data(comment_type=comment_type)
+
+    type_names = {
+        "reflection": "🤔 Рефлексия",
+        "idea": "💡 Идея",
+        "question": "❓ Вопрос",
+        "update": "📝 Обновление"
+    }
+
+    await callback.message.edit_text(
+        f"{type_names.get(comment_type, 'Комментарий')}\n\n"
+        f"Напишите ваш комментарий:",
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+
+@router.message(PersonalPostStates.waiting_comment)
+async def process_comment(message: Message, state: FSMContext, db: AsyncSession):
+    """Обработать текст комментария."""
+    # Получаем данные из FSM
+    data = await state.get_data()
+    post_id = data.get("commenting_post_id")
+    comment_type = data.get("comment_type", "reflection")
+
+    if not post_id:
+        await message.answer("❌ Ошибка: не найден ID заметки")
+        await state.clear()
+        return
+
+    # Создаём комментарий
+    comment = PostComment(
+        post_id=post_id,
+        user_id=message.from_user.id,
+        content=message.text,
+        comment_type=comment_type
+    )
+
+    db.add(comment)
+    await db.commit()
+
+    logger.info(
+        "comment_added",
+        post_id=post_id,
+        comment_id=comment.id,
+        comment_type=comment_type,
+        user_id=message.from_user.id
+    )
+
+    # Очищаем FSM
+    await state.clear()
+
+    # Показываем комментарии
+    buttons = [
+        [InlineKeyboardButton(text="💬 К комментариям", callback_data=f"view_comments:{post_id}")],
+        [InlineKeyboardButton(text="« К заметке", callback_data=f"view_post:{post_id}")]
+    ]
+
+    type_icons = {
+        "reflection": "🤔",
+        "idea": "💡",
+        "question": "❓",
+        "update": "📝"
+    }
+
+    await message.answer(
+        f"✅ <b>Комментарий добавлен!</b>\n\n"
+        f"{type_icons.get(comment_type, '💬')} {message.text}",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
+    )
+
+
+@router.callback_query(F.data.startswith("edit_post:"))
+async def callback_edit_post(callback: CallbackQuery, state: FSMContext, db: AsyncSession):
+    """Начать редактирование заметки."""
+    post_id = int(callback.data.split(":")[1])
+
+    # Получаем заметку
+    result = await db.execute(
+        select(PersonalPost).where(
+            PersonalPost.id == post_id,
+            PersonalPost.user_id == callback.from_user.id
+        )
+    )
+    post = result.scalar_one_or_none()
+
+    if not post:
+        await callback.answer("❌ Заметка не найдена", show_alert=True)
+        return
+
+    # Сохраняем ID поста в FSM для последующего обновления
+    await state.update_data(editing_post_id=post_id)
+    await state.set_state(PersonalPostStates.waiting_edit_text)
+
+    await callback.message.edit_text(
+        f"✏️ <b>Редактирование заметки</b>\n\n"
+        f"<b>Текущий текст:</b>\n{post.content}\n\n"
+        f"{'─' * 30}\n\n"
+        f"Отправьте новый текст сообщением. Я заменю содержимое заметки и обновлю теги.",
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+
+@router.message(PersonalPostStates.waiting_edit_text)
+async def process_edit_post(message: Message, state: FSMContext, db: AsyncSession):
+    """Обработать отредактированный текст."""
+    from app.modules.personal_posts_manager import enrich_post_with_metadata
+
+    # Получаем ID редактируемого поста из FSM
+    data = await state.get_data()
+    post_id = data.get("editing_post_id")
+
+    if not post_id:
+        await message.answer("❌ Ошибка: не найден ID редактируемого поста")
+        await state.clear()
+        return
+
+    # Получаем пост из БД
+    result = await db.execute(
+        select(PersonalPost).where(
+            PersonalPost.id == post_id,
+            PersonalPost.user_id == message.from_user.id
+        )
+    )
+    post = result.scalar_one_or_none()
+
+    if not post:
+        await message.answer("❌ Заметка не найдена")
+        await state.clear()
+        return
+
+    # Обновляем контент
+    post.content = message.text
+    post.updated_at = datetime.utcnow()
+
+    # Показываем индикатор typing
+    await message.bot.send_chat_action(message.chat.id, "typing")
+    await message.answer("⏳ Обновляю заметку и перегенерирую теги...")
+
+    try:
+        # Обогащаем метаданными заново
+        await enrich_post_with_metadata(post, db)
+
+        tags_str = ", ".join(post.tags[:5]) if post.tags else "нет"
+
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="👁 Посмотреть заметку", callback_data=f"view_post:{post.id}")],
+            [InlineKeyboardButton(text="📋 К списку заметок", callback_data="list_personal_posts")],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="back_to_main_menu")]
+        ])
+
+        await message.answer(
+            f"✅ <b>Заметка обновлена!</b>\n\n"
+            f"📂 <b>Категория:</b> {post.category or 'нет'}\n"
+            f"🏷 <b>Теги:</b> {tags_str}\n"
+            f"😊 <b>Тон:</b> {post.sentiment or 'нет'}",
+            parse_mode="HTML",
+            reply_markup=keyboard
+        )
+
+    except Exception as e:
+        logger.error("post_edit_enrichment_error", error=str(e), post_id=post.id)
+        await message.answer(
+            f"⚠️ Заметка обновлена, но не удалось обогатить метаданными.\n\nОшибка: {str(e)}",
+            parse_mode="HTML"
+        )
+
+    await state.clear()
+
+
+@router.callback_query(F.data == "noop")
+async def callback_noop(callback: CallbackQuery):
+    """No operation - просто ответ на callback."""
+    await callback.answer()
+
+
+@router.callback_query(F.data == "back_to_main_menu")
+async def callback_back_to_main_menu(callback: CallbackQuery):
+    """Вернуться в главное меню."""
+    await callback.answer()
+
+    await callback.message.edit_text(
+        "🏠 <b>Главное меню</b>\n\n"
+        "Выберите действие:",
+        parse_mode="HTML",
+        reply_markup=get_main_menu_keyboard()
     )
 
 
@@ -2171,10 +3820,18 @@ async def setup_bot_commands():
 async def start_bot():
     """Запустить бота."""
     # Инициализация базы данных (создаём таблицы если их нет)
-    from app.models.database import init_db
+    from app.models.database import init_db, get_db
+    from app.modules.settings_manager import init_default_settings
     try:
         await init_db()
         logger.info("database_initialized")
+
+        # Инициализация дефолтных настроек
+        async for db in get_db():
+            await init_default_settings(db)
+            logger.info("default_settings_initialized")
+            break
+
     except Exception as e:
         logger.error("database_init_error", error=str(e))
 
