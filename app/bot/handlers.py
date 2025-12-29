@@ -2424,6 +2424,7 @@ class PersonalPostStates(StatesGroup):
     waiting_ai_ideas = State()
     waiting_ai_feedback = State()
     waiting_voice = State()
+    waiting_edit_text = State()
 
 
 @router.callback_query(F.data == "post_manual")
@@ -2973,8 +2974,6 @@ async def callback_view_post(callback: CallbackQuery, db: AsyncSession):
 @router.callback_query(F.data.startswith("publish_post:"))
 async def callback_publish_post(callback: CallbackQuery, db: AsyncSession):
     """Опубликовать личную заметку в канал."""
-    await callback.answer()
-
     post_id = int(callback.data.split(":")[1])
 
     # Получаем заметку
@@ -3017,12 +3016,13 @@ async def callback_publish_post(callback: CallbackQuery, db: AsyncSession):
 
         await callback.answer("✅ Опубликовано!", show_alert=True)
 
-        # Обновляем просмотр заметки
+        # Обновляем просмотр заметки - создаём новый callback data
+        callback.data = f"view_post:{post_id}"
         await callback_view_post(callback, db)
 
     except Exception as e:
         logger.error("post_publication_error", error=str(e), post_id=post_id)
-        await callback.answer(f"❌ Ошибка публикации: {str(e)}", show_alert=True)
+        await callback.answer(f"❌ Ошибка: {str(e)}", show_alert=True)
 
 
 @router.callback_query(F.data.startswith("delete_post:"))
@@ -3039,6 +3039,105 @@ async def callback_delete_post(callback: CallbackQuery, db: AsyncSession):
         await callback_list_personal_posts(callback, db)
     else:
         await callback.answer("❌ Не удалось удалить", show_alert=True)
+
+
+@router.callback_query(F.data.startswith("edit_post:"))
+async def callback_edit_post(callback: CallbackQuery, state: FSMContext, db: AsyncSession):
+    """Начать редактирование заметки."""
+    post_id = int(callback.data.split(":")[1])
+
+    # Получаем заметку
+    result = await db.execute(
+        select(PersonalPost).where(
+            PersonalPost.id == post_id,
+            PersonalPost.user_id == callback.from_user.id
+        )
+    )
+    post = result.scalar_one_or_none()
+
+    if not post:
+        await callback.answer("❌ Заметка не найдена", show_alert=True)
+        return
+
+    # Сохраняем ID поста в FSM для последующего обновления
+    await state.update_data(editing_post_id=post_id)
+    await state.set_state(PersonalPostStates.waiting_edit_text)
+
+    await callback.message.edit_text(
+        f"✏️ <b>Редактирование заметки</b>\n\n"
+        f"<b>Текущий текст:</b>\n{post.content}\n\n"
+        f"{'─' * 30}\n\n"
+        f"Отправьте новый текст сообщением. Я заменю содержимое заметки и обновлю теги.",
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+
+@router.message(PersonalPostStates.waiting_edit_text)
+async def process_edit_post(message: Message, state: FSMContext, db: AsyncSession):
+    """Обработать отредактированный текст."""
+    from app.modules.personal_posts_manager import enrich_post_with_metadata
+
+    # Получаем ID редактируемого поста из FSM
+    data = await state.get_data()
+    post_id = data.get("editing_post_id")
+
+    if not post_id:
+        await message.answer("❌ Ошибка: не найден ID редактируемого поста")
+        await state.clear()
+        return
+
+    # Получаем пост из БД
+    result = await db.execute(
+        select(PersonalPost).where(
+            PersonalPost.id == post_id,
+            PersonalPost.user_id == message.from_user.id
+        )
+    )
+    post = result.scalar_one_or_none()
+
+    if not post:
+        await message.answer("❌ Заметка не найдена")
+        await state.clear()
+        return
+
+    # Обновляем контент
+    post.content = message.text
+    post.updated_at = datetime.utcnow()
+
+    # Показываем индикатор typing
+    await message.bot.send_chat_action(message.chat.id, "typing")
+    await message.answer("⏳ Обновляю заметку и перегенерирую теги...")
+
+    try:
+        # Обогащаем метаданными заново
+        await enrich_post_with_metadata(post, db)
+
+        tags_str = ", ".join(post.tags[:5]) if post.tags else "нет"
+
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="👁 Посмотреть заметку", callback_data=f"view_post:{post.id}")],
+            [InlineKeyboardButton(text="📋 К списку заметок", callback_data="list_personal_posts")],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="back_to_main_menu")]
+        ])
+
+        await message.answer(
+            f"✅ <b>Заметка обновлена!</b>\n\n"
+            f"📂 <b>Категория:</b> {post.category or 'нет'}\n"
+            f"🏷 <b>Теги:</b> {tags_str}\n"
+            f"😊 <b>Тон:</b> {post.sentiment or 'нет'}",
+            parse_mode="HTML",
+            reply_markup=keyboard
+        )
+
+    except Exception as e:
+        logger.error("post_edit_enrichment_error", error=str(e), post_id=post.id)
+        await message.answer(
+            f"⚠️ Заметка обновлена, но не удалось обогатить метаданными.\n\nОшибка: {str(e)}",
+            parse_mode="HTML"
+        )
+
+    await state.clear()
 
 
 @router.callback_query(F.data == "noop")
