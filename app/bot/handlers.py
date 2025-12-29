@@ -1407,6 +1407,10 @@ async def get_statistics(db: AsyncSession) -> str:
     # Получаем стоимость API за текущий месяц
     api_cost_data = await get_current_month_cost(db)
 
+    # Получаем статистику AI анализа
+    analytics = AnalyticsService(db)
+    ai_stats = await analytics.get_ai_analysis_stats()
+
     stats_text = f"""
 📊 <b>Статистика системы</b>
 
@@ -1433,6 +1437,23 @@ async def get_statistics(db: AsyncSession) -> str:
             stats_text += f"│  ├─ Стоимость: ${data['cost_usd']:.4f}\n"
             stats_text += f"│  ├─ Токенов: {data['tokens']:,}\n"
             stats_text += f"│  └─ Запросов: {data['requests']}\n"
+
+    # Добавляем статистику AI анализа
+    stats_text += "\n━━━━━━━━━━━━━━━━\n\n"
+    stats_text += "🤖 <b>AI Анализ аналитики (GPT-4)</b>\n\n"
+
+    if ai_stats['month']['count'] > 0 or ai_stats['year']['count'] > 0:
+        stats_text += f"<b>За текущий месяц:</b>\n"
+        stats_text += f"├─ Запросов: {ai_stats['month']['count']}\n"
+        stats_text += f"├─ Токенов: {ai_stats['month']['total_tokens']:,}\n"
+        stats_text += f"└─ Стоимость: ${ai_stats['month']['total_cost_usd']:.4f}\n\n"
+
+        stats_text += f"<b>За текущий год:</b>\n"
+        stats_text += f"├─ Запросов: {ai_stats['year']['count']}\n"
+        stats_text += f"├─ Токенов: {ai_stats['year']['total_tokens']:,}\n"
+        stats_text += f"└─ Стоимость: ${ai_stats['year']['total_cost_usd']:.2f}\n"
+    else:
+        stats_text += "Анализы ещё не запускались\n"
 
     stats_text += f"\n📅 Обновлено: {datetime.now().strftime('%d.%m.%Y %H:%M')}\n"
 
