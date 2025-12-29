@@ -581,13 +581,24 @@ def collect_telegram_metrics_task():
         try:
             # Подключаемся к Telegram через Telethon (MTProto API)
             # Используем ту же сессию что и для сбора новостей
+            # Абсолютный путь к session файлу для Celery worker
+            session_path = '/app/telegram_bot'
             client = TelegramClient(
-                'telegram_bot',
+                session_path,
                 settings.telegram_api_id,
                 settings.telegram_api_hash
             )
 
-            await client.start()
+            # Подключаемся БЕЗ интерактивной авторизации (session уже создан)
+            await client.connect()
+
+            # Проверяем авторизацию
+            if not await client.is_user_authorized():
+                logger.error("telegram_session_not_authorized",
+                           session_path=session_path)
+                raise Exception("Telegram session not authorized. Run setup_telegram_session.py first.")
+
+            logger.info("telegram_client_connected", session_path=session_path)
 
             # Получаем публикации за последние 30 дней
             async for db in get_db():
