@@ -885,39 +885,31 @@ async def callback_show_stats(callback: CallbackQuery, db: AsyncSession):
 
 
 @router.callback_query(F.data == "show_settings")
-async def callback_show_settings(callback: CallbackQuery):
+async def callback_show_settings(callback: CallbackQuery, db: AsyncSession):
     """Показать настройки через кнопку."""
     if not await check_admin(callback.from_user.id):
         await callback.answer("⛔️ Нет прав доступа", show_alert=True)
         return
 
-    # Определяем название текущего провайдера
-    provider_name = "OpenAI (GPT-4o-mini)" if _selected_llm_provider == "openai" else "Perplexity (Llama 3.1)"
+    # Используем новую систему настроек
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📰 Источники новостей", callback_data="settings:sources")],
+        [InlineKeyboardButton(text="🤖 Модели LLM", callback_data="settings:llm")],
+        [InlineKeyboardButton(text="🎨 Генерация изображений (DALL-E)", callback_data="settings:dalle")],
+        [InlineKeyboardButton(text="📅 Автопубликация", callback_data="settings:autopublish")],
+        [InlineKeyboardButton(text="🔔 Уведомления", callback_data="settings:alerts")],
+        [InlineKeyboardButton(text="🎯 Фильтрация и качество", callback_data="settings:quality")],
+        [InlineKeyboardButton(text="💰 Бюджет API", callback_data="settings:budget")],
+        [InlineKeyboardButton(text="« Назад", callback_data="back_to_main_menu")],
+    ])
 
-    settings_text = f"""
-⚙️ <b>Настройки системы</b>
-
-📊 Сбор новостей: автоматически в 09:00 MSK
-🤖 AI модель: {provider_name}
-📝 Макс. драфтов/день: 3
-✅ Требуется модерация: Да
-
-Для изменения настроек используйте переменные окружения в .env файле.
-"""
-
-    # Добавляем кнопку выбора LLM
-    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-    from aiogram.utils.keyboard import InlineKeyboardBuilder
-
-    builder = InlineKeyboardBuilder()
-    builder.row(
-        InlineKeyboardButton(
-            text="🤖 Выбрать LLM провайдера",
-            callback_data="show_llm_selection"
-        )
+    await callback.message.edit_text(
+        "⚙️ <b>Системные настройки</b>\n\n"
+        "Все параметры сохраняются в базе данных и применяются автоматически.\n\n"
+        "Выберите категорию:",
+        parse_mode="HTML",
+        reply_markup=keyboard
     )
-
-    await callback.message.answer(settings_text, parse_mode="HTML", reply_markup=builder.as_markup())
     await callback.answer()
 
 
