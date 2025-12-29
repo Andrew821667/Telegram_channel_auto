@@ -1689,10 +1689,63 @@ async def cmd_analytics(message: Message, db: AsyncSession):
         ],
         [
             InlineKeyboardButton(text="📅 Всё время", callback_data="analytics:all"),
+        ],
+        [
+            InlineKeyboardButton(text="🤖 AI Анализ", callback_data="show_ai_analysis_menu"),
         ]
     ])
 
     await message.answer(
+        "📊 <b>Выберите период для аналитики:</b>",
+        parse_mode="HTML",
+        reply_markup=keyboard
+    )
+
+
+@router.callback_query(F.data == "show_ai_analysis_menu")
+async def callback_show_ai_analysis_menu(callback: CallbackQuery):
+    """Показать меню выбора периода для AI анализа."""
+    await callback.answer()
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="🤖 7 дней", callback_data="ai_analysis:7"),
+            InlineKeyboardButton(text="🤖 30 дней", callback_data="ai_analysis:30"),
+        ],
+        [
+            InlineKeyboardButton(text="« Назад", callback_data="back_to_analytics_menu"),
+        ]
+    ])
+
+    await callback.message.edit_text(
+        "🤖 <b>AI Анализ и Рекомендации</b>\n\n"
+        "Выберите период для анализа:\n\n"
+        "GPT-4 проанализирует все метрики и даст конкретные рекомендации "
+        "по улучшению engagement, контент-стратегии и оптимизации источников.",
+        parse_mode="HTML",
+        reply_markup=keyboard
+    )
+
+
+@router.callback_query(F.data == "back_to_analytics_menu")
+async def callback_back_to_analytics_menu(callback: CallbackQuery):
+    """Вернуться к меню аналитики."""
+    await callback.answer()
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="📅 7 дней", callback_data="analytics:7"),
+            InlineKeyboardButton(text="📅 30 дней", callback_data="analytics:30"),
+        ],
+        [
+            InlineKeyboardButton(text="📅 Всё время", callback_data="analytics:all"),
+        ],
+        [
+            InlineKeyboardButton(text="🤖 AI Анализ", callback_data="show_ai_analysis_menu"),
+        ]
+    ])
+
+    await callback.message.edit_text(
         "📊 <b>Выберите период для аналитики:</b>",
         parse_mode="HTML",
         reply_markup=keyboard
@@ -1777,6 +1830,161 @@ async def callback_analytics(callback: CallbackQuery, db: AsyncSession):
         logger.error("analytics_error", error=str(e), period=callback.data)
         await callback.message.answer(
             "❌ Произошла ошибка при сборе аналитики. Попробуйте позже.",
+            parse_mode="HTML"
+        )
+
+
+@router.callback_query(F.data.startswith("ai_analysis:"))
+async def callback_ai_analysis(callback: CallbackQuery, db: AsyncSession):
+    """AI-анализ аналитики с рекомендациями от GPT-4."""
+
+    await callback.answer("🤖 Запускаю AI анализ...")
+
+    if not await check_admin(callback.from_user.id):
+        await callback.message.answer("⛔ У вас нет доступа")
+        return
+
+    try:
+        period = callback.data.split(":")[1]
+        days = int(period) if period != "all" else 30  # Ограничиваем для AI анализа
+
+        await callback.message.answer(
+            "🤖 <b>AI Анализ запущен...</b>\n\n"
+            "Собираю данные и анализирую метрики...",
+            parse_mode="HTML"
+        )
+
+        logger.info("ai_analysis_requested", period=period, days=days, user_id=callback.from_user.id)
+
+        # Собираем данные аналитики
+        analytics = AnalyticsService(db)
+
+        stats = await analytics.get_period_stats(days)
+        top_posts = await analytics.get_top_posts(3, days)
+        worst_posts = await analytics.get_worst_posts(3, days)
+        sources = await analytics.get_source_stats(days)
+        views_stats = await analytics.get_views_and_forwards_stats(days)
+        best_time = await analytics.get_best_publish_time(min(days, 30))
+        trending_topics = await analytics.get_trending_topics(days, top_n=5)
+        alerts = await analytics.get_performance_alerts(days)
+        source_recommendations = await analytics.get_source_recommendations(min(days, 30))
+
+        # Формируем данные для GPT
+        analytics_data = f"""
+ПЕРИОД АНАЛИЗА: {days} дней
+
+ОСНОВНЫЕ МЕТРИКИ:
+- Публикаций: {stats['total_publications']}
+- Одобрено драфтов: {stats['approved_drafts']} из {stats['total_drafts']} ({stats['approval_rate']:.1f}%)
+- Engagement rate: {stats['engagement_rate']:.1f}%
+- Avg quality score: {stats['avg_quality_score']}
+
+РЕАКЦИИ:
+- Полезно: {stats['reactions']['useful']}
+- Важно: {stats['reactions']['important']}
+- Спорно: {stats['reactions']['controversial']}
+- Банально: {stats['reactions']['banal']}
+- Плохое качество: {stats['reactions']['poor_quality']}
+
+VIEWS И FORWARDS:
+- Всего просмотров: {views_stats.get('total_views', 0)}
+- Avg просмотров/пост: {views_stats.get('avg_views', 0)}
+- Всего форвардов: {views_stats.get('total_forwards', 0)}
+- Viral coefficient: {views_stats.get('viral_coefficient', 0)}%
+
+ЛУЧШЕЕ ВРЕМЯ ПУБЛИКАЦИИ:
+{best_time.get('recommendation', 'Нет данных')}
+
+ТРЕНДОВЫЕ ТЕМЫ:
+{chr(10).join([f"- {t['topic']} ({t['mentions']} упоминаний)" for t in trending_topics[:5]]) if trending_topics else 'Нет данных'}
+
+ТОП-3 ПОСТА:
+{chr(10).join([f"- {p['title'][:60]}... (quality: {p['quality_score']})" for p in top_posts[:3]]) if top_posts else 'Нет данных'}
+
+ХУДШИЕ ПОСТЫ:
+{chr(10).join([f"- {p['title'][:60]}... (quality: {p['quality_score']})" for p in worst_posts[:3]]) if worst_posts else 'Нет данных'}
+
+ПРОБЛЕМНЫЕ ИСТОЧНИКИ:
+{chr(10).join([f"- {s['source_name']}: {s['recommendation']}" for s in source_recommendations[:3]]) if source_recommendations else 'Нет проблем'}
+
+АЛЕРТЫ:
+{chr(10).join([f"[{a['severity'].upper()}] {a['message']}" for a in alerts]) if alerts else 'Нет алертов'}
+"""
+
+        # Вызываем GPT-4 для анализа
+        from app.modules.ai_core import call_openai_chat
+
+        prompt = f"""Ты - эксперт по аналитике Telegram каналов и контент-маркетингу.
+
+Проанализируй следующие данные аналитики канала @legal_ai_pro (новости о внедрении ИИ в юриспруденцию и бизнес):
+
+{analytics_data}
+
+Дай детальный анализ и конкретные рекомендации:
+
+1. **АНАЛИЗ СИТУАЦИИ** (2-3 предложения):
+   - Общая оценка производительности канала
+   - Ключевые проблемы и возможности
+
+2. **ПРИОРИТЕТНЫЕ РЕКОМЕНДАЦИИ** (топ-3, нумерованный список):
+   - Конкретные действия для улучшения метрик
+   - Фокус на engagement, quality score, и viral coefficient
+
+3. **КОНТЕНТ-СТРАТЕГИЯ**:
+   - Какие темы работают лучше всего (на основе trending topics)
+   - Рекомендации по улучшению худших постов
+   - Как повысить viral coefficient
+
+4. **ИСТОЧНИКИ КОНТЕНТА**:
+   - Какие источники стоит оптимизировать/отключить
+   - Рекомендации по поиску новых источников
+
+5. **ТАЙМИНГ ПУБЛИКАЦИЙ**:
+   - Оптимальное время на основе данных
+   - Рекомендации по частоте публикаций
+
+Формат ответа: структурированный, с эмодзи, конкретными цифрами и actionable советами. Не более 800 слов."""
+
+        ai_response = await call_openai_chat(
+            messages=[{"role": "user", "content": prompt}],
+            model="gpt-4o",  # Используем GPT-4 для качественного анализа
+            temperature=0.7,
+            max_tokens=2000
+        )
+
+        # Форматируем ответ
+        report = f"""🤖 <b>AI АНАЛИЗ АНАЛИТИКИ</b>
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+{ai_response}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+<i>Анализ выполнен GPT-4 на основе данных за {days} дней</i>
+📅 {datetime.now().strftime('%d.%m.%Y %H:%M')}"""
+
+        # Отправляем ответ (может быть длинным, поэтому разбиваем если нужно)
+        if len(report) > 4096:
+            # Разбиваем на части
+            parts = report.split("━━━━━━━━━━━━━━━━━━━━━━━━━━")
+            for i, part in enumerate(parts):
+                if part.strip():
+                    await callback.message.answer(
+                        part if i == 0 else "━━━━━━━━━━━━━━━━━━━━━━━━━━" + part,
+                        parse_mode="HTML",
+                        disable_web_page_preview=True
+                    )
+        else:
+            await callback.message.answer(report, parse_mode="HTML", disable_web_page_preview=True)
+
+        logger.info("ai_analysis_sent", period=period, response_length=len(ai_response))
+
+    except Exception as e:
+        logger.error("ai_analysis_error", error=str(e), period=callback.data)
+        await callback.message.answer(
+            "❌ Произошла ошибка при AI анализе. Попробуйте позже.\n\n"
+            f"Ошибка: {str(e)}",
             parse_mode="HTML"
         )
 
