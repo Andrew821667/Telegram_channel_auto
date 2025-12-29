@@ -1,0 +1,1236 @@
+legal_ai_bot  | 2025-12-27 03:46:57 [info     ] bot_starting
+legal_ai_bot  | 2025-12-27 03:46:57 [info     ] bot_commands_set               count=6
+legal_ai_bot  | 2025-12-27 03:47:33 [info     ] analytics_requested            days=9999 period=all user_id=321681061
+legal_ai_bot  | 2025-12-27 03:47:33,503 INFO sqlalchemy.engine.Engine select pg_catalog.version()
+legal_ai_bot  | 2025-12-27 03:47:33,504 INFO sqlalchemy.engine.Engine [raw sql] ()
+legal_ai_bot  | 2025-12-27 03:47:33,506 INFO sqlalchemy.engine.Engine select current_schema()
+legal_ai_bot  | 2025-12-27 03:47:33,506 INFO sqlalchemy.engine.Engine [raw sql] ()
+legal_ai_bot  | 2025-12-27 03:47:33,507 INFO sqlalchemy.engine.Engine show standard_conforming_strings
+legal_ai_bot  | 2025-12-27 03:47:33,507 INFO sqlalchemy.engine.Engine [raw sql] ()
+legal_ai_bot  | 2025-12-27 03:47:33,508 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+legal_ai_bot  | 2025-12-27 03:47:33,509 INFO sqlalchemy.engine.Engine 
+legal_ai_bot  |                 SELECT COUNT(*) as total_publications
+legal_ai_bot  |                 FROM publications
+legal_ai_bot  |                 WHERE published_at >= $1
+legal_ai_bot  |             
+legal_ai_bot  | 2025-12-27 03:47:33,509 INFO sqlalchemy.engine.Engine [generated in 0.00032s] (datetime.datetime(1998, 8, 12, 0, 47, 33, 474762),)
+legal_ai_bot  | 2025-12-27 03:47:33,511 INFO sqlalchemy.engine.Engine 
+legal_ai_bot  |                 SELECT
+legal_ai_bot  |                     COUNT(*) as total_drafts,
+legal_ai_bot  |                     COUNT(CASE WHEN status = 'approved' THEN 1 END) as approved_drafts,
+legal_ai_bot  |                     COUNT(CASE WHEN status = 'rejected' THEN 1 END) as rejected_drafts
+legal_ai_bot  |                 FROM post_drafts
+legal_ai_bot  |                 WHERE created_at >= $1
+legal_ai_bot  |             
+legal_ai_bot  | 2025-12-27 03:47:33,511 INFO sqlalchemy.engine.Engine [generated in 0.00010s] (datetime.datetime(1998, 8, 12, 0, 47, 33, 474762),)
+legal_ai_bot  | 2025-12-27 03:47:33,514 INFO sqlalchemy.engine.Engine 
+legal_ai_bot  |                 SELECT
+legal_ai_bot  |                     SUM(COALESCE((reactions->>'useful')::int, 0)) as useful,
+legal_ai_bot  |                     SUM(COALESCE((reactions->>'important')::int, 0)) as important,
+legal_ai_bot  |                     SUM(COALESCE((reactions->>'controversial')::int, 0)) as controversial,
+legal_ai_bot  |                     SUM(COALESCE((reactions->>'banal')::int, 0)) as banal,
+legal_ai_bot  |                     SUM(COALESCE((reactions->>'obvious')::int, 0)) as obvious,
+legal_ai_bot  |                     SUM(COALESCE((reactions->>'poor_quality')::int, 0)) as poor_quality
+legal_ai_bot  |                 FROM publications
+legal_ai_bot  |                 WHERE published_at >= $1
+legal_ai_bot  |             
+legal_ai_bot  | 2025-12-27 03:47:33,514 INFO sqlalchemy.engine.Engine [generated in 0.00007s] (datetime.datetime(1998, 8, 12, 0, 47, 33, 474762),)
+legal_ai_bot  | 2025-12-27 03:47:33,515 INFO sqlalchemy.engine.Engine 
+legal_ai_bot  |                     SELECT AVG(
+legal_ai_bot  |                         (
+legal_ai_bot  |                             COALESCE((reactions->>'useful')::int, 0) +
+legal_ai_bot  |                             COALESCE((reactions->>'important')::int, 0) -
+legal_ai_bot  |                             COALESCE((reactions->>'banal')::int, 0) -
+legal_ai_bot  |                             COALESCE((reactions->>'obvious')::int, 0) -
+legal_ai_bot  |                             COALESCE((reactions->>'poor_quality')::int, 0)
+legal_ai_bot  |                         )::float / NULLIF(
+legal_ai_bot  |                             COALESCE((reactions->>'useful')::int, 0) +
+legal_ai_bot  |                             COALESCE((reactions->>'important')::int, 0) +
+legal_ai_bot  |                             COALESCE((reactions->>'banal')::int, 0) +
+legal_ai_bot  |                             COALESCE((reactions->>'obvious')::int, 0) +
+legal_ai_bot  |                             COALESCE((reactions->>'poor_quality')::int, 0) +
+legal_ai_bot  |                             COALESCE((reactions->>'controversial')::int, 0),
+legal_ai_bot  |                             0
+legal_ai_bot  |                         )
+legal_ai_bot  |                     ) as avg_quality_score
+legal_ai_bot  |                     FROM publications
+legal_ai_bot  |                     WHERE published_at >= $1
+legal_ai_bot  |                     AND (
+legal_ai_bot  |                         COALESCE((reactions->>'useful')::int, 0) +
+legal_ai_bot  |                         COALESCE((reactions->>'important')::int, 0) +
+legal_ai_bot  |                         COALESCE((reactions->>'banal')::int, 0) +
+legal_ai_bot  |                         COALESCE((reactions->>'obvious')::int, 0) +
+legal_ai_bot  |                         COALESCE((reactions->>'poor_quality')::int, 0) +
+legal_ai_bot  |                         COALESCE((reactions->>'controversial')::int, 0)
+legal_ai_bot  |                     ) > 0
+legal_ai_bot  |                 
+legal_ai_bot  | 2025-12-27 03:47:33,515 INFO sqlalchemy.engine.Engine [generated in 0.00007s] (datetime.datetime(1998, 8, 12, 0, 47, 33, 474762),)
+legal_ai_bot  | 2025-12-27 03:47:33,516 INFO sqlalchemy.engine.Engine 
+legal_ai_bot  |                 SELECT
+legal_ai_bot  |                     p.id,
+legal_ai_bot  |                     d.title,
+legal_ai_bot  |                     d.content,
+legal_ai_bot  |                     p.published_at,
+legal_ai_bot  |                     p.message_id as telegram_message_id,
+legal_ai_bot  |                     p.reactions,
+legal_ai_bot  |                     (
+legal_ai_bot  |                         COALESCE((p.reactions->>'useful')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'important')::int, 0) -
+legal_ai_bot  |                         COALESCE((p.reactions->>'banal')::int, 0) -
+legal_ai_bot  |                         COALESCE((p.reactions->>'obvious')::int, 0) -
+legal_ai_bot  |                         COALESCE((p.reactions->>'poor_quality')::int, 0)
+legal_ai_bot  |                     )::float / NULLIF(
+legal_ai_bot  |                         COALESCE((p.reactions->>'useful')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'important')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'banal')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'obvious')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'poor_quality')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'controversial')::int, 0),
+legal_ai_bot  |                         0
+legal_ai_bot  |                     ) as quality_score,
+legal_ai_bot  |                     (
+legal_ai_bot  |                         COALESCE((p.reactions->>'useful')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'important')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'banal')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'obvious')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'poor_quality')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'controversial')::int, 0)
+legal_ai_bot  |                     ) as total_reactions
+legal_ai_bot  |                 FROM publications p
+legal_ai_bot  |                 JOIN post_drafts d ON p.draft_id = d.id
+legal_ai_bot  |                 WHERE p.published_at >= $1
+legal_ai_bot  |                 AND (
+legal_ai_bot  |                     COALESCE((p.reactions->>'useful')::int, 0) +
+legal_ai_bot  |                     COALESCE((p.reactions->>'important')::int, 0) +
+legal_ai_bot  |                     COALESCE((p.reactions->>'banal')::int, 0) +
+legal_ai_bot  |                     COALESCE((p.reactions->>'obvious')::int, 0) +
+legal_ai_bot  |                     COALESCE((p.reactions->>'poor_quality')::int, 0) +
+legal_ai_bot  |                     COALESCE((p.reactions->>'controversial')::int, 0)
+legal_ai_bot  |                 ) > 0
+legal_ai_bot  |                 ORDER BY quality_score DESC, total_reactions DESC
+legal_ai_bot  |                 LIMIT $2
+legal_ai_bot  |             
+legal_ai_bot  | 2025-12-27 03:47:33,516 INFO sqlalchemy.engine.Engine [generated in 0.00010s] (datetime.datetime(1998, 8, 12, 0, 47, 33, 516452), 3)
+legal_ai_bot  | 2025-12-27 03:47:33,519 INFO sqlalchemy.engine.Engine 
+legal_ai_bot  |                 SELECT
+legal_ai_bot  |                     p.id,
+legal_ai_bot  |                     d.title,
+legal_ai_bot  |                     d.content,
+legal_ai_bot  |                     p.published_at,
+legal_ai_bot  |                     p.message_id as telegram_message_id,
+legal_ai_bot  |                     p.reactions,
+legal_ai_bot  |                     (
+legal_ai_bot  |                         COALESCE((p.reactions->>'useful')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'important')::int, 0) -
+legal_ai_bot  |                         COALESCE((p.reactions->>'banal')::int, 0) -
+legal_ai_bot  |                         COALESCE((p.reactions->>'obvious')::int, 0) -
+legal_ai_bot  |                         COALESCE((p.reactions->>'poor_quality')::int, 0)
+legal_ai_bot  |                     )::float / NULLIF(
+legal_ai_bot  |                         COALESCE((p.reactions->>'useful')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'important')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'banal')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'obvious')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'poor_quality')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'controversial')::int, 0),
+legal_ai_bot  |                         0
+legal_ai_bot  |                     ) as quality_score,
+legal_ai_bot  |                     (
+legal_ai_bot  |                         COALESCE((p.reactions->>'useful')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'important')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'banal')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'obvious')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'poor_quality')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'controversial')::int, 0)
+legal_ai_bot  |                     ) as total_reactions
+legal_ai_bot  |                 FROM publications p
+legal_ai_bot  |                 JOIN post_drafts d ON p.draft_id = d.id
+legal_ai_bot  |                 WHERE p.published_at >= $1
+legal_ai_bot  |                 AND (
+legal_ai_bot  |                     COALESCE((p.reactions->>'banal')::int, 0) +
+legal_ai_bot  |                     COALESCE((p.reactions->>'obvious')::int, 0) +
+legal_ai_bot  |                     COALESCE((p.reactions->>'poor_quality')::int, 0)
+legal_ai_bot  |                 ) > 0
+legal_ai_bot  |                 ORDER BY quality_score ASC, total_reactions DESC
+legal_ai_bot  |                 LIMIT $2
+legal_ai_bot  |             
+legal_ai_bot  | 2025-12-27 03:47:33,519 INFO sqlalchemy.engine.Engine [generated in 0.00007s] (datetime.datetime(1998, 8, 12, 0, 47, 33, 518883), 3)
+legal_ai_bot  | 2025-12-27 03:47:33,520 INFO sqlalchemy.engine.Engine 
+legal_ai_bot  |                 SELECT
+legal_ai_bot  |                     source_name,
+legal_ai_bot  |                     COUNT(*) as total_collected
+legal_ai_bot  |                 FROM raw_articles
+legal_ai_bot  |                 WHERE fetched_at >= $1
+legal_ai_bot  |                 GROUP BY source_name
+legal_ai_bot  |                 ORDER BY total_collected DESC
+legal_ai_bot  |             
+legal_ai_bot  | 2025-12-27 03:47:33,520 INFO sqlalchemy.engine.Engine [generated in 0.00006s] (datetime.datetime(1998, 8, 12, 0, 47, 33, 520028),)
+legal_ai_bot  | 2025-12-27 03:47:33,521 INFO sqlalchemy.engine.Engine 
+legal_ai_bot  |                 SELECT
+legal_ai_bot  |                     a.source_name,
+legal_ai_bot  |                     COUNT(*) as total_published,
+legal_ai_bot  |                     AVG(
+legal_ai_bot  |                         (
+legal_ai_bot  |                             COALESCE((p.reactions->>'useful')::int, 0) +
+legal_ai_bot  |                             COALESCE((p.reactions->>'important')::int, 0) -
+legal_ai_bot  |                             COALESCE((p.reactions->>'banal')::int, 0) -
+legal_ai_bot  |                             COALESCE((p.reactions->>'obvious')::int, 0) -
+legal_ai_bot  |                             COALESCE((p.reactions->>'poor_quality')::int, 0)
+legal_ai_bot  |                         )::float / NULLIF(
+legal_ai_bot  |                             COALESCE((p.reactions->>'useful')::int, 0) +
+legal_ai_bot  |                             COALESCE((p.reactions->>'important')::int, 0) +
+legal_ai_bot  |                             COALESCE((p.reactions->>'banal')::int, 0) +
+legal_ai_bot  |                             COALESCE((p.reactions->>'obvious')::int, 0) +
+legal_ai_bot  |                             COALESCE((p.reactions->>'poor_quality')::int, 0) +
+legal_ai_bot  |                             COALESCE((p.reactions->>'controversial')::int, 0),
+legal_ai_bot  |                             0
+legal_ai_bot  |                         )
+legal_ai_bot  |                     ) as avg_quality_score
+legal_ai_bot  |                 FROM publications p
+legal_ai_bot  |                 JOIN post_drafts d ON p.draft_id = d.id
+legal_ai_bot  |                 JOIN raw_articles a ON d.article_id = a.id
+legal_ai_bot  |                 WHERE p.published_at >= $1
+legal_ai_bot  |                 GROUP BY a.source_name
+legal_ai_bot  |             
+legal_ai_bot  | 2025-12-27 03:47:33,521 INFO sqlalchemy.engine.Engine [generated in 0.00007s] (datetime.datetime(1998, 8, 12, 0, 47, 33, 520028),)
+legal_ai_bot  | 2025-12-27 03:47:33,522 INFO sqlalchemy.engine.Engine 
+legal_ai_bot  |                 SELECT
+legal_ai_bot  |                     EXTRACT(DOW FROM published_at) as day_of_week,
+legal_ai_bot  |                     COUNT(*) as total_posts,
+legal_ai_bot  |                     AVG(
+legal_ai_bot  |                         (
+legal_ai_bot  |                             COALESCE((reactions->>'useful')::int, 0) +
+legal_ai_bot  |                             COALESCE((reactions->>'important')::int, 0) -
+legal_ai_bot  |                             COALESCE((reactions->>'banal')::int, 0) -
+legal_ai_bot  |                             COALESCE((reactions->>'obvious')::int, 0) -
+legal_ai_bot  |                             COALESCE((reactions->>'poor_quality')::int, 0)
+legal_ai_bot  |                         )::float / NULLIF(
+legal_ai_bot  |                             COALESCE((reactions->>'useful')::int, 0) +
+legal_ai_bot  |                             COALESCE((reactions->>'important')::int, 0) +
+legal_ai_bot  |                             COALESCE((reactions->>'banal')::int, 0) +
+legal_ai_bot  |                             COALESCE((reactions->>'obvious')::int, 0) +
+legal_ai_bot  |                             COALESCE((reactions->>'poor_quality')::int, 0) +
+legal_ai_bot  |                             COALESCE((reactions->>'controversial')::int, 0),
+legal_ai_bot  |                             0
+legal_ai_bot  |                         )
+legal_ai_bot  |                     ) as avg_quality_score
+legal_ai_bot  |                 FROM publications
+legal_ai_bot  |                 WHERE published_at >= $1
+legal_ai_bot  |                 GROUP BY day_of_week
+legal_ai_bot  |                 ORDER BY day_of_week
+legal_ai_bot  |             
+legal_ai_bot  | 2025-12-27 03:47:33,522 INFO sqlalchemy.engine.Engine [generated in 0.00005s] (datetime.datetime(2025, 11, 27, 0, 47, 33, 522775),)
+legal_ai_bot  | /usr/local/lib/python3.11/site-packages/huggingface_hub/file_download.py:942: FutureWarning: `resume_download` is deprecated and will be removed in version 1.0.0. Downloads always resume when possible. If you want to force a new download, use `force_download=True`.
+legal_ai_bot  |   warnings.warn(
+legal_ai_bot  | 2025-12-27 03:49:20 [info     ] qdrant_collection_exists       collection=legal_ai_publications
+legal_ai_bot  | 2025-12-27 03:49:20 [info     ] vector_search_initialized      collection=legal_ai_publications vector_size=768
+legal_ai_bot  | Failed to fetch updates - TelegramNetworkError: HTTP Client says - Request timeout error
+legal_ai_bot  | Sleep for 1.000000 seconds and try again... (tryings = 0, bot id = 8237648488)
+legal_ai_bot  | 2025-12-27 03:49:20 [error    ] analytics_error                error=Telegram server says - Bad Request: can't parse entities: Unsupported start tag "" at byte offset 3329 period=analytics:all
+legal_ai_bot  | 2025-12-27 03:49:20,910 INFO sqlalchemy.engine.Engine ROLLBACK
+legal_ai_bot  | Received SIGTERM signal
+legal_ai_bot  | 2025-12-27 03:52:25 [info     ] bot_starting
+legal_ai_bot  | 2025-12-27 03:52:26 [info     ] bot_commands_set               count=6
+legal_ai_bot  | 2025-12-27 03:52:38 [info     ] analytics_requested            days=9999 period=all user_id=321681061
+legal_ai_bot  | 2025-12-27 03:52:38,912 INFO sqlalchemy.engine.Engine select pg_catalog.version()
+legal_ai_bot  | 2025-12-27 03:52:38,912 INFO sqlalchemy.engine.Engine [raw sql] ()
+legal_ai_bot  | 2025-12-27 03:52:38,914 INFO sqlalchemy.engine.Engine select current_schema()
+legal_ai_bot  | 2025-12-27 03:52:38,914 INFO sqlalchemy.engine.Engine [raw sql] ()
+legal_ai_bot  | 2025-12-27 03:52:38,915 INFO sqlalchemy.engine.Engine show standard_conforming_strings
+legal_ai_bot  | 2025-12-27 03:52:38,915 INFO sqlalchemy.engine.Engine [raw sql] ()
+legal_ai_bot  | 2025-12-27 03:52:38,916 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+legal_ai_bot  | 2025-12-27 03:52:38,916 INFO sqlalchemy.engine.Engine 
+legal_ai_bot  |                 SELECT COUNT(*) as total_publications
+legal_ai_bot  |                 FROM publications
+legal_ai_bot  |                 WHERE published_at >= $1
+legal_ai_bot  |             
+legal_ai_bot  | 2025-12-27 03:52:38,916 INFO sqlalchemy.engine.Engine [generated in 0.00019s] (datetime.datetime(1998, 8, 12, 0, 52, 38, 874945),)
+legal_ai_bot  | 2025-12-27 03:52:38,919 INFO sqlalchemy.engine.Engine 
+legal_ai_bot  |                 SELECT
+legal_ai_bot  |                     COUNT(*) as total_drafts,
+legal_ai_bot  |                     COUNT(CASE WHEN status = 'approved' THEN 1 END) as approved_drafts,
+legal_ai_bot  |                     COUNT(CASE WHEN status = 'rejected' THEN 1 END) as rejected_drafts
+legal_ai_bot  |                 FROM post_drafts
+legal_ai_bot  |                 WHERE created_at >= $1
+legal_ai_bot  |             
+legal_ai_bot  | 2025-12-27 03:52:38,919 INFO sqlalchemy.engine.Engine [generated in 0.00008s] (datetime.datetime(1998, 8, 12, 0, 52, 38, 874945),)
+legal_ai_bot  | 2025-12-27 03:52:38,922 INFO sqlalchemy.engine.Engine 
+legal_ai_bot  |                 SELECT
+legal_ai_bot  |                     SUM(COALESCE((reactions->>'useful')::int, 0)) as useful,
+legal_ai_bot  |                     SUM(COALESCE((reactions->>'important')::int, 0)) as important,
+legal_ai_bot  |                     SUM(COALESCE((reactions->>'controversial')::int, 0)) as controversial,
+legal_ai_bot  |                     SUM(COALESCE((reactions->>'banal')::int, 0)) as banal,
+legal_ai_bot  |                     SUM(COALESCE((reactions->>'obvious')::int, 0)) as obvious,
+legal_ai_bot  |                     SUM(COALESCE((reactions->>'poor_quality')::int, 0)) as poor_quality
+legal_ai_bot  |                 FROM publications
+legal_ai_bot  |                 WHERE published_at >= $1
+legal_ai_bot  |             
+legal_ai_bot  | 2025-12-27 03:52:38,922 INFO sqlalchemy.engine.Engine [generated in 0.00007s] (datetime.datetime(1998, 8, 12, 0, 52, 38, 874945),)
+legal_ai_bot  | 2025-12-27 03:52:38,922 INFO sqlalchemy.engine.Engine 
+legal_ai_bot  |                     SELECT AVG(
+legal_ai_bot  |                         (
+legal_ai_bot  |                             COALESCE((reactions->>'useful')::int, 0) +
+legal_ai_bot  |                             COALESCE((reactions->>'important')::int, 0) -
+legal_ai_bot  |                             COALESCE((reactions->>'banal')::int, 0) -
+legal_ai_bot  |                             COALESCE((reactions->>'obvious')::int, 0) -
+legal_ai_bot  |                             COALESCE((reactions->>'poor_quality')::int, 0)
+legal_ai_bot  |                         )::float / NULLIF(
+legal_ai_bot  |                             COALESCE((reactions->>'useful')::int, 0) +
+legal_ai_bot  |                             COALESCE((reactions->>'important')::int, 0) +
+legal_ai_bot  |                             COALESCE((reactions->>'banal')::int, 0) +
+legal_ai_bot  |                             COALESCE((reactions->>'obvious')::int, 0) +
+legal_ai_bot  |                             COALESCE((reactions->>'poor_quality')::int, 0) +
+legal_ai_bot  |                             COALESCE((reactions->>'controversial')::int, 0),
+legal_ai_bot  |                             0
+legal_ai_bot  |                         )
+legal_ai_bot  |                     ) as avg_quality_score
+legal_ai_bot  |                     FROM publications
+legal_ai_bot  |                     WHERE published_at >= $1
+legal_ai_bot  |                     AND (
+legal_ai_bot  |                         COALESCE((reactions->>'useful')::int, 0) +
+legal_ai_bot  |                         COALESCE((reactions->>'important')::int, 0) +
+legal_ai_bot  |                         COALESCE((reactions->>'banal')::int, 0) +
+legal_ai_bot  |                         COALESCE((reactions->>'obvious')::int, 0) +
+legal_ai_bot  |                         COALESCE((reactions->>'poor_quality')::int, 0) +
+legal_ai_bot  |                         COALESCE((reactions->>'controversial')::int, 0)
+legal_ai_bot  |                     ) > 0
+legal_ai_bot  |                 
+legal_ai_bot  | 2025-12-27 03:52:38,922 INFO sqlalchemy.engine.Engine [generated in 0.00006s] (datetime.datetime(1998, 8, 12, 0, 52, 38, 874945),)
+legal_ai_bot  | 2025-12-27 03:52:38,924 INFO sqlalchemy.engine.Engine 
+legal_ai_bot  |                 SELECT
+legal_ai_bot  |                     p.id,
+legal_ai_bot  |                     d.title,
+legal_ai_bot  |                     d.content,
+legal_ai_bot  |                     p.published_at,
+legal_ai_bot  |                     p.message_id as telegram_message_id,
+legal_ai_bot  |                     p.reactions,
+legal_ai_bot  |                     (
+legal_ai_bot  |                         COALESCE((p.reactions->>'useful')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'important')::int, 0) -
+legal_ai_bot  |                         COALESCE((p.reactions->>'banal')::int, 0) -
+legal_ai_bot  |                         COALESCE((p.reactions->>'obvious')::int, 0) -
+legal_ai_bot  |                         COALESCE((p.reactions->>'poor_quality')::int, 0)
+legal_ai_bot  |                     )::float / NULLIF(
+legal_ai_bot  |                         COALESCE((p.reactions->>'useful')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'important')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'banal')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'obvious')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'poor_quality')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'controversial')::int, 0),
+legal_ai_bot  |                         0
+legal_ai_bot  |                     ) as quality_score,
+legal_ai_bot  |                     (
+legal_ai_bot  |                         COALESCE((p.reactions->>'useful')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'important')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'banal')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'obvious')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'poor_quality')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'controversial')::int, 0)
+legal_ai_bot  |                     ) as total_reactions
+legal_ai_bot  |                 FROM publications p
+legal_ai_bot  |                 JOIN post_drafts d ON p.draft_id = d.id
+legal_ai_bot  |                 WHERE p.published_at >= $1
+legal_ai_bot  |                 AND (
+legal_ai_bot  |                     COALESCE((p.reactions->>'useful')::int, 0) +
+legal_ai_bot  |                     COALESCE((p.reactions->>'important')::int, 0) +
+legal_ai_bot  |                     COALESCE((p.reactions->>'banal')::int, 0) +
+legal_ai_bot  |                     COALESCE((p.reactions->>'obvious')::int, 0) +
+legal_ai_bot  |                     COALESCE((p.reactions->>'poor_quality')::int, 0) +
+legal_ai_bot  |                     COALESCE((p.reactions->>'controversial')::int, 0)
+legal_ai_bot  |                 ) > 0
+legal_ai_bot  |                 ORDER BY quality_score DESC, total_reactions DESC
+legal_ai_bot  |                 LIMIT $2
+legal_ai_bot  |             
+legal_ai_bot  | 2025-12-27 03:52:38,924 INFO sqlalchemy.engine.Engine [generated in 0.00011s] (datetime.datetime(1998, 8, 12, 0, 52, 38, 924013), 3)
+legal_ai_bot  | 2025-12-27 03:52:38,926 INFO sqlalchemy.engine.Engine 
+legal_ai_bot  |                 SELECT
+legal_ai_bot  |                     p.id,
+legal_ai_bot  |                     d.title,
+legal_ai_bot  |                     d.content,
+legal_ai_bot  |                     p.published_at,
+legal_ai_bot  |                     p.message_id as telegram_message_id,
+legal_ai_bot  |                     p.reactions,
+legal_ai_bot  |                     (
+legal_ai_bot  |                         COALESCE((p.reactions->>'useful')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'important')::int, 0) -
+legal_ai_bot  |                         COALESCE((p.reactions->>'banal')::int, 0) -
+legal_ai_bot  |                         COALESCE((p.reactions->>'obvious')::int, 0) -
+legal_ai_bot  |                         COALESCE((p.reactions->>'poor_quality')::int, 0)
+legal_ai_bot  |                     )::float / NULLIF(
+legal_ai_bot  |                         COALESCE((p.reactions->>'useful')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'important')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'banal')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'obvious')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'poor_quality')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'controversial')::int, 0),
+legal_ai_bot  |                         0
+legal_ai_bot  |                     ) as quality_score,
+legal_ai_bot  |                     (
+legal_ai_bot  |                         COALESCE((p.reactions->>'useful')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'important')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'banal')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'obvious')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'poor_quality')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'controversial')::int, 0)
+legal_ai_bot  |                     ) as total_reactions
+legal_ai_bot  |                 FROM publications p
+legal_ai_bot  |                 JOIN post_drafts d ON p.draft_id = d.id
+legal_ai_bot  |                 WHERE p.published_at >= $1
+legal_ai_bot  |                 AND (
+legal_ai_bot  |                     COALESCE((p.reactions->>'banal')::int, 0) +
+legal_ai_bot  |                     COALESCE((p.reactions->>'obvious')::int, 0) +
+legal_ai_bot  |                     COALESCE((p.reactions->>'poor_quality')::int, 0)
+legal_ai_bot  |                 ) > 0
+legal_ai_bot  |                 ORDER BY quality_score ASC, total_reactions DESC
+legal_ai_bot  |                 LIMIT $2
+legal_ai_bot  |             
+legal_ai_bot  | 2025-12-27 03:52:38,926 INFO sqlalchemy.engine.Engine [generated in 0.00006s] (datetime.datetime(1998, 8, 12, 0, 52, 38, 926243), 3)
+legal_ai_bot  | 2025-12-27 03:52:38,927 INFO sqlalchemy.engine.Engine 
+legal_ai_bot  |                 SELECT
+legal_ai_bot  |                     source_name,
+legal_ai_bot  |                     COUNT(*) as total_collected
+legal_ai_bot  |                 FROM raw_articles
+legal_ai_bot  |                 WHERE fetched_at >= $1
+legal_ai_bot  |                 GROUP BY source_name
+legal_ai_bot  |                 ORDER BY total_collected DESC
+legal_ai_bot  |             
+legal_ai_bot  | 2025-12-27 03:52:38,927 INFO sqlalchemy.engine.Engine [generated in 0.00006s] (datetime.datetime(1998, 8, 12, 0, 52, 38, 927341),)
+legal_ai_bot  | 2025-12-27 03:52:38,929 INFO sqlalchemy.engine.Engine 
+legal_ai_bot  |                 SELECT
+legal_ai_bot  |                     a.source_name,
+legal_ai_bot  |                     COUNT(*) as total_published,
+legal_ai_bot  |                     AVG(
+legal_ai_bot  |                         (
+legal_ai_bot  |                             COALESCE((p.reactions->>'useful')::int, 0) +
+legal_ai_bot  |                             COALESCE((p.reactions->>'important')::int, 0) -
+legal_ai_bot  |                             COALESCE((p.reactions->>'banal')::int, 0) -
+legal_ai_bot  |                             COALESCE((p.reactions->>'obvious')::int, 0) -
+legal_ai_bot  |                             COALESCE((p.reactions->>'poor_quality')::int, 0)
+legal_ai_bot  |                         )::float / NULLIF(
+legal_ai_bot  |                             COALESCE((p.reactions->>'useful')::int, 0) +
+legal_ai_bot  |                             COALESCE((p.reactions->>'important')::int, 0) +
+legal_ai_bot  |                             COALESCE((p.reactions->>'banal')::int, 0) +
+legal_ai_bot  |                             COALESCE((p.reactions->>'obvious')::int, 0) +
+legal_ai_bot  |                             COALESCE((p.reactions->>'poor_quality')::int, 0) +
+legal_ai_bot  |                             COALESCE((p.reactions->>'controversial')::int, 0),
+legal_ai_bot  |                             0
+legal_ai_bot  |                         )
+legal_ai_bot  |                     ) as avg_quality_score
+legal_ai_bot  |                 FROM publications p
+legal_ai_bot  |                 JOIN post_drafts d ON p.draft_id = d.id
+legal_ai_bot  |                 JOIN raw_articles a ON d.article_id = a.id
+legal_ai_bot  |                 WHERE p.published_at >= $1
+legal_ai_bot  |                 GROUP BY a.source_name
+legal_ai_bot  |             
+legal_ai_bot  | 2025-12-27 03:52:38,929 INFO sqlalchemy.engine.Engine [generated in 0.00006s] (datetime.datetime(1998, 8, 12, 0, 52, 38, 927341),)
+legal_ai_bot  | 2025-12-27 03:52:38,930 INFO sqlalchemy.engine.Engine 
+legal_ai_bot  |                 SELECT
+legal_ai_bot  |                     EXTRACT(DOW FROM published_at) as day_of_week,
+legal_ai_bot  |                     COUNT(*) as total_posts,
+legal_ai_bot  |                     AVG(
+legal_ai_bot  |                         (
+legal_ai_bot  |                             COALESCE((reactions->>'useful')::int, 0) +
+legal_ai_bot  |                             COALESCE((reactions->>'important')::int, 0) -
+legal_ai_bot  |                             COALESCE((reactions->>'banal')::int, 0) -
+legal_ai_bot  |                             COALESCE((reactions->>'obvious')::int, 0) -
+legal_ai_bot  |                             COALESCE((reactions->>'poor_quality')::int, 0)
+legal_ai_bot  |                         )::float / NULLIF(
+legal_ai_bot  |                             COALESCE((reactions->>'useful')::int, 0) +
+legal_ai_bot  |                             COALESCE((reactions->>'important')::int, 0) +
+legal_ai_bot  |                             COALESCE((reactions->>'banal')::int, 0) +
+legal_ai_bot  |                             COALESCE((reactions->>'obvious')::int, 0) +
+legal_ai_bot  |                             COALESCE((reactions->>'poor_quality')::int, 0) +
+legal_ai_bot  |                             COALESCE((reactions->>'controversial')::int, 0),
+legal_ai_bot  |                             0
+legal_ai_bot  |                         )
+legal_ai_bot  |                     ) as avg_quality_score
+legal_ai_bot  |                 FROM publications
+legal_ai_bot  |                 WHERE published_at >= $1
+legal_ai_bot  |                 GROUP BY day_of_week
+legal_ai_bot  |                 ORDER BY day_of_week
+legal_ai_bot  |             
+legal_ai_bot  | 2025-12-27 03:52:38,930 INFO sqlalchemy.engine.Engine [generated in 0.00007s] (datetime.datetime(2025, 11, 27, 0, 52, 38, 930064),)
+legal_ai_bot  | /usr/local/lib/python3.11/site-packages/huggingface_hub/file_download.py:942: FutureWarning: `resume_download` is deprecated and will be removed in version 1.0.0. Downloads always resume when possible. If you want to force a new download, use `force_download=True`.
+legal_ai_bot  |   warnings.warn(
+legal_ai_bot  | 2025-12-27 03:52:42 [info     ] qdrant_collection_exists       collection=legal_ai_publications
+legal_ai_bot  | 2025-12-27 03:52:42 [info     ] vector_search_initialized      collection=legal_ai_publications vector_size=768
+legal_ai_bot  | 2025-12-27 03:52:42 [error    ] analytics_error                error=Telegram server says - Bad Request: can't parse entities: Unsupported start tag "" at byte offset 3329 period=analytics:all
+legal_ai_bot  | 2025-12-27 03:52:42,833 INFO sqlalchemy.engine.Engine ROLLBACK
+legal_ai_bot  | Received SIGTERM signal
+legal_ai_bot  | 2025-12-27 03:54:09 [info     ] bot_starting
+legal_ai_bot  | 2025-12-27 03:54:09 [info     ] bot_commands_set               count=6
+legal_ai_bot  | 2025-12-27 03:54:20 [info     ] analytics_requested            days=9999 period=all user_id=321681061
+legal_ai_bot  | 2025-12-27 03:54:20,321 INFO sqlalchemy.engine.Engine select pg_catalog.version()
+legal_ai_bot  | 2025-12-27 03:54:20,321 INFO sqlalchemy.engine.Engine [raw sql] ()
+legal_ai_bot  | 2025-12-27 03:54:20,322 INFO sqlalchemy.engine.Engine select current_schema()
+legal_ai_bot  | 2025-12-27 03:54:20,322 INFO sqlalchemy.engine.Engine [raw sql] ()
+legal_ai_bot  | 2025-12-27 03:54:20,323 INFO sqlalchemy.engine.Engine show standard_conforming_strings
+legal_ai_bot  | 2025-12-27 03:54:20,323 INFO sqlalchemy.engine.Engine [raw sql] ()
+legal_ai_bot  | 2025-12-27 03:54:20,324 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+legal_ai_bot  | 2025-12-27 03:54:20,324 INFO sqlalchemy.engine.Engine 
+legal_ai_bot  |                 SELECT COUNT(*) as total_publications
+legal_ai_bot  |                 FROM publications
+legal_ai_bot  |                 WHERE published_at >= $1
+legal_ai_bot  |             
+legal_ai_bot  | 2025-12-27 03:54:20,324 INFO sqlalchemy.engine.Engine [generated in 0.00011s] (datetime.datetime(1998, 8, 12, 0, 54, 20, 305257),)
+legal_ai_bot  | 2025-12-27 03:54:20,326 INFO sqlalchemy.engine.Engine 
+legal_ai_bot  |                 SELECT
+legal_ai_bot  |                     COUNT(*) as total_drafts,
+legal_ai_bot  |                     COUNT(CASE WHEN status = 'approved' THEN 1 END) as approved_drafts,
+legal_ai_bot  |                     COUNT(CASE WHEN status = 'rejected' THEN 1 END) as rejected_drafts
+legal_ai_bot  |                 FROM post_drafts
+legal_ai_bot  |                 WHERE created_at >= $1
+legal_ai_bot  |             
+legal_ai_bot  | 2025-12-27 03:54:20,326 INFO sqlalchemy.engine.Engine [generated in 0.00005s] (datetime.datetime(1998, 8, 12, 0, 54, 20, 305257),)
+legal_ai_bot  | 2025-12-27 03:54:20,328 INFO sqlalchemy.engine.Engine 
+legal_ai_bot  |                 SELECT
+legal_ai_bot  |                     SUM(COALESCE((reactions->>'useful')::int, 0)) as useful,
+legal_ai_bot  |                     SUM(COALESCE((reactions->>'important')::int, 0)) as important,
+legal_ai_bot  |                     SUM(COALESCE((reactions->>'controversial')::int, 0)) as controversial,
+legal_ai_bot  |                     SUM(COALESCE((reactions->>'banal')::int, 0)) as banal,
+legal_ai_bot  |                     SUM(COALESCE((reactions->>'obvious')::int, 0)) as obvious,
+legal_ai_bot  |                     SUM(COALESCE((reactions->>'poor_quality')::int, 0)) as poor_quality
+legal_ai_bot  |                 FROM publications
+legal_ai_bot  |                 WHERE published_at >= $1
+legal_ai_bot  |             
+legal_ai_bot  | 2025-12-27 03:54:20,328 INFO sqlalchemy.engine.Engine [generated in 0.00009s] (datetime.datetime(1998, 8, 12, 0, 54, 20, 305257),)
+legal_ai_bot  | 2025-12-27 03:54:20,329 INFO sqlalchemy.engine.Engine 
+legal_ai_bot  |                     SELECT AVG(
+legal_ai_bot  |                         (
+legal_ai_bot  |                             COALESCE((reactions->>'useful')::int, 0) +
+legal_ai_bot  |                             COALESCE((reactions->>'important')::int, 0) -
+legal_ai_bot  |                             COALESCE((reactions->>'banal')::int, 0) -
+legal_ai_bot  |                             COALESCE((reactions->>'obvious')::int, 0) -
+legal_ai_bot  |                             COALESCE((reactions->>'poor_quality')::int, 0)
+legal_ai_bot  |                         )::float / NULLIF(
+legal_ai_bot  |                             COALESCE((reactions->>'useful')::int, 0) +
+legal_ai_bot  |                             COALESCE((reactions->>'important')::int, 0) +
+legal_ai_bot  |                             COALESCE((reactions->>'banal')::int, 0) +
+legal_ai_bot  |                             COALESCE((reactions->>'obvious')::int, 0) +
+legal_ai_bot  |                             COALESCE((reactions->>'poor_quality')::int, 0) +
+legal_ai_bot  |                             COALESCE((reactions->>'controversial')::int, 0),
+legal_ai_bot  |                             0
+legal_ai_bot  |                         )
+legal_ai_bot  |                     ) as avg_quality_score
+legal_ai_bot  |                     FROM publications
+legal_ai_bot  |                     WHERE published_at >= $1
+legal_ai_bot  |                     AND (
+legal_ai_bot  |                         COALESCE((reactions->>'useful')::int, 0) +
+legal_ai_bot  |                         COALESCE((reactions->>'important')::int, 0) +
+legal_ai_bot  |                         COALESCE((reactions->>'banal')::int, 0) +
+legal_ai_bot  |                         COALESCE((reactions->>'obvious')::int, 0) +
+legal_ai_bot  |                         COALESCE((reactions->>'poor_quality')::int, 0) +
+legal_ai_bot  |                         COALESCE((reactions->>'controversial')::int, 0)
+legal_ai_bot  |                     ) > 0
+legal_ai_bot  |                 
+legal_ai_bot  | 2025-12-27 03:54:20,329 INFO sqlalchemy.engine.Engine [generated in 0.00007s] (datetime.datetime(1998, 8, 12, 0, 54, 20, 305257),)
+legal_ai_bot  | 2025-12-27 03:54:20,330 INFO sqlalchemy.engine.Engine 
+legal_ai_bot  |                 SELECT
+legal_ai_bot  |                     p.id,
+legal_ai_bot  |                     d.title,
+legal_ai_bot  |                     d.content,
+legal_ai_bot  |                     p.published_at,
+legal_ai_bot  |                     p.message_id as telegram_message_id,
+legal_ai_bot  |                     p.reactions,
+legal_ai_bot  |                     (
+legal_ai_bot  |                         COALESCE((p.reactions->>'useful')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'important')::int, 0) -
+legal_ai_bot  |                         COALESCE((p.reactions->>'banal')::int, 0) -
+legal_ai_bot  |                         COALESCE((p.reactions->>'obvious')::int, 0) -
+legal_ai_bot  |                         COALESCE((p.reactions->>'poor_quality')::int, 0)
+legal_ai_bot  |                     )::float / NULLIF(
+legal_ai_bot  |                         COALESCE((p.reactions->>'useful')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'important')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'banal')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'obvious')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'poor_quality')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'controversial')::int, 0),
+legal_ai_bot  |                         0
+legal_ai_bot  |                     ) as quality_score,
+legal_ai_bot  |                     (
+legal_ai_bot  |                         COALESCE((p.reactions->>'useful')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'important')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'banal')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'obvious')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'poor_quality')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'controversial')::int, 0)
+legal_ai_bot  |                     ) as total_reactions
+legal_ai_bot  |                 FROM publications p
+legal_ai_bot  |                 JOIN post_drafts d ON p.draft_id = d.id
+legal_ai_bot  |                 WHERE p.published_at >= $1
+legal_ai_bot  |                 AND (
+legal_ai_bot  |                     COALESCE((p.reactions->>'useful')::int, 0) +
+legal_ai_bot  |                     COALESCE((p.reactions->>'important')::int, 0) +
+legal_ai_bot  |                     COALESCE((p.reactions->>'banal')::int, 0) +
+legal_ai_bot  |                     COALESCE((p.reactions->>'obvious')::int, 0) +
+legal_ai_bot  |                     COALESCE((p.reactions->>'poor_quality')::int, 0) +
+legal_ai_bot  |                     COALESCE((p.reactions->>'controversial')::int, 0)
+legal_ai_bot  |                 ) > 0
+legal_ai_bot  |                 ORDER BY quality_score DESC, total_reactions DESC
+legal_ai_bot  |                 LIMIT $2
+legal_ai_bot  |             
+legal_ai_bot  | 2025-12-27 03:54:20,330 INFO sqlalchemy.engine.Engine [generated in 0.00008s] (datetime.datetime(1998, 8, 12, 0, 54, 20, 330047), 3)
+legal_ai_bot  | 2025-12-27 03:54:20,332 INFO sqlalchemy.engine.Engine 
+legal_ai_bot  |                 SELECT
+legal_ai_bot  |                     p.id,
+legal_ai_bot  |                     d.title,
+legal_ai_bot  |                     d.content,
+legal_ai_bot  |                     p.published_at,
+legal_ai_bot  |                     p.message_id as telegram_message_id,
+legal_ai_bot  |                     p.reactions,
+legal_ai_bot  |                     (
+legal_ai_bot  |                         COALESCE((p.reactions->>'useful')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'important')::int, 0) -
+legal_ai_bot  |                         COALESCE((p.reactions->>'banal')::int, 0) -
+legal_ai_bot  |                         COALESCE((p.reactions->>'obvious')::int, 0) -
+legal_ai_bot  |                         COALESCE((p.reactions->>'poor_quality')::int, 0)
+legal_ai_bot  |                     )::float / NULLIF(
+legal_ai_bot  |                         COALESCE((p.reactions->>'useful')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'important')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'banal')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'obvious')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'poor_quality')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'controversial')::int, 0),
+legal_ai_bot  |                         0
+legal_ai_bot  |                     ) as quality_score,
+legal_ai_bot  |                     (
+legal_ai_bot  |                         COALESCE((p.reactions->>'useful')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'important')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'banal')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'obvious')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'poor_quality')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'controversial')::int, 0)
+legal_ai_bot  |                     ) as total_reactions
+legal_ai_bot  |                 FROM publications p
+legal_ai_bot  |                 JOIN post_drafts d ON p.draft_id = d.id
+legal_ai_bot  |                 WHERE p.published_at >= $1
+legal_ai_bot  |                 AND (
+legal_ai_bot  |                     COALESCE((p.reactions->>'banal')::int, 0) +
+legal_ai_bot  |                     COALESCE((p.reactions->>'obvious')::int, 0) +
+legal_ai_bot  |                     COALESCE((p.reactions->>'poor_quality')::int, 0)
+legal_ai_bot  |                 ) > 0
+legal_ai_bot  |                 ORDER BY quality_score ASC, total_reactions DESC
+legal_ai_bot  |                 LIMIT $2
+legal_ai_bot  |             
+legal_ai_bot  | 2025-12-27 03:54:20,332 INFO sqlalchemy.engine.Engine [generated in 0.00011s] (datetime.datetime(1998, 8, 12, 0, 54, 20, 331978), 3)
+legal_ai_bot  | 2025-12-27 03:54:20,333 INFO sqlalchemy.engine.Engine 
+legal_ai_bot  |                 SELECT
+legal_ai_bot  |                     source_name,
+legal_ai_bot  |                     COUNT(*) as total_collected
+legal_ai_bot  |                 FROM raw_articles
+legal_ai_bot  |                 WHERE fetched_at >= $1
+legal_ai_bot  |                 GROUP BY source_name
+legal_ai_bot  |                 ORDER BY total_collected DESC
+legal_ai_bot  |             
+legal_ai_bot  | 2025-12-27 03:54:20,333 INFO sqlalchemy.engine.Engine [generated in 0.00009s] (datetime.datetime(1998, 8, 12, 0, 54, 20, 333284),)
+legal_ai_bot  | 2025-12-27 03:54:20,334 INFO sqlalchemy.engine.Engine 
+legal_ai_bot  |                 SELECT
+legal_ai_bot  |                     a.source_name,
+legal_ai_bot  |                     COUNT(*) as total_published,
+legal_ai_bot  |                     AVG(
+legal_ai_bot  |                         (
+legal_ai_bot  |                             COALESCE((p.reactions->>'useful')::int, 0) +
+legal_ai_bot  |                             COALESCE((p.reactions->>'important')::int, 0) -
+legal_ai_bot  |                             COALESCE((p.reactions->>'banal')::int, 0) -
+legal_ai_bot  |                             COALESCE((p.reactions->>'obvious')::int, 0) -
+legal_ai_bot  |                             COALESCE((p.reactions->>'poor_quality')::int, 0)
+legal_ai_bot  |                         )::float / NULLIF(
+legal_ai_bot  |                             COALESCE((p.reactions->>'useful')::int, 0) +
+legal_ai_bot  |                             COALESCE((p.reactions->>'important')::int, 0) +
+legal_ai_bot  |                             COALESCE((p.reactions->>'banal')::int, 0) +
+legal_ai_bot  |                             COALESCE((p.reactions->>'obvious')::int, 0) +
+legal_ai_bot  |                             COALESCE((p.reactions->>'poor_quality')::int, 0) +
+legal_ai_bot  |                             COALESCE((p.reactions->>'controversial')::int, 0),
+legal_ai_bot  |                             0
+legal_ai_bot  |                         )
+legal_ai_bot  |                     ) as avg_quality_score
+legal_ai_bot  |                 FROM publications p
+legal_ai_bot  |                 JOIN post_drafts d ON p.draft_id = d.id
+legal_ai_bot  |                 JOIN raw_articles a ON d.article_id = a.id
+legal_ai_bot  |                 WHERE p.published_at >= $1
+legal_ai_bot  |                 GROUP BY a.source_name
+legal_ai_bot  |             
+legal_ai_bot  | 2025-12-27 03:54:20,334 INFO sqlalchemy.engine.Engine [generated in 0.00006s] (datetime.datetime(1998, 8, 12, 0, 54, 20, 333284),)
+legal_ai_bot  | 2025-12-27 03:54:20,335 INFO sqlalchemy.engine.Engine 
+legal_ai_bot  |                 SELECT
+legal_ai_bot  |                     EXTRACT(DOW FROM published_at) as day_of_week,
+legal_ai_bot  |                     COUNT(*) as total_posts,
+legal_ai_bot  |                     AVG(
+legal_ai_bot  |                         (
+legal_ai_bot  |                             COALESCE((reactions->>'useful')::int, 0) +
+legal_ai_bot  |                             COALESCE((reactions->>'important')::int, 0) -
+legal_ai_bot  |                             COALESCE((reactions->>'banal')::int, 0) -
+legal_ai_bot  |                             COALESCE((reactions->>'obvious')::int, 0) -
+legal_ai_bot  |                             COALESCE((reactions->>'poor_quality')::int, 0)
+legal_ai_bot  |                         )::float / NULLIF(
+legal_ai_bot  |                             COALESCE((reactions->>'useful')::int, 0) +
+legal_ai_bot  |                             COALESCE((reactions->>'important')::int, 0) +
+legal_ai_bot  |                             COALESCE((reactions->>'banal')::int, 0) +
+legal_ai_bot  |                             COALESCE((reactions->>'obvious')::int, 0) +
+legal_ai_bot  |                             COALESCE((reactions->>'poor_quality')::int, 0) +
+legal_ai_bot  |                             COALESCE((reactions->>'controversial')::int, 0),
+legal_ai_bot  |                             0
+legal_ai_bot  |                         )
+legal_ai_bot  |                     ) as avg_quality_score
+legal_ai_bot  |                 FROM publications
+legal_ai_bot  |                 WHERE published_at >= $1
+legal_ai_bot  |                 GROUP BY day_of_week
+legal_ai_bot  |                 ORDER BY day_of_week
+legal_ai_bot  |             
+legal_ai_bot  | 2025-12-27 03:54:20,335 INFO sqlalchemy.engine.Engine [generated in 0.00005s] (datetime.datetime(2025, 11, 27, 0, 54, 20, 335724),)
+legal_ai_bot  | /usr/local/lib/python3.11/site-packages/huggingface_hub/file_download.py:942: FutureWarning: `resume_download` is deprecated and will be removed in version 1.0.0. Downloads always resume when possible. If you want to force a new download, use `force_download=True`.
+legal_ai_bot  |   warnings.warn(
+legal_ai_bot  | 2025-12-27 03:54:23 [info     ] qdrant_collection_exists       collection=legal_ai_publications
+legal_ai_bot  | 2025-12-27 03:54:23 [info     ] vector_search_initialized      collection=legal_ai_publications vector_size=768
+legal_ai_bot  | 2025-12-27 03:54:23 [error    ] analytics_error                error=Telegram server says - Bad Request: can't parse entities: Unsupported start tag "" at byte offset 3329 period=analytics:all
+legal_ai_bot  | 2025-12-27 03:54:24,007 INFO sqlalchemy.engine.Engine ROLLBACK
+legal_ai_bot  | Received SIGTERM signal
+legal_ai_bot  | 2025-12-27 03:56:19 [info     ] bot_starting
+legal_ai_bot  | 2025-12-27 03:56:19 [info     ] bot_commands_set               count=6
+legal_ai_bot  | 2025-12-27 03:56:35 [info     ] analytics_requested            days=9999 period=all user_id=321681061
+legal_ai_bot  | 2025-12-27 03:56:35,905 INFO sqlalchemy.engine.Engine select pg_catalog.version()
+legal_ai_bot  | 2025-12-27 03:56:35,905 INFO sqlalchemy.engine.Engine [raw sql] ()
+legal_ai_bot  | 2025-12-27 03:56:35,906 INFO sqlalchemy.engine.Engine select current_schema()
+legal_ai_bot  | 2025-12-27 03:56:35,906 INFO sqlalchemy.engine.Engine [raw sql] ()
+legal_ai_bot  | 2025-12-27 03:56:35,907 INFO sqlalchemy.engine.Engine show standard_conforming_strings
+legal_ai_bot  | 2025-12-27 03:56:35,907 INFO sqlalchemy.engine.Engine [raw sql] ()
+legal_ai_bot  | 2025-12-27 03:56:35,908 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+legal_ai_bot  | 2025-12-27 03:56:35,908 INFO sqlalchemy.engine.Engine 
+legal_ai_bot  |                 SELECT COUNT(*) as total_publications
+legal_ai_bot  |                 FROM publications
+legal_ai_bot  |                 WHERE published_at >= $1
+legal_ai_bot  |             
+legal_ai_bot  | 2025-12-27 03:56:35,908 INFO sqlalchemy.engine.Engine [generated in 0.00012s] (datetime.datetime(1998, 8, 12, 0, 56, 35, 879367),)
+legal_ai_bot  | 2025-12-27 03:56:35,910 INFO sqlalchemy.engine.Engine 
+legal_ai_bot  |                 SELECT
+legal_ai_bot  |                     COUNT(*) as total_drafts,
+legal_ai_bot  |                     COUNT(CASE WHEN status = 'approved' THEN 1 END) as approved_drafts,
+legal_ai_bot  |                     COUNT(CASE WHEN status = 'rejected' THEN 1 END) as rejected_drafts
+legal_ai_bot  |                 FROM post_drafts
+legal_ai_bot  |                 WHERE created_at >= $1
+legal_ai_bot  |             
+legal_ai_bot  | 2025-12-27 03:56:35,910 INFO sqlalchemy.engine.Engine [generated in 0.00009s] (datetime.datetime(1998, 8, 12, 0, 56, 35, 879367),)
+legal_ai_bot  | 2025-12-27 03:56:35,913 INFO sqlalchemy.engine.Engine 
+legal_ai_bot  |                 SELECT
+legal_ai_bot  |                     SUM(COALESCE((reactions->>'useful')::int, 0)) as useful,
+legal_ai_bot  |                     SUM(COALESCE((reactions->>'important')::int, 0)) as important,
+legal_ai_bot  |                     SUM(COALESCE((reactions->>'controversial')::int, 0)) as controversial,
+legal_ai_bot  |                     SUM(COALESCE((reactions->>'banal')::int, 0)) as banal,
+legal_ai_bot  |                     SUM(COALESCE((reactions->>'obvious')::int, 0)) as obvious,
+legal_ai_bot  |                     SUM(COALESCE((reactions->>'poor_quality')::int, 0)) as poor_quality
+legal_ai_bot  |                 FROM publications
+legal_ai_bot  |                 WHERE published_at >= $1
+legal_ai_bot  |             
+legal_ai_bot  | 2025-12-27 03:56:35,913 INFO sqlalchemy.engine.Engine [generated in 0.00010s] (datetime.datetime(1998, 8, 12, 0, 56, 35, 879367),)
+legal_ai_bot  | 2025-12-27 03:56:35,914 INFO sqlalchemy.engine.Engine 
+legal_ai_bot  |                     SELECT AVG(
+legal_ai_bot  |                         (
+legal_ai_bot  |                             COALESCE((reactions->>'useful')::int, 0) +
+legal_ai_bot  |                             COALESCE((reactions->>'important')::int, 0) -
+legal_ai_bot  |                             COALESCE((reactions->>'banal')::int, 0) -
+legal_ai_bot  |                             COALESCE((reactions->>'obvious')::int, 0) -
+legal_ai_bot  |                             COALESCE((reactions->>'poor_quality')::int, 0)
+legal_ai_bot  |                         )::float / NULLIF(
+legal_ai_bot  |                             COALESCE((reactions->>'useful')::int, 0) +
+legal_ai_bot  |                             COALESCE((reactions->>'important')::int, 0) +
+legal_ai_bot  |                             COALESCE((reactions->>'banal')::int, 0) +
+legal_ai_bot  |                             COALESCE((reactions->>'obvious')::int, 0) +
+legal_ai_bot  |                             COALESCE((reactions->>'poor_quality')::int, 0) +
+legal_ai_bot  |                             COALESCE((reactions->>'controversial')::int, 0),
+legal_ai_bot  |                             0
+legal_ai_bot  |                         )
+legal_ai_bot  |                     ) as avg_quality_score
+legal_ai_bot  |                     FROM publications
+legal_ai_bot  |                     WHERE published_at >= $1
+legal_ai_bot  |                     AND (
+legal_ai_bot  |                         COALESCE((reactions->>'useful')::int, 0) +
+legal_ai_bot  |                         COALESCE((reactions->>'important')::int, 0) +
+legal_ai_bot  |                         COALESCE((reactions->>'banal')::int, 0) +
+legal_ai_bot  |                         COALESCE((reactions->>'obvious')::int, 0) +
+legal_ai_bot  |                         COALESCE((reactions->>'poor_quality')::int, 0) +
+legal_ai_bot  |                         COALESCE((reactions->>'controversial')::int, 0)
+legal_ai_bot  |                     ) > 0
+legal_ai_bot  |                 
+legal_ai_bot  | 2025-12-27 03:56:35,914 INFO sqlalchemy.engine.Engine [generated in 0.00008s] (datetime.datetime(1998, 8, 12, 0, 56, 35, 879367),)
+legal_ai_bot  | 2025-12-27 03:56:35,915 INFO sqlalchemy.engine.Engine 
+legal_ai_bot  |                 SELECT
+legal_ai_bot  |                     p.id,
+legal_ai_bot  |                     d.title,
+legal_ai_bot  |                     d.content,
+legal_ai_bot  |                     p.published_at,
+legal_ai_bot  |                     p.message_id as telegram_message_id,
+legal_ai_bot  |                     p.reactions,
+legal_ai_bot  |                     (
+legal_ai_bot  |                         COALESCE((p.reactions->>'useful')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'important')::int, 0) -
+legal_ai_bot  |                         COALESCE((p.reactions->>'banal')::int, 0) -
+legal_ai_bot  |                         COALESCE((p.reactions->>'obvious')::int, 0) -
+legal_ai_bot  |                         COALESCE((p.reactions->>'poor_quality')::int, 0)
+legal_ai_bot  |                     )::float / NULLIF(
+legal_ai_bot  |                         COALESCE((p.reactions->>'useful')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'important')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'banal')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'obvious')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'poor_quality')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'controversial')::int, 0),
+legal_ai_bot  |                         0
+legal_ai_bot  |                     ) as quality_score,
+legal_ai_bot  |                     (
+legal_ai_bot  |                         COALESCE((p.reactions->>'useful')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'important')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'banal')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'obvious')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'poor_quality')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'controversial')::int, 0)
+legal_ai_bot  |                     ) as total_reactions
+legal_ai_bot  |                 FROM publications p
+legal_ai_bot  |                 JOIN post_drafts d ON p.draft_id = d.id
+legal_ai_bot  |                 WHERE p.published_at >= $1
+legal_ai_bot  |                 AND (
+legal_ai_bot  |                     COALESCE((p.reactions->>'useful')::int, 0) +
+legal_ai_bot  |                     COALESCE((p.reactions->>'important')::int, 0) +
+legal_ai_bot  |                     COALESCE((p.reactions->>'banal')::int, 0) +
+legal_ai_bot  |                     COALESCE((p.reactions->>'obvious')::int, 0) +
+legal_ai_bot  |                     COALESCE((p.reactions->>'poor_quality')::int, 0) +
+legal_ai_bot  |                     COALESCE((p.reactions->>'controversial')::int, 0)
+legal_ai_bot  |                 ) > 0
+legal_ai_bot  |                 ORDER BY quality_score DESC, total_reactions DESC
+legal_ai_bot  |                 LIMIT $2
+legal_ai_bot  |             
+legal_ai_bot  | 2025-12-27 03:56:35,915 INFO sqlalchemy.engine.Engine [generated in 0.00008s] (datetime.datetime(1998, 8, 12, 0, 56, 35, 915356), 3)
+legal_ai_bot  | 2025-12-27 03:56:35,917 INFO sqlalchemy.engine.Engine 
+legal_ai_bot  |                 SELECT
+legal_ai_bot  |                     p.id,
+legal_ai_bot  |                     d.title,
+legal_ai_bot  |                     d.content,
+legal_ai_bot  |                     p.published_at,
+legal_ai_bot  |                     p.message_id as telegram_message_id,
+legal_ai_bot  |                     p.reactions,
+legal_ai_bot  |                     (
+legal_ai_bot  |                         COALESCE((p.reactions->>'useful')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'important')::int, 0) -
+legal_ai_bot  |                         COALESCE((p.reactions->>'banal')::int, 0) -
+legal_ai_bot  |                         COALESCE((p.reactions->>'obvious')::int, 0) -
+legal_ai_bot  |                         COALESCE((p.reactions->>'poor_quality')::int, 0)
+legal_ai_bot  |                     )::float / NULLIF(
+legal_ai_bot  |                         COALESCE((p.reactions->>'useful')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'important')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'banal')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'obvious')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'poor_quality')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'controversial')::int, 0),
+legal_ai_bot  |                         0
+legal_ai_bot  |                     ) as quality_score,
+legal_ai_bot  |                     (
+legal_ai_bot  |                         COALESCE((p.reactions->>'useful')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'important')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'banal')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'obvious')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'poor_quality')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'controversial')::int, 0)
+legal_ai_bot  |                     ) as total_reactions
+legal_ai_bot  |                 FROM publications p
+legal_ai_bot  |                 JOIN post_drafts d ON p.draft_id = d.id
+legal_ai_bot  |                 WHERE p.published_at >= $1
+legal_ai_bot  |                 AND (
+legal_ai_bot  |                     COALESCE((p.reactions->>'banal')::int, 0) +
+legal_ai_bot  |                     COALESCE((p.reactions->>'obvious')::int, 0) +
+legal_ai_bot  |                     COALESCE((p.reactions->>'poor_quality')::int, 0)
+legal_ai_bot  |                 ) > 0
+legal_ai_bot  |                 ORDER BY quality_score ASC, total_reactions DESC
+legal_ai_bot  |                 LIMIT $2
+legal_ai_bot  |             
+legal_ai_bot  | 2025-12-27 03:56:35,917 INFO sqlalchemy.engine.Engine [generated in 0.00007s] (datetime.datetime(1998, 8, 12, 0, 56, 35, 916949), 3)
+legal_ai_bot  | 2025-12-27 03:56:35,918 INFO sqlalchemy.engine.Engine 
+legal_ai_bot  |                 SELECT
+legal_ai_bot  |                     source_name,
+legal_ai_bot  |                     COUNT(*) as total_collected
+legal_ai_bot  |                 FROM raw_articles
+legal_ai_bot  |                 WHERE fetched_at >= $1
+legal_ai_bot  |                 GROUP BY source_name
+legal_ai_bot  |                 ORDER BY total_collected DESC
+legal_ai_bot  |             
+legal_ai_bot  | 2025-12-27 03:56:35,918 INFO sqlalchemy.engine.Engine [generated in 0.00006s] (datetime.datetime(1998, 8, 12, 0, 56, 35, 917917),)
+legal_ai_bot  | 2025-12-27 03:56:35,919 INFO sqlalchemy.engine.Engine 
+legal_ai_bot  |                 SELECT
+legal_ai_bot  |                     a.source_name,
+legal_ai_bot  |                     COUNT(*) as total_published,
+legal_ai_bot  |                     AVG(
+legal_ai_bot  |                         (
+legal_ai_bot  |                             COALESCE((p.reactions->>'useful')::int, 0) +
+legal_ai_bot  |                             COALESCE((p.reactions->>'important')::int, 0) -
+legal_ai_bot  |                             COALESCE((p.reactions->>'banal')::int, 0) -
+legal_ai_bot  |                             COALESCE((p.reactions->>'obvious')::int, 0) -
+legal_ai_bot  |                             COALESCE((p.reactions->>'poor_quality')::int, 0)
+legal_ai_bot  |                         )::float / NULLIF(
+legal_ai_bot  |                             COALESCE((p.reactions->>'useful')::int, 0) +
+legal_ai_bot  |                             COALESCE((p.reactions->>'important')::int, 0) +
+legal_ai_bot  |                             COALESCE((p.reactions->>'banal')::int, 0) +
+legal_ai_bot  |                             COALESCE((p.reactions->>'obvious')::int, 0) +
+legal_ai_bot  |                             COALESCE((p.reactions->>'poor_quality')::int, 0) +
+legal_ai_bot  |                             COALESCE((p.reactions->>'controversial')::int, 0),
+legal_ai_bot  |                             0
+legal_ai_bot  |                         )
+legal_ai_bot  |                     ) as avg_quality_score
+legal_ai_bot  |                 FROM publications p
+legal_ai_bot  |                 JOIN post_drafts d ON p.draft_id = d.id
+legal_ai_bot  |                 JOIN raw_articles a ON d.article_id = a.id
+legal_ai_bot  |                 WHERE p.published_at >= $1
+legal_ai_bot  |                 GROUP BY a.source_name
+legal_ai_bot  |             
+legal_ai_bot  | 2025-12-27 03:56:35,919 INFO sqlalchemy.engine.Engine [generated in 0.00006s] (datetime.datetime(1998, 8, 12, 0, 56, 35, 917917),)
+legal_ai_bot  | 2025-12-27 03:56:35,920 INFO sqlalchemy.engine.Engine 
+legal_ai_bot  |                 SELECT
+legal_ai_bot  |                     EXTRACT(DOW FROM published_at) as day_of_week,
+legal_ai_bot  |                     COUNT(*) as total_posts,
+legal_ai_bot  |                     AVG(
+legal_ai_bot  |                         (
+legal_ai_bot  |                             COALESCE((reactions->>'useful')::int, 0) +
+legal_ai_bot  |                             COALESCE((reactions->>'important')::int, 0) -
+legal_ai_bot  |                             COALESCE((reactions->>'banal')::int, 0) -
+legal_ai_bot  |                             COALESCE((reactions->>'obvious')::int, 0) -
+legal_ai_bot  |                             COALESCE((reactions->>'poor_quality')::int, 0)
+legal_ai_bot  |                         )::float / NULLIF(
+legal_ai_bot  |                             COALESCE((reactions->>'useful')::int, 0) +
+legal_ai_bot  |                             COALESCE((reactions->>'important')::int, 0) +
+legal_ai_bot  |                             COALESCE((reactions->>'banal')::int, 0) +
+legal_ai_bot  |                             COALESCE((reactions->>'obvious')::int, 0) +
+legal_ai_bot  |                             COALESCE((reactions->>'poor_quality')::int, 0) +
+legal_ai_bot  |                             COALESCE((reactions->>'controversial')::int, 0),
+legal_ai_bot  |                             0
+legal_ai_bot  |                         )
+legal_ai_bot  |                     ) as avg_quality_score
+legal_ai_bot  |                 FROM publications
+legal_ai_bot  |                 WHERE published_at >= $1
+legal_ai_bot  |                 GROUP BY day_of_week
+legal_ai_bot  |                 ORDER BY day_of_week
+legal_ai_bot  |             
+legal_ai_bot  | 2025-12-27 03:56:35,920 INFO sqlalchemy.engine.Engine [generated in 0.00017s] (datetime.datetime(2025, 11, 27, 0, 56, 35, 920184),)
+legal_ai_bot  | /usr/local/lib/python3.11/site-packages/huggingface_hub/file_download.py:942: FutureWarning: `resume_download` is deprecated and will be removed in version 1.0.0. Downloads always resume when possible. If you want to force a new download, use `force_download=True`.
+legal_ai_bot  |   warnings.warn(
+legal_ai_bot  | 2025-12-27 03:56:39 [info     ] qdrant_collection_exists       collection=legal_ai_publications
+legal_ai_bot  | 2025-12-27 03:56:39 [info     ] vector_search_initialized      collection=legal_ai_publications vector_size=768
+legal_ai_bot  | 2025-12-27 03:56:40 [error    ] analytics_error                error=Telegram server says - Bad Request: can't parse entities: Unsupported start tag "" at byte offset 3329 period=analytics:all
+legal_ai_bot  | 2025-12-27 03:56:40,191 INFO sqlalchemy.engine.Engine ROLLBACK
+legal_ai_bot  | Received SIGTERM signal
+legal_ai_bot  | 2025-12-27 04:00:02 [info     ] bot_starting
+legal_ai_bot  | 2025-12-27 04:00:03 [info     ] bot_commands_set               count=6
+legal_ai_bot  | 2025-12-27 04:00:18 [info     ] analytics_requested            days=9999 period=all user_id=321681061
+legal_ai_bot  | 2025-12-27 04:00:18,349 INFO sqlalchemy.engine.Engine select pg_catalog.version()
+legal_ai_bot  | 2025-12-27 04:00:18,349 INFO sqlalchemy.engine.Engine [raw sql] ()
+legal_ai_bot  | 2025-12-27 04:00:18,350 INFO sqlalchemy.engine.Engine select current_schema()
+legal_ai_bot  | 2025-12-27 04:00:18,350 INFO sqlalchemy.engine.Engine [raw sql] ()
+legal_ai_bot  | 2025-12-27 04:00:18,351 INFO sqlalchemy.engine.Engine show standard_conforming_strings
+legal_ai_bot  | 2025-12-27 04:00:18,351 INFO sqlalchemy.engine.Engine [raw sql] ()
+legal_ai_bot  | 2025-12-27 04:00:18,351 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+legal_ai_bot  | 2025-12-27 04:00:18,352 INFO sqlalchemy.engine.Engine 
+legal_ai_bot  |                 SELECT COUNT(*) as total_publications
+legal_ai_bot  |                 FROM publications
+legal_ai_bot  |                 WHERE published_at >= $1
+legal_ai_bot  |             
+legal_ai_bot  | 2025-12-27 04:00:18,352 INFO sqlalchemy.engine.Engine [generated in 0.00012s] (datetime.datetime(1998, 8, 12, 1, 0, 18, 321506),)
+legal_ai_bot  | 2025-12-27 04:00:18,354 INFO sqlalchemy.engine.Engine 
+legal_ai_bot  |                 SELECT
+legal_ai_bot  |                     COUNT(*) as total_drafts,
+legal_ai_bot  |                     COUNT(CASE WHEN status = 'approved' THEN 1 END) as approved_drafts,
+legal_ai_bot  |                     COUNT(CASE WHEN status = 'rejected' THEN 1 END) as rejected_drafts
+legal_ai_bot  |                 FROM post_drafts
+legal_ai_bot  |                 WHERE created_at >= $1
+legal_ai_bot  |             
+legal_ai_bot  | 2025-12-27 04:00:18,354 INFO sqlalchemy.engine.Engine [generated in 0.00009s] (datetime.datetime(1998, 8, 12, 1, 0, 18, 321506),)
+legal_ai_bot  | 2025-12-27 04:00:18,356 INFO sqlalchemy.engine.Engine 
+legal_ai_bot  |                 SELECT
+legal_ai_bot  |                     SUM(COALESCE((reactions->>'useful')::int, 0)) as useful,
+legal_ai_bot  |                     SUM(COALESCE((reactions->>'important')::int, 0)) as important,
+legal_ai_bot  |                     SUM(COALESCE((reactions->>'controversial')::int, 0)) as controversial,
+legal_ai_bot  |                     SUM(COALESCE((reactions->>'banal')::int, 0)) as banal,
+legal_ai_bot  |                     SUM(COALESCE((reactions->>'obvious')::int, 0)) as obvious,
+legal_ai_bot  |                     SUM(COALESCE((reactions->>'poor_quality')::int, 0)) as poor_quality
+legal_ai_bot  |                 FROM publications
+legal_ai_bot  |                 WHERE published_at >= $1
+legal_ai_bot  |             
+legal_ai_bot  | 2025-12-27 04:00:18,356 INFO sqlalchemy.engine.Engine [generated in 0.00008s] (datetime.datetime(1998, 8, 12, 1, 0, 18, 321506),)
+legal_ai_bot  | 2025-12-27 04:00:18,357 INFO sqlalchemy.engine.Engine 
+legal_ai_bot  |                     SELECT AVG(
+legal_ai_bot  |                         (
+legal_ai_bot  |                             COALESCE((reactions->>'useful')::int, 0) +
+legal_ai_bot  |                             COALESCE((reactions->>'important')::int, 0) -
+legal_ai_bot  |                             COALESCE((reactions->>'banal')::int, 0) -
+legal_ai_bot  |                             COALESCE((reactions->>'obvious')::int, 0) -
+legal_ai_bot  |                             COALESCE((reactions->>'poor_quality')::int, 0)
+legal_ai_bot  |                         )::float / NULLIF(
+legal_ai_bot  |                             COALESCE((reactions->>'useful')::int, 0) +
+legal_ai_bot  |                             COALESCE((reactions->>'important')::int, 0) +
+legal_ai_bot  |                             COALESCE((reactions->>'banal')::int, 0) +
+legal_ai_bot  |                             COALESCE((reactions->>'obvious')::int, 0) +
+legal_ai_bot  |                             COALESCE((reactions->>'poor_quality')::int, 0) +
+legal_ai_bot  |                             COALESCE((reactions->>'controversial')::int, 0),
+legal_ai_bot  |                             0
+legal_ai_bot  |                         )
+legal_ai_bot  |                     ) as avg_quality_score
+legal_ai_bot  |                     FROM publications
+legal_ai_bot  |                     WHERE published_at >= $1
+legal_ai_bot  |                     AND (
+legal_ai_bot  |                         COALESCE((reactions->>'useful')::int, 0) +
+legal_ai_bot  |                         COALESCE((reactions->>'important')::int, 0) +
+legal_ai_bot  |                         COALESCE((reactions->>'banal')::int, 0) +
+legal_ai_bot  |                         COALESCE((reactions->>'obvious')::int, 0) +
+legal_ai_bot  |                         COALESCE((reactions->>'poor_quality')::int, 0) +
+legal_ai_bot  |                         COALESCE((reactions->>'controversial')::int, 0)
+legal_ai_bot  |                     ) > 0
+legal_ai_bot  |                 
+legal_ai_bot  | 2025-12-27 04:00:18,357 INFO sqlalchemy.engine.Engine [generated in 0.00006s] (datetime.datetime(1998, 8, 12, 1, 0, 18, 321506),)
+legal_ai_bot  | 2025-12-27 04:00:18,358 INFO sqlalchemy.engine.Engine 
+legal_ai_bot  |                 SELECT
+legal_ai_bot  |                     p.id,
+legal_ai_bot  |                     d.title,
+legal_ai_bot  |                     d.content,
+legal_ai_bot  |                     p.published_at,
+legal_ai_bot  |                     p.message_id as telegram_message_id,
+legal_ai_bot  |                     p.reactions,
+legal_ai_bot  |                     (
+legal_ai_bot  |                         COALESCE((p.reactions->>'useful')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'important')::int, 0) -
+legal_ai_bot  |                         COALESCE((p.reactions->>'banal')::int, 0) -
+legal_ai_bot  |                         COALESCE((p.reactions->>'obvious')::int, 0) -
+legal_ai_bot  |                         COALESCE((p.reactions->>'poor_quality')::int, 0)
+legal_ai_bot  |                     )::float / NULLIF(
+legal_ai_bot  |                         COALESCE((p.reactions->>'useful')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'important')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'banal')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'obvious')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'poor_quality')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'controversial')::int, 0),
+legal_ai_bot  |                         0
+legal_ai_bot  |                     ) as quality_score,
+legal_ai_bot  |                     (
+legal_ai_bot  |                         COALESCE((p.reactions->>'useful')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'important')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'banal')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'obvious')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'poor_quality')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'controversial')::int, 0)
+legal_ai_bot  |                     ) as total_reactions
+legal_ai_bot  |                 FROM publications p
+legal_ai_bot  |                 JOIN post_drafts d ON p.draft_id = d.id
+legal_ai_bot  |                 WHERE p.published_at >= $1
+legal_ai_bot  |                 AND (
+legal_ai_bot  |                     COALESCE((p.reactions->>'useful')::int, 0) +
+legal_ai_bot  |                     COALESCE((p.reactions->>'important')::int, 0) +
+legal_ai_bot  |                     COALESCE((p.reactions->>'banal')::int, 0) +
+legal_ai_bot  |                     COALESCE((p.reactions->>'obvious')::int, 0) +
+legal_ai_bot  |                     COALESCE((p.reactions->>'poor_quality')::int, 0) +
+legal_ai_bot  |                     COALESCE((p.reactions->>'controversial')::int, 0)
+legal_ai_bot  |                 ) > 0
+legal_ai_bot  |                 ORDER BY quality_score DESC, total_reactions DESC
+legal_ai_bot  |                 LIMIT $2
+legal_ai_bot  |             
+legal_ai_bot  | 2025-12-27 04:00:18,358 INFO sqlalchemy.engine.Engine [generated in 0.00010s] (datetime.datetime(1998, 8, 12, 1, 0, 18, 358633), 3)
+legal_ai_bot  | 2025-12-27 04:00:18,361 INFO sqlalchemy.engine.Engine 
+legal_ai_bot  |                 SELECT
+legal_ai_bot  |                     p.id,
+legal_ai_bot  |                     d.title,
+legal_ai_bot  |                     d.content,
+legal_ai_bot  |                     p.published_at,
+legal_ai_bot  |                     p.message_id as telegram_message_id,
+legal_ai_bot  |                     p.reactions,
+legal_ai_bot  |                     (
+legal_ai_bot  |                         COALESCE((p.reactions->>'useful')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'important')::int, 0) -
+legal_ai_bot  |                         COALESCE((p.reactions->>'banal')::int, 0) -
+legal_ai_bot  |                         COALESCE((p.reactions->>'obvious')::int, 0) -
+legal_ai_bot  |                         COALESCE((p.reactions->>'poor_quality')::int, 0)
+legal_ai_bot  |                     )::float / NULLIF(
+legal_ai_bot  |                         COALESCE((p.reactions->>'useful')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'important')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'banal')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'obvious')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'poor_quality')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'controversial')::int, 0),
+legal_ai_bot  |                         0
+legal_ai_bot  |                     ) as quality_score,
+legal_ai_bot  |                     (
+legal_ai_bot  |                         COALESCE((p.reactions->>'useful')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'important')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'banal')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'obvious')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'poor_quality')::int, 0) +
+legal_ai_bot  |                         COALESCE((p.reactions->>'controversial')::int, 0)
+legal_ai_bot  |                     ) as total_reactions
+legal_ai_bot  |                 FROM publications p
+legal_ai_bot  |                 JOIN post_drafts d ON p.draft_id = d.id
+legal_ai_bot  |                 WHERE p.published_at >= $1
+legal_ai_bot  |                 AND (
+legal_ai_bot  |                     COALESCE((p.reactions->>'banal')::int, 0) +
+legal_ai_bot  |                     COALESCE((p.reactions->>'obvious')::int, 0) +
+legal_ai_bot  |                     COALESCE((p.reactions->>'poor_quality')::int, 0)
+legal_ai_bot  |                 ) > 0
+legal_ai_bot  |                 ORDER BY quality_score ASC, total_reactions DESC
+legal_ai_bot  |                 LIMIT $2
+legal_ai_bot  |             
+legal_ai_bot  | 2025-12-27 04:00:18,361 INFO sqlalchemy.engine.Engine [generated in 0.00007s] (datetime.datetime(1998, 8, 12, 1, 0, 18, 360961), 3)
+legal_ai_bot  | 2025-12-27 04:00:18,362 INFO sqlalchemy.engine.Engine 
+legal_ai_bot  |                 SELECT
+legal_ai_bot  |                     source_name,
+legal_ai_bot  |                     COUNT(*) as total_collected
+legal_ai_bot  |                 FROM raw_articles
+legal_ai_bot  |                 WHERE fetched_at >= $1
+legal_ai_bot  |                 GROUP BY source_name
+legal_ai_bot  |                 ORDER BY total_collected DESC
+legal_ai_bot  |             
+legal_ai_bot  | 2025-12-27 04:00:18,362 INFO sqlalchemy.engine.Engine [generated in 0.00005s] (datetime.datetime(1998, 8, 12, 1, 0, 18, 362089),)
+legal_ai_bot  | 2025-12-27 04:00:18,363 INFO sqlalchemy.engine.Engine 
+legal_ai_bot  |                 SELECT
+legal_ai_bot  |                     a.source_name,
+legal_ai_bot  |                     COUNT(*) as total_published,
+legal_ai_bot  |                     AVG(
+legal_ai_bot  |                         (
+legal_ai_bot  |                             COALESCE((p.reactions->>'useful')::int, 0) +
+legal_ai_bot  |                             COALESCE((p.reactions->>'important')::int, 0) -
+legal_ai_bot  |                             COALESCE((p.reactions->>'banal')::int, 0) -
+legal_ai_bot  |                             COALESCE((p.reactions->>'obvious')::int, 0) -
+legal_ai_bot  |                             COALESCE((p.reactions->>'poor_quality')::int, 0)
+legal_ai_bot  |                         )::float / NULLIF(
+legal_ai_bot  |                             COALESCE((p.reactions->>'useful')::int, 0) +
+legal_ai_bot  |                             COALESCE((p.reactions->>'important')::int, 0) +
+legal_ai_bot  |                             COALESCE((p.reactions->>'banal')::int, 0) +
+legal_ai_bot  |                             COALESCE((p.reactions->>'obvious')::int, 0) +
+legal_ai_bot  |                             COALESCE((p.reactions->>'poor_quality')::int, 0) +
+legal_ai_bot  |                             COALESCE((p.reactions->>'controversial')::int, 0),
+legal_ai_bot  |                             0
+legal_ai_bot  |                         )
+legal_ai_bot  |                     ) as avg_quality_score
+legal_ai_bot  |                 FROM publications p
+legal_ai_bot  |                 JOIN post_drafts d ON p.draft_id = d.id
+legal_ai_bot  |                 JOIN raw_articles a ON d.article_id = a.id
+legal_ai_bot  |                 WHERE p.published_at >= $1
+legal_ai_bot  |                 GROUP BY a.source_name
+legal_ai_bot  |             
+legal_ai_bot  | 2025-12-27 04:00:18,363 INFO sqlalchemy.engine.Engine [generated in 0.00005s] (datetime.datetime(1998, 8, 12, 1, 0, 18, 362089),)
+legal_ai_bot  | 2025-12-27 04:00:18,364 INFO sqlalchemy.engine.Engine 
+legal_ai_bot  |                 SELECT
+legal_ai_bot  |                     EXTRACT(DOW FROM published_at) as day_of_week,
+legal_ai_bot  |                     COUNT(*) as total_posts,
+legal_ai_bot  |                     AVG(
+legal_ai_bot  |                         (
+legal_ai_bot  |                             COALESCE((reactions->>'useful')::int, 0) +
+legal_ai_bot  |                             COALESCE((reactions->>'important')::int, 0) -
+legal_ai_bot  |                             COALESCE((reactions->>'banal')::int, 0) -
+legal_ai_bot  |                             COALESCE((reactions->>'obvious')::int, 0) -
+legal_ai_bot  |                             COALESCE((reactions->>'poor_quality')::int, 0)
+legal_ai_bot  |                         )::float / NULLIF(
+legal_ai_bot  |                             COALESCE((reactions->>'useful')::int, 0) +
+legal_ai_bot  |                             COALESCE((reactions->>'important')::int, 0) +
+legal_ai_bot  |                             COALESCE((reactions->>'banal')::int, 0) +
+legal_ai_bot  |                             COALESCE((reactions->>'obvious')::int, 0) +
+legal_ai_bot  |                             COALESCE((reactions->>'poor_quality')::int, 0) +
+legal_ai_bot  |                             COALESCE((reactions->>'controversial')::int, 0),
+legal_ai_bot  |                             0
+legal_ai_bot  |                         )
+legal_ai_bot  |                     ) as avg_quality_score
+legal_ai_bot  |                 FROM publications
+legal_ai_bot  |                 WHERE published_at >= $1
+legal_ai_bot  |                 GROUP BY day_of_week
+legal_ai_bot  |                 ORDER BY day_of_week
+legal_ai_bot  |             
+legal_ai_bot  | 2025-12-27 04:00:18,364 INFO sqlalchemy.engine.Engine [generated in 0.00005s] (datetime.datetime(2025, 11, 27, 1, 0, 18, 364753),)
+legal_ai_bot  | /usr/local/lib/python3.11/site-packages/huggingface_hub/file_download.py:942: FutureWarning: `resume_download` is deprecated and will be removed in version 1.0.0. Downloads always resume when possible. If you want to force a new download, use `force_download=True`.
+legal_ai_bot  |   warnings.warn(
+legal_ai_bot  | 2025-12-27 04:00:22 [info     ] qdrant_collection_exists       collection=legal_ai_publications
+legal_ai_bot  | 2025-12-27 04:00:22 [info     ] vector_search_initialized      collection=legal_ai_publications vector_size=768
+legal_ai_bot  | 2025-12-27 04:00:22 [info     ] analytics_full_report          report=📊 <b>Аналитика канала @legal_ai_pro</b>
+legal_ai_bot  | 
+legal_ai_bot  | ━━━━━━━━━━━━━━━━━━━━━━━━━━
+legal_ai_bot  | 📈 <b>За последние 9999 дней:</b>
+legal_ai_bot  | 
+legal_ai_bot  | <b>Публикации:</b>
+legal_ai_bot  | ├─ 📝 Опубликовано: 28 постов
+legal_ai_bot  | ├─ ✅ Одобрено: 22 из 57 драфтов (39%)
+legal_ai_bot  | ├─ ❌ Отклонено: 9 драфтов
+legal_ai_bot  | └─ 📊 Avg quality score: 0.67
+legal_ai_bot  | 
+legal_ai_bot  | <b>Реакции:</b>
+legal_ai_bot  | ├─ 👍 Полезно: 3 (50%)
+legal_ai_bot  | ├─ 🔥 Важно: 2 (33%)
+legal_ai_bot  | ├─ 🤔 Спорно: 0 (0%)
+legal_ai_bot  | ├─ 💤 Банальщина: 0 (0%)
+legal_ai_bot  | ├─ 🤷 Очевидно: 0 (0%)
+legal_ai_bot  | └─ 👎 Плохое: 1 (17%)
+legal_ai_bot  | 
+legal_ai_bot  | <b>Engagement:</b>
+legal_ai_bot  | └─ 📊 Всего реакций: 6
+legal_ai_bot  | 
+legal_ai_bot  | ━━━━━━━━━━━━━━━━━━━━━━━━━━
+legal_ai_bot  | 🔥 <b>Топ-3 поста:</b>
+legal_ai_bot  | 
+legal_ai_bot  | 1️⃣ <b> Калифорния делает шаг к лидерству в области AI</b>
+legal_ai_bot  |    📅 25.12.2025 22:24
+legal_ai_bot  |    👍 1 | 🔥 0 | 🤔 0
+legal_ai_bot  |    📊 Quality: 1.0
+legal_ai_bot  |    🔗 <a href="https://t.me/legal_ai_pro/15">Перейти к посту</a>
+legal_ai_bot  | 
+legal_ai_bot  | 2️⃣ <b> Регулирование ИИ  важный шаг для бизнеса!</b>
+legal_ai_bot  |    📅 26.12.2025 07:03
+legal_ai_bot  |    👍 0 | 🔥 1 | 🤔 0
+legal_ai_bot  |    📊 Quality: 1.0
+legal_ai_bot  |    🔗 <a href="https://t.me/legal_ai_pro/19">Перейти к посту</a>
+legal_ai_bot  | 
+legal_ai_bot  | 3️⃣ <b> Международные новости:</b>
+legal_ai_bot  |    📅 26.12.2025 12:55
+legal_ai_bot  |    👍 0 | 🔥 1 | 🤔 0
+legal_ai_bot  |    📊 Quality: 1.0
+legal_ai_bot  |    🔗 <a href="https://t.me/legal_ai_pro/29">Перейти к посту</a>
+legal_ai_bot  | 
+legal_ai_bot  | ━━━━━━━━━━━━━━━━━━━━━━━━━━
+legal_ai_bot  | 💤 <b>Худшие посты (учимся на ошибках):</b>
+legal_ai_bot  | 
+legal_ai_bot  | 1️⃣ <b>Минцифры: ИИ-робот Макс на Госуслугах, 7 млн пользователей до 120 млн  итоги 202...</b>
+legal_ai_bot  |    📅 26.12.2025 20:51
+legal_ai_bot  |    💤 0 | 👎 1 | 🤷 0
+legal_ai_bot  |    📊 Quality: -1.0
+legal_ai_bot  |    ⚠️ Проблема: Низкое качество контента
+legal_ai_bot  | 
+legal_ai_bot  | ━━━━━━━━━━━━━━━━━━━━━━━━━━
+legal_ai_bot  | 📅 <b>Статистика по дням недели:</b>
+legal_ai_bot  | 
+legal_ai_bot  | Чт: 11 постов | Avg quality: 1.0 ⭐
+legal_ai_bot  | Пт: 17 постов | Avg quality: 0.6 
+legal_ai_bot  | 
+legal_ai_bot  | 🏆 Лучший день: <b>Чт</b> (avg quality: 1.0)
+legal_ai_bot  | 
+legal_ai_bot  | ━━━━━━━━━━━━━━━━━━━━━━━━━━
+legal_ai_bot  | 📰 <b>Топ источников:</b>
+legal_ai_bot  | 
+legal_ai_bot  | 1. <b>Google News RSS RU</b> ✅
+legal_ai_bot  |    ├─ Отобрано: 19 новостей
+legal_ai_bot  |    ├─ Опубликовано: 6 (32%)
+legal_ai_bot  |    └─ Avg quality: 1.0
+legal_ai_bot  | 
+legal_ai_bot  | 2. <b>Google News RSS (EN)</b> ✅
+legal_ai_bot  |    ├─ Отобрано: 17 новостей
+legal_ai_bot  |    ├─ Опубликовано: 2 (12%)
+legal_ai_bot  |    └─ Avg quality: 1.0
+legal_ai_bot  | 
+legal_ai_bot  | 3. <b>Google News RSS EN</b> ✅
+legal_ai_bot  |    ├─ Отобрано: 23 новостей
+legal_ai_bot  |    ├─ Опубликовано: 14 (61%)
+legal_ai_bot  |    └─ Avg quality: 1.0
+legal_ai_bot  | 
+legal_ai_bot  | 4. <b>Google News RSS (RU)</b> ❌
+legal_ai_bot  |    ├─ Отобрано: 28 новостей
+legal_ai_bot  |    ├─ Опубликовано: 6 (21%)
+legal_ai_bot  |    └─ Avg quality: 0
+legal_ai_bot  | 
+legal_ai_bot  | ━━━━━━━━━━━━━━━━━━━━━━━━━━
+legal_ai_bot  | 🗄️ <b>Векторная база Qdrant:</b>
+legal_ai_bot  | 
+legal_ai_bot  | ├─ 📦 Всего векторов: 9
+legal_ai_bot  | ├─ ✅ Позитивных примеров: 0 (score > 0.5)
+legal_ai_bot  | ├─ ❌ Негативных примеров: 0 (score < -0.3)
+legal_ai_bot  | ├─ ⚖️ Нейтральных: 9
+legal_ai_bot  | └─ 📊 Avg score всей базы: 0.0
+legal_ai_bot  | 
+legal_ai_bot  | ━━━━━━━━━━━━━━━━━━━━━━━━━━
+legal_ai_bot  | 📅 Обновлено: 27.12.2025 04:00
+legal_ai_bot  |  total_length=2227
+legal_ai_bot  | 2025-12-27 04:00:22 [error    ] analytics_error                error=Telegram server says - Bad Request: can't parse entities: Unsupported start tag "" at byte offset 3329 period=analytics:all
+legal_ai_bot  | 2025-12-27 04:00:22,256 INFO sqlalchemy.engine.Engine ROLLBACK
