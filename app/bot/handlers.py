@@ -1901,6 +1901,8 @@ async def callback_settings_llm(callback: CallbackQuery, db: AsyncSession):
 @router.callback_query(F.data.startswith("llm_select:"))
 async def callback_llm_select(callback: CallbackQuery, db: AsyncSession):
     """Выбор модели LLM для операции."""
+    from app.modules.settings_manager import get_setting
+
     operation = callback.data.split(":")[1]
 
     operation_names = {
@@ -1909,13 +1911,28 @@ async def callback_llm_select(callback: CallbackQuery, db: AsyncSession):
         "ranking": "Ранжирование"
     }
 
-    # Available models
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="GPT-4o (самая умная)", callback_data=f"llm_set:{operation}:gpt-4o")],
-        [InlineKeyboardButton(text="GPT-4o-mini (быстрая)", callback_data=f"llm_set:{operation}:gpt-4o-mini")],
-        [InlineKeyboardButton(text="Perplexity Sonar (для поиска)", callback_data=f"llm_set:{operation}:sonar")],
-        [InlineKeyboardButton(text="« Назад", callback_data="settings:llm")],
-    ])
+    # Получаем текущую модель
+    current_model = await get_setting(f"llm.{operation}.model", db, default="gpt-4o-mini")
+
+    # Available models with checkmarks
+    models = [
+        ("gpt-4o", "GPT-4o (самая умная)"),
+        ("gpt-4o-mini", "GPT-4o-mini (быстрая)"),
+        ("sonar", "Perplexity Sonar (поиск)")
+    ]
+
+    buttons = []
+    for model_key, model_name in models:
+        icon = "✅" if current_model == model_key else "☐"
+        buttons.append([
+            InlineKeyboardButton(
+                text=f"{icon} {model_name}",
+                callback_data=f"llm_set:{operation}:{model_key}"
+            )
+        ])
+
+    buttons.append([InlineKeyboardButton(text="« Назад", callback_data="settings:llm")])
+    keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
 
     await callback.message.edit_text(
         f"🤖 <b>Выбор модели для: {operation_names.get(operation, operation)}</b>\n\n"
@@ -1923,7 +1940,8 @@ async def callback_llm_select(callback: CallbackQuery, db: AsyncSession):
         "• <b>GPT-4o</b> - самая продвинутая, точная, дорогая (~$15/1M токенов)\n"
         "• <b>GPT-4o-mini</b> - быстрая, дешевая (~$0.15/1M токенов)\n"
         "• <b>Perplexity Sonar</b> - для поиска и генерации новостей\n\n"
-        "Текущая модель будет обновлена для всех новых операций.",
+        "✅ - выбранная модель\n"
+        "Нажмите для изменения:",
         parse_mode="HTML",
         reply_markup=keyboard
     )
@@ -1939,8 +1957,11 @@ async def callback_llm_set(callback: CallbackQuery, db: AsyncSession):
     setting_key = f"llm.{operation}.model"
     await set_setting(setting_key, model, db)
 
-    await callback.answer(f"✅ Модель обновлена: {model}")
-    await callback_settings_llm(callback, db)
+    await callback.answer(f"✅ {model}")
+
+    # Обновляем экран с новыми галочками
+    callback.data = f"llm_select:{operation}"
+    await callback_llm_select(callback, db)
 
 
 @router.callback_query(F.data == "settings:dalle")
@@ -2218,6 +2239,57 @@ async def callback_settings_alerts(callback: CallbackQuery, db: AsyncSession):
         reply_markup=keyboard
     )
     await callback.answer()
+
+
+@router.callback_query(F.data.startswith("alert_threshold:"))
+async def callback_alert_threshold(callback: CallbackQuery):
+    """Настройка порогов уведомлений (заглушка)."""
+    alert_type = callback.data.split(":")[1]
+
+    alert_names = {
+        "low_engagement": "Падение engagement",
+        "viral_post": "Viral пост",
+        "low_approval": "Низкий approval rate"
+    }
+
+    await callback.answer(
+        f"⚠️ Настройка порога для '{alert_names.get(alert_type, alert_type)}' будет доступна в следующей версии",
+        show_alert=True
+    )
+
+
+@router.callback_query(F.data.startswith("quality_param:"))
+async def callback_quality_param(callback: CallbackQuery):
+    """Настройка параметров качества (заглушка)."""
+    param = callback.data.split(":")[1]
+
+    param_names = {
+        "min_score": "минимального quality score",
+        "min_content_length": "минимальной длины текста",
+        "similarity_threshold": "порога схожести",
+        "languages": "языков"
+    }
+
+    await callback.answer(
+        f"⚠️ Настройка {param_names.get(param, param)} будет доступна в следующей версии",
+        show_alert=True
+    )
+
+
+@router.callback_query(F.data.startswith("budget_param:"))
+async def callback_budget_param(callback: CallbackQuery):
+    """Настройка параметров бюджета (заглушка)."""
+    param = callback.data.split(":")[1]
+
+    param_names = {
+        "max_per_month": "максимального бюджета",
+        "warning_threshold": "порога предупреждения"
+    }
+
+    await callback.answer(
+        f"⚠️ Настройка {param_names.get(param, param)} будет доступна в следующей версии",
+        show_alert=True
+    )
 
 
 @router.callback_query(F.data == "settings:quality")
