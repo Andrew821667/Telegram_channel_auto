@@ -22,6 +22,7 @@ from app.models.database import (
     PostDraft,
     Publication
 )
+from app.api.miniapp import router as miniapp_router
 import structlog
 
 # Настройка логирования
@@ -86,6 +87,20 @@ app = FastAPI(
     lifespan=lifespan,
     docs_url="/docs" if settings.debug else None,
     redoc_url="/redoc" if settings.debug else None,
+)
+
+# Include API routers
+app.include_router(miniapp_router)
+
+# Add CORS middleware for Mini App
+from fastapi.middleware.cors import CORSMiddleware
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # In production, specify exact origins
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 
