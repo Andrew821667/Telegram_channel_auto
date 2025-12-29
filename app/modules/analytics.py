@@ -952,7 +952,7 @@ class AnalyticsService:
             }
 
     async def get_ai_analysis_stats(self) -> Dict:
-        """Статистика использования AI анализа (токены и стоимость)."""
+        """Статистика использования AI анализа (токены и стоимость) с разбивкой по моделям."""
         try:
             from datetime import date
             from dateutil.relativedelta import relativedelta
@@ -989,22 +989,68 @@ class AnalyticsService:
             result_year = await self.db.execute(query_year, {"year_start": year_start})
             row_year = result_year.fetchone()
 
+            # Разбивка по моделям за месяц
+            query_month_by_model = text("""
+                SELECT
+                    model,
+                    COUNT(*) as count,
+                    SUM(total_tokens) as total_tokens,
+                    SUM(cost_usd) as total_cost
+                FROM api_usage
+                WHERE operation = 'ai_analysis'
+                AND date >= :month_start
+                GROUP BY model
+            """)
+
+            result_month_by_model = await self.db.execute(query_month_by_model, {"month_start": month_start})
+            by_model_month = {}
+            for row in result_month_by_model.fetchall():
+                by_model_month[row.model] = {
+                    "count": row.count,
+                    "tokens": row.total_tokens or 0,
+                    "cost_usd": float(row.total_cost or 0)
+                }
+
+            # Разбивка по моделям за год
+            query_year_by_model = text("""
+                SELECT
+                    model,
+                    COUNT(*) as count,
+                    SUM(total_tokens) as total_tokens,
+                    SUM(cost_usd) as total_cost
+                FROM api_usage
+                WHERE operation = 'ai_analysis'
+                AND date >= :year_start
+                GROUP BY model
+            """)
+
+            result_year_by_model = await self.db.execute(query_year_by_model, {"year_start": year_start})
+            by_model_year = {}
+            for row in result_year_by_model.fetchall():
+                by_model_year[row.model] = {
+                    "count": row.count,
+                    "tokens": row.total_tokens or 0,
+                    "cost_usd": float(row.total_cost or 0)
+                }
+
             return {
                 "month": {
                     "count": row_month.count or 0,
                     "total_tokens": row_month.total_tokens or 0,
-                    "total_cost_usd": float(row_month.total_cost or 0)
+                    "total_cost_usd": float(row_month.total_cost or 0),
+                    "by_model": by_model_month
                 },
                 "year": {
                     "count": row_year.count or 0,
                     "total_tokens": row_year.total_tokens or 0,
-                    "total_cost_usd": float(row_year.total_cost or 0)
+                    "total_cost_usd": float(row_year.total_cost or 0),
+                    "by_model": by_model_year
                 }
             }
 
         except Exception as e:
             logger.error("get_ai_analysis_stats_error", error=str(e))
             return {
-                "month": {"count": 0, "total_tokens": 0, "total_cost_usd": 0},
-                "year": {"count": 0, "total_tokens": 0, "total_cost_usd": 0}
+                "month": {"count": 0, "total_tokens": 0, "total_cost_usd": 0, "by_model": {}},
+                "year": {"count": 0, "total_tokens": 0, "total_cost_usd": 0, "by_model": {}}
             }

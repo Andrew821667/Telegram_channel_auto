@@ -1440,18 +1440,30 @@ async def get_statistics(db: AsyncSession) -> str:
 
     # Добавляем статистику AI анализа
     stats_text += "\n━━━━━━━━━━━━━━━━\n\n"
-    stats_text += "🤖 <b>AI Анализ аналитики (GPT-4)</b>\n\n"
+    stats_text += "🤖 <b>AI Анализ аналитики</b>\n\n"
 
     if ai_stats['month']['count'] > 0 or ai_stats['year']['count'] > 0:
         stats_text += f"<b>За текущий месяц:</b>\n"
         stats_text += f"├─ Запросов: {ai_stats['month']['count']}\n"
         stats_text += f"├─ Токенов: {ai_stats['month']['total_tokens']:,}\n"
-        stats_text += f"└─ Стоимость: ${ai_stats['month']['total_cost_usd']:.4f}\n\n"
+        stats_text += f"└─ Стоимость: ${ai_stats['month']['total_cost_usd']:.4f}\n"
 
-        stats_text += f"<b>За текущий год:</b>\n"
+        # Разбивка по моделям за месяц
+        if ai_stats['month']['by_model']:
+            for model, data in ai_stats['month']['by_model'].items():
+                model_name = model.replace('gpt-', 'GPT-').upper()
+                stats_text += f"   └─ {model_name}: {data['count']} запросов, ${data['cost_usd']:.4f}\n"
+
+        stats_text += f"\n<b>За текущий год:</b>\n"
         stats_text += f"├─ Запросов: {ai_stats['year']['count']}\n"
         stats_text += f"├─ Токенов: {ai_stats['year']['total_tokens']:,}\n"
         stats_text += f"└─ Стоимость: ${ai_stats['year']['total_cost_usd']:.2f}\n"
+
+        # Разбивка по моделям за год
+        if ai_stats['year']['by_model']:
+            for model, data in ai_stats['year']['by_model'].items():
+                model_name = model.replace('gpt-', 'GPT-').upper()
+                stats_text += f"   └─ {model_name}: {data['count']} запросов, ${data['cost_usd']:.2f}\n"
     else:
         stats_text += "Анализы ещё не запускались\n"
 
@@ -1988,7 +2000,7 @@ VIEWS И FORWARDS:
 
         ai_response, usage_stats = await call_openai_chat(
             messages=[{"role": "user", "content": prompt}],
-            model="gpt-4o",  # Используем GPT-4 для качественного анализа
+            model="gpt-4o-mini",  # Используем GPT-4o-mini (в 16 раз дешевле чем GPT-4o)
             temperature=0.7,
             max_tokens=2000,
             db=db,

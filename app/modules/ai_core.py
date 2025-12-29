@@ -656,16 +656,28 @@ async def call_openai_chat(
         result = response.choices[0].message.content
 
         # Расчет стоимости
-        # GPT-4o pricing (на декабрь 2024):
-        # - Input: $2.50 / 1M tokens
-        # - Output: $10.00 / 1M tokens
+        # Pricing определяется по модели:
+        # GPT-4o: Input $2.50/1M, Output $10.00/1M
+        # GPT-4o-mini: Input $0.150/1M, Output $0.600/1M (в 16 раз дешевле!)
         prompt_tokens = response.usage.prompt_tokens
         completion_tokens = response.usage.completion_tokens
         total_tokens = response.usage.total_tokens
 
+        # Определяем цены в зависимости от модели
+        if "gpt-4o-mini" in model.lower():
+            input_price_per_1m = 0.150
+            output_price_per_1m = 0.600
+        elif "gpt-4o" in model.lower():
+            input_price_per_1m = 2.50
+            output_price_per_1m = 10.00
+        else:
+            # Дефолтные цены для других моделей
+            input_price_per_1m = 2.50
+            output_price_per_1m = 10.00
+
         cost_usd = (
-            (prompt_tokens / 1_000_000 * 2.50) +
-            (completion_tokens / 1_000_000 * 10.00)
+            (prompt_tokens / 1_000_000 * input_price_per_1m) +
+            (completion_tokens / 1_000_000 * output_price_per_1m)
         )
 
         usage_stats = {
