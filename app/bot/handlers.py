@@ -1760,7 +1760,7 @@ async def callback_back_to_analytics_menu(callback: CallbackQuery):
 async def callback_analytics(callback: CallbackQuery, db: AsyncSession):
     """Отобразить аналитику за период."""
 
-    await callback.answer("Собираю аналитику...")
+    await callback.answer()
 
     if not await check_admin(callback.from_user.id):
         await callback.message.answer("⛔ У вас нет доступа")
@@ -1769,6 +1769,13 @@ async def callback_analytics(callback: CallbackQuery, db: AsyncSession):
     try:
         period = callback.data.split(":")[1]
         days = int(period) if period != "all" else 9999
+
+        # Показываем loading сообщение
+        loading_msg = await callback.message.answer(
+            "⏳ <b>Собираю аналитику...</b>\n\n"
+            "Анализирую публикации, метрики и источники...",
+            parse_mode="HTML"
+        )
 
         logger.info("analytics_requested", period=period, days=days, user_id=callback.from_user.id)
 
@@ -1806,6 +1813,9 @@ async def callback_analytics(callback: CallbackQuery, db: AsyncSession):
         )
 
 
+        # Удаляем loading сообщение
+        await loading_msg.delete()
+
         # Telegram ограничивает сообщения до 4096 символов
         # Если отчёт длинный - разбиваем на части
         if len(report) > 4096:
@@ -1832,6 +1842,11 @@ async def callback_analytics(callback: CallbackQuery, db: AsyncSession):
 
     except Exception as e:
         logger.error("analytics_error", error=str(e), period=callback.data)
+        # Удаляем loading сообщение если оно существует
+        try:
+            await loading_msg.delete()
+        except:
+            pass
         await callback.message.answer(
             "❌ Произошла ошибка при сборе аналитики. Попробуйте позже.",
             parse_mode="HTML"
@@ -1842,7 +1857,7 @@ async def callback_analytics(callback: CallbackQuery, db: AsyncSession):
 async def callback_ai_analysis(callback: CallbackQuery, db: AsyncSession):
     """AI-анализ аналитики с рекомендациями от GPT-4."""
 
-    await callback.answer("🤖 Запускаю AI анализ...")
+    await callback.answer()
 
     if not await check_admin(callback.from_user.id):
         await callback.message.answer("⛔ У вас нет доступа")
@@ -1852,9 +1867,10 @@ async def callback_ai_analysis(callback: CallbackQuery, db: AsyncSession):
         period = callback.data.split(":")[1]
         days = int(period) if period != "all" else 30  # Ограничиваем для AI анализа
 
-        await callback.message.answer(
+        loading_msg = await callback.message.answer(
             "🤖 <b>AI Анализ запущен...</b>\n\n"
-            "Собираю данные и анализирую метрики...",
+            "⏳ Собираю данные и анализирую метрики...\n"
+            "⏳ Отправляю запрос к GPT-4...",
             parse_mode="HTML"
         )
 
@@ -1981,6 +1997,9 @@ VIEWS И FORWARDS:
 • За месяц: {ai_stats['month']['count']} запросов, {ai_stats['month']['total_tokens']:,} токенов, ${ai_stats['month']['total_cost_usd']:.2f}
 • За год: {ai_stats['year']['count']} запросов, {ai_stats['year']['total_tokens']:,} токенов, ${ai_stats['year']['total_cost_usd']:.2f}"""
 
+        # Удаляем loading сообщение
+        await loading_msg.delete()
+
         # Отправляем ответ (может быть длинным, поэтому разбиваем если нужно)
         if len(report) > 4096:
             # Разбиваем на части
@@ -1999,6 +2018,11 @@ VIEWS И FORWARDS:
 
     except Exception as e:
         logger.error("ai_analysis_error", error=str(e), period=callback.data)
+        # Удаляем loading сообщение если оно существует
+        try:
+            await loading_msg.delete()
+        except:
+            pass
         await callback.message.answer(
             "❌ Произошла ошибка при AI анализе. Попробуйте позже.\n\n"
             f"Ошибка: {str(e)}",
