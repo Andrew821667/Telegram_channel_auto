@@ -10,7 +10,7 @@ from typing import Optional, Dict, List
 
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.filters import Command, CommandStart
-from aiogram.types import Message, CallbackQuery, FSInputFile, BotCommand
+from aiogram.types import Message, CallbackQuery, FSInputFile, BotCommand, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from sqlalchemy import select
