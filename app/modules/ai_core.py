@@ -621,6 +621,51 @@ class AICore:
             raise
 
 
+async def call_openai_chat(
+    messages: List[Dict[str, str]],
+    model: str = "gpt-4o",
+    temperature: float = 0.7,
+    max_tokens: int = 2000
+) -> str:
+    """
+    Прямой вызов OpenAI Chat API для аналитики.
+
+    Args:
+        messages: Список сообщений для GPT (формат [{"role": "user", "content": "..."}])
+        model: Модель GPT (по умолчанию gpt-4o)
+        temperature: Температура генерации (0-2)
+        max_tokens: Максимум токенов в ответе
+
+    Returns:
+        Ответ от GPT-4
+    """
+    try:
+        client = AsyncOpenAI(api_key=settings.openai_api_key)
+
+        response = await client.chat.completions.create(
+            model=model,
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens
+        )
+
+        result = response.choices[0].message.content
+
+        logger.info(
+            "openai_chat_call",
+            model=model,
+            prompt_tokens=response.usage.prompt_tokens,
+            completion_tokens=response.usage.completion_tokens,
+            total_tokens=response.usage.total_tokens
+        )
+
+        return result
+
+    except Exception as e:
+        logger.error("openai_chat_error", error=str(e), model=model)
+        raise
+
+
 async def process_articles_with_ai(db_session: AsyncSession, provider: str = None) -> Dict[str, Any]:
     """
     Удобная функция для запуска AI обработки статей.
