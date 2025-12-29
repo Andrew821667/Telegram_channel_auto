@@ -1707,6 +1707,8 @@ async def callback_show_ai_analysis_menu(callback: CallbackQuery):
     """Показать меню выбора периода для AI анализа."""
     await callback.answer()
 
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="🤖 7 дней", callback_data="ai_analysis:7"),
@@ -1731,6 +1733,8 @@ async def callback_show_ai_analysis_menu(callback: CallbackQuery):
 async def callback_back_to_analytics_menu(callback: CallbackQuery):
     """Вернуться к меню аналитики."""
     await callback.answer()
+
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [
