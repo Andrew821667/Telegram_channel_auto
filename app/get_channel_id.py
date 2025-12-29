@@ -6,7 +6,7 @@
 
 import asyncio
 from telethon import TelegramClient
-from app.config import settings
+from config import settings
 
 
 async def get_channel_numeric_id():
