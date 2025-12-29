@@ -2171,10 +2171,18 @@ async def setup_bot_commands():
 async def start_bot():
     """Запустить бота."""
     # Инициализация базы данных (создаём таблицы если их нет)
-    from app.models.database import init_db
+    from app.models.database import init_db, get_db
+    from app.modules.settings_manager import init_default_settings
     try:
         await init_db()
         logger.info("database_initialized")
+
+        # Инициализация дефолтных настроек
+        async for db in get_db():
+            await init_default_settings(db)
+            logger.info("default_settings_initialized")
+            break
+
     except Exception as e:
         logger.error("database_init_error", error=str(e))
 

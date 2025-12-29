@@ -276,6 +276,30 @@ class MonthlyAPIStats(Base):
     )
 
 
+class SystemSettings(Base):
+    """Системные настройки приложения (управляются через UI)."""
+
+    __tablename__ = "system_settings"
+
+    id = Column(Integer, primary_key=True, index=True)
+    key = Column(String(100), unique=True, nullable=False, index=True)
+    value = Column(Text)  # JSON or string value
+    type = Column(String(20), nullable=False)  # bool, string, int, float, json
+    category = Column(String(50), nullable=False, index=True)  # sources, llm, publishing, media, etc
+    description = Column(Text)
+
+    # Metadata
+    created_at = Column(TIMESTAMP, default=datetime.utcnow)
+    updated_at = Column(TIMESTAMP, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        CheckConstraint(
+            "type IN ('bool', 'string', 'int', 'float', 'json')",
+            name='valid_setting_type'
+        ),
+    )
+
+
 # ====================
 # Database Connection
 # ====================
