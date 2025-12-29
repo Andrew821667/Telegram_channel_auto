@@ -2229,7 +2229,7 @@ async def callback_settings_alerts(callback: CallbackQuery, db: AsyncSession):
     await callback.message.edit_text(
         "🔔 <b>Уведомления и алерты</b>\n\n"
         "Настройте когда получать уведомления:\n\n"
-        "• <b>Падение engagement</b> - если views/subscribers < порога\n"
+        "• <b>Падение engagement</b> - если engagement ниже порога\n"
         "• <b>Viral пост</b> - если пост набрал много просмотров\n"
         "• <b>Низкий approval</b> - если отклонено много статей\n"
         "• <b>Ошибки сбора</b> - проблемы с источниками\n"
@@ -2993,15 +2993,18 @@ async def callback_publish_post(callback: CallbackQuery, db: AsyncSession):
     # Публикуем в канал
     try:
         from app.config import settings
+        import html
 
         # Форматируем пост для публикации
-        publish_text = post.content
+        # Экранируем HTML символы для безопасности
+        publish_text = html.escape(post.content)
 
         # Добавляем теги если есть
         if post.tags:
-            publish_text += f"\n\n🏷 {' '.join(['#' + tag.replace(' ', '_') for tag in post.tags[:5]])}"
+            escaped_tags = [html.escape(tag.replace(' ', '_')) for tag in post.tags[:5]]
+            publish_text += f"\n\n🏷 {' '.join(['#' + tag for tag in escaped_tags])}"
 
-        # Публикуем
+        # Публикуем (теперь безопасно использовать HTML parse mode)
         message = await callback.bot.send_message(
             chat_id=settings.channel_id,
             text=publish_text,
