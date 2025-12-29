@@ -2290,6 +2290,549 @@ async def callback_settings_budget(callback: CallbackQuery, db: AsyncSession):
     await callback.answer()
 
 
+# ====================
+# Personal Posts Handlers
+# ====================
+
+@router.callback_query(F.data == "show_personal_posts")
+async def callback_show_personal_posts(callback: CallbackQuery, db: AsyncSession):
+    """Показать меню личных постов."""
+    await callback.answer()
+
+    from app.modules.personal_posts_manager import get_user_posts
+
+    # Получаем последние посты пользователя
+    posts = await get_user_posts(callback.from_user.id, db, limit=5)
+
+    posts_text = ""
+    if posts:
+        posts_text = "\n\n<b>Последние заметки:</b>\n"
+        for post in posts:
+            date_str = post.created_at.strftime("%d.%m.%Y")
+            title = post.title or post.content[:50] + "..."
+            posts_text += f"\n• {date_str}: {title}"
+    else:
+        posts_text = "\n\n<i>У вас пока нет заметок</i>"
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✍️ Создать новую заметку", callback_data="create_personal_post")],
+        [InlineKeyboardButton(text="📚 Все мои заметки", callback_data="list_personal_posts")],
+        [InlineKeyboardButton(text="« Назад", callback_data="back_to_main_menu")],
+    ])
+
+    await callback.message.edit_text(
+        "✍️ <b>Мои заметки</b>\n\n"
+        "Личный дневник работы с AI. Фиксируйте идеи, эксперименты, инсайты.\n"
+        "Заметки автоматически анализируются и связываются с публикациями."
+        f"{posts_text}",
+        parse_mode="HTML",
+        reply_markup=keyboard
+    )
+
+
+@router.callback_query(F.data == "create_personal_post")
+async def callback_create_personal_post(callback: CallbackQuery):
+    """Выбор способа создания поста."""
+    await callback.answer()
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📝 Написать самостоятельно", callback_data="post_manual")],
+        [InlineKeyboardButton(text="🤖 Создать с помощью AI", callback_data="post_ai_assisted")],
+        [InlineKeyboardButton(text="🎤 Надиктовать голосом", callback_data="post_voice")],
+        [InlineKeyboardButton(text="« Назад", callback_data="show_personal_posts")],
+    ])
+
+    await callback.message.edit_text(
+        "✍️ <b>Создать новую заметку</b>\n\n"
+        "Выберите способ создания:\n\n"
+        "• <b>Написать самостоятельно</b> - просто напишите текст\n"
+        "• <b>Создать с AI</b> - опишите идеи, AI сформирует пост\n"
+        "• <b>Надиктовать</b> - отправьте голосовое сообщение\n\n"
+        "Все заметки сохраняются и индексируются для поиска связей.",
+        parse_mode="HTML",
+        reply_markup=keyboard
+    )
+
+
+# FSM States для создания постов
+class PersonalPostStates(StatesGroup):
+    waiting_manual_text = State()
+    waiting_ai_ideas = State()
+    waiting_ai_feedback = State()
+    waiting_voice = State()
+
+
+@router.callback_query(F.data == "post_manual")
+async def callback_post_manual(callback: CallbackQuery, state: FSMContext):
+    """Начать создание поста вручную."""
+    await callback.answer()
+
+    await state.set_state(PersonalPostStates.waiting_manual_text)
+
+    await callback.message.edit_text(
+        "📝 <b>Написать заметку</b>\n\n"
+        "Напишите текст вашей заметки. Можно использовать Markdown форматирование.\n\n"
+        "Отправьте текст сообщением, и я сохраню его.",
+        parse_mode="HTML"
+    )
+
+
+@router.message(PersonalPostStates.waiting_manual_text)
+async def process_manual_post(message: Message, state: FSMContext, db: AsyncSession):
+    """Обработать текст ручного поста."""
+    from app.modules.personal_posts_manager import create_personal_post, enrich_post_with_metadata
+
+    content = message.text
+
+    # Показываем индикатор typing
+    await message.bot.send_chat_action(message.chat.id, "typing")
+
+    # Создаём пост
+    post = await create_personal_post(
+        user_id=message.from_user.id,
+        content=content,
+        db=db,
+        creation_method="manual"
+    )
+
+    # Обогащаем метаданными в фоне
+    await message.answer("⏳ Сохраняю и анализирую вашу заметку...")
+
+    try:
+        await enrich_post_with_metadata(post, db)
+
+        tags_str = ", ".join(post.tags[:5]) if post.tags else "нет"
+
+        await message.answer(
+            f"✅ <b>Заметка сохранена!</b>\n\n"
+            f"📊 Категория: {post.category or 'не определена'}\n"
+            f"🏷 Теги: {tags_str}\n"
+            f"😊 Настроение: {post.sentiment or 'neutral'}\n\n"
+            f"ID: {post.id}",
+            parse_mode="HTML",
+            reply_markup=get_main_menu_keyboard()
+        )
+
+    except Exception as e:
+        logger.error("post_enrichment_failed", error=str(e))
+        await message.answer(
+            f"✅ Заметка сохранена (ID: {post.id})\n\n"
+            "⚠️ Не удалось проанализировать автоматически, но данные сохранены.",
+            reply_markup=get_main_menu_keyboard()
+        )
+
+    await state.clear()
+
+
+@router.callback_query(F.data == "post_ai_assisted")
+async def callback_post_ai_assisted(callback: CallbackQuery, state: FSMContext):
+    """Начать создание поста с AI."""
+    await callback.answer()
+
+    await state.set_state(PersonalPostStates.waiting_ai_ideas)
+    await state.update_data(previous_attempts=[])
+
+    await callback.message.edit_text(
+        "🤖 <b>Создать заметку с помощью AI</b>\n\n"
+        "Опишите свои идеи, мысли или то, о чём хотите написать.\n"
+        "Это может быть просто набор тезисов или вольное описание.\n\n"
+        "AI сформирует из этого структурированную заметку.\n\n"
+        "Отправьте ваши идеи сообщением:",
+        parse_mode="HTML"
+    )
+
+
+@router.message(PersonalPostStates.waiting_ai_ideas)
+async def process_ai_ideas(message: Message, state: FSMContext, db: AsyncSession):
+    """Обработать идеи для AI генерации."""
+    from app.modules.personal_posts_manager import generate_post_with_ai, create_personal_post
+    from app.modules.settings_manager import get_llm_model
+
+    user_input = message.text
+
+    # Показываем индикатор typing
+    await message.bot.send_chat_action(message.chat.id, "typing")
+
+    processing_msg = await message.answer("🤖 AI формирует вашу заметку...")
+
+    try:
+        # Получаем модель из настроек
+        model = await get_llm_model("draft_generation", db)
+
+        # Генерируем пост
+        data = await state.get_data()
+        previous_attempts = data.get("previous_attempts", [])
+
+        generated_content = await generate_post_with_ai(
+            user_input=user_input,
+            model=model,
+            previous_attempts=previous_attempts if previous_attempts else None
+        )
+
+        await processing_msg.delete()
+
+        # Сохраняем сгенерированный контент для следующей итерации
+        await state.update_data(
+            current_content=generated_content,
+            raw_input=user_input,
+            model_used=model
+        )
+        await state.set_state(PersonalPostStates.waiting_ai_feedback)
+
+        # Показываем результат с кнопками
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="✅ Сохранить", callback_data="ai_post_save")],
+            [InlineKeyboardButton(text="🔄 Переделать", callback_data="ai_post_regenerate")],
+            [InlineKeyboardButton(text="❌ Отменить", callback_data="ai_post_cancel")],
+        ])
+
+        await message.answer(
+            f"🤖 <b>Вот что получилось:</b>\n\n"
+            f"{generated_content}\n\n"
+            "Вас устраивает результат?",
+            parse_mode="HTML",
+            reply_markup=keyboard
+        )
+
+    except Exception as e:
+        logger.error("ai_generation_failed", error=str(e))
+        await processing_msg.delete()
+        await message.answer(
+            "❌ Не удалось сгенерировать заметку. Попробуйте ещё раз или напишите вручную.",
+            reply_markup=get_main_menu_keyboard()
+        )
+        await state.clear()
+
+
+@router.callback_query(F.data == "ai_post_save")
+async def callback_ai_post_save(callback: CallbackQuery, state: FSMContext, db: AsyncSession):
+    """Сохранить AI-сгенерированный пост."""
+    await callback.answer()
+
+    from app.modules.personal_posts_manager import create_personal_post, enrich_post_with_metadata
+
+    data = await state.get_data()
+    content = data.get("current_content")
+    raw_input = data.get("raw_input")
+    model_used = data.get("model_used")
+
+    if not content:
+        await callback.message.answer("❌ Ошибка: контент не найден")
+        await state.clear()
+        return
+
+    await callback.message.edit_text("⏳ Сохраняю и анализирую заметку...")
+
+    # Создаём пост
+    post = await create_personal_post(
+        user_id=callback.from_user.id,
+        content=content,
+        db=db,
+        creation_method="ai_assisted",
+        raw_input=raw_input,
+        ai_model_used=model_used
+    )
+
+    # Обогащаем метаданными
+    try:
+        await enrich_post_with_metadata(post, db)
+
+        tags_str = ", ".join(post.tags[:5]) if post.tags else "нет"
+
+        await callback.message.answer(
+            f"✅ <b>Заметка сохранена!</b>\n\n"
+            f"📊 Категория: {post.category or 'не определена'}\n"
+            f"🏷 Теги: {tags_str}\n"
+            f"🤖 Модель: {model_used}\n\n"
+            f"ID: {post.id}",
+            parse_mode="HTML",
+            reply_markup=get_main_menu_keyboard()
+        )
+
+    except Exception as e:
+        logger.error("post_enrichment_failed", error=str(e))
+        await callback.message.answer(
+            f"✅ Заметка сохранена (ID: {post.id})\n\n"
+            "⚠️ Не удалось проанализировать автоматически.",
+            reply_markup=get_main_menu_keyboard()
+        )
+
+    await state.clear()
+
+
+@router.callback_query(F.data == "ai_post_regenerate")
+async def callback_ai_post_regenerate(callback: CallbackQuery, state: FSMContext):
+    """Переделать AI-сгенерированный пост."""
+    await callback.answer("Отправьте уточнения или новые идеи")
+
+    data = await state.get_data()
+    current_content = data.get("current_content")
+
+    # Добавляем текущую попытку в список предыдущих
+    previous_attempts = data.get("previous_attempts", [])
+    previous_attempts.append(current_content)
+    await state.update_data(previous_attempts=previous_attempts)
+
+    await state.set_state(PersonalPostStates.waiting_ai_ideas)
+
+    await callback.message.edit_text(
+        "🔄 <b>Переделаем заметку</b>\n\n"
+        "Опишите что не понравилось или какие изменения внести.\n"
+        "Можно просто отправить новые идеи.\n\n"
+        "AI учтёт предыдущую версию и создаст новую:",
+        parse_mode="HTML"
+    )
+
+
+@router.callback_query(F.data == "ai_post_cancel")
+async def callback_ai_post_cancel(callback: CallbackQuery, state: FSMContext):
+    """Отменить создание AI поста."""
+    await callback.answer("Отменено")
+    await state.clear()
+
+    await callback.message.edit_text(
+        "❌ Создание заметки отменено.",
+        reply_markup=get_main_menu_keyboard()
+    )
+
+
+@router.callback_query(F.data == "post_voice")
+async def callback_post_voice(callback: CallbackQuery, state: FSMContext):
+    """Начать создание поста голосом."""
+    await callback.answer()
+
+    await state.set_state(PersonalPostStates.waiting_voice)
+
+    await callback.message.edit_text(
+        "🎤 <b>Надиктовать заметку</b>\n\n"
+        "Отправьте голосовое сообщение с вашими мыслями.\n\n"
+        "Я расшифрую его и создам заметку.\n"
+        "После расшифровки вы сможете выбрать:\n"
+        "• Сохранить как есть\n"
+        "• Дать AI отредактировать",
+        parse_mode="HTML"
+    )
+
+
+@router.message(PersonalPostStates.waiting_voice, F.voice)
+async def process_voice_post(message: Message, state: FSMContext, db: AsyncSession):
+    """Обработать голосовое сообщение."""
+    from app.modules.personal_posts_manager import transcribe_voice
+    import os
+    import tempfile
+
+    # Скачиваем голосовое сообщение
+    voice = message.voice
+    file = await message.bot.get_file(voice.file_id)
+
+    # Сохраняем во временный файл
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".ogg") as temp_file:
+        await message.bot.download_file(file.file_path, temp_file.name)
+        audio_path = temp_file.name
+
+    processing_msg = await message.answer("🎧 Расшифровываю голосовое сообщение...")
+
+    try:
+        # Транскрибируем
+        transcribed_text = await transcribe_voice(audio_path)
+
+        # Удаляем временный файл
+        os.unlink(audio_path)
+
+        await processing_msg.delete()
+
+        # Сохраняем транскрипт и предлагаем опции
+        await state.update_data(transcribed_text=transcribed_text)
+        await state.set_state(PersonalPostStates.waiting_ai_feedback)
+
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="✅ Сохранить как есть", callback_data="voice_save_raw")],
+            [InlineKeyboardButton(text="🤖 Улучшить с AI", callback_data="voice_improve_ai")],
+            [InlineKeyboardButton(text="❌ Отменить", callback_data="ai_post_cancel")],
+        ])
+
+        await message.answer(
+            f"🎤 <b>Расшифровка:</b>\n\n"
+            f"{transcribed_text}\n\n"
+            "Что делаем дальше?",
+            parse_mode="HTML",
+            reply_markup=keyboard
+        )
+
+    except Exception as e:
+        logger.error("voice_transcription_failed", error=str(e))
+        os.unlink(audio_path)
+        await processing_msg.delete()
+        await message.answer(
+            "❌ Не удалось расшифровать голосовое сообщение. Попробуйте ещё раз или напишите текстом.",
+            reply_markup=get_main_menu_keyboard()
+        )
+        await state.clear()
+
+
+@router.callback_query(F.data == "voice_save_raw")
+async def callback_voice_save_raw(callback: CallbackQuery, state: FSMContext, db: AsyncSession):
+    """Сохранить расшифровку голоса как есть."""
+    await callback.answer()
+
+    from app.modules.personal_posts_manager import create_personal_post, enrich_post_with_metadata
+
+    data = await state.get_data()
+    content = data.get("transcribed_text")
+
+    if not content:
+        await callback.message.answer("❌ Ошибка: текст не найден")
+        await state.clear()
+        return
+
+    await callback.message.edit_text("⏳ Сохраняю заметку...")
+
+    # Создаём пост
+    post = await create_personal_post(
+        user_id=callback.from_user.id,
+        content=content,
+        db=db,
+        creation_method="voice"
+    )
+
+    # Обогащаем метаданными
+    try:
+        await enrich_post_with_metadata(post, db)
+
+        tags_str = ", ".join(post.tags[:5]) if post.tags else "нет"
+
+        await callback.message.answer(
+            f"✅ <b>Заметка из голосового сохранена!</b>\n\n"
+            f"📊 Категория: {post.category or 'не определена'}\n"
+            f"🏷 Теги: {tags_str}\n\n"
+            f"ID: {post.id}",
+            parse_mode="HTML",
+            reply_markup=get_main_menu_keyboard()
+        )
+
+    except Exception as e:
+        logger.error("post_enrichment_failed", error=str(e))
+        await callback.message.answer(
+            f"✅ Заметка сохранена (ID: {post.id})",
+            reply_markup=get_main_menu_keyboard()
+        )
+
+    await state.clear()
+
+
+@router.callback_query(F.data == "voice_improve_ai")
+async def callback_voice_improve_ai(callback: CallbackQuery, state: FSMContext, db: AsyncSession):
+    """Улучшить расшифровку голоса с помощью AI."""
+    await callback.answer()
+
+    from app.modules.personal_posts_manager import generate_post_with_ai
+    from app.modules.settings_manager import get_llm_model
+
+    data = await state.get_data()
+    transcribed_text = data.get("transcribed_text")
+
+    if not transcribed_text:
+        await callback.message.answer("❌ Ошибка: текст не найден")
+        await state.clear()
+        return
+
+    await callback.message.edit_text("🤖 AI улучшает вашу заметку...")
+
+    try:
+        model = await get_llm_model("draft_generation", db)
+
+        # Генерируем улучшенную версию
+        improved_content = await generate_post_with_ai(
+            user_input=transcribed_text,
+            model=model
+        )
+
+        # Сохраняем для feedback
+        await state.update_data(
+            current_content=improved_content,
+            raw_input=transcribed_text,
+            model_used=model
+        )
+
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="✅ Сохранить", callback_data="ai_post_save")],
+            [InlineKeyboardButton(text="🔄 Переделать", callback_data="ai_post_regenerate")],
+            [InlineKeyboardButton(text="❌ Отменить", callback_data="ai_post_cancel")],
+        ])
+
+        await callback.message.answer(
+            f"🤖 <b>Улучшенная версия:</b>\n\n"
+            f"{improved_content}\n\n"
+            "Вас устраивает?",
+            parse_mode="HTML",
+            reply_markup=keyboard
+        )
+
+    except Exception as e:
+        logger.error("ai_improvement_failed", error=str(e))
+        await callback.message.answer(
+            "❌ Не удалось улучшить. Сохраните оригинальный текст или попробуйте позже.",
+            reply_markup=get_main_menu_keyboard()
+        )
+        await state.clear()
+
+
+@router.callback_query(F.data == "list_personal_posts")
+async def callback_list_personal_posts(callback: CallbackQuery, db: AsyncSession):
+    """Показать список всех личных постов."""
+    await callback.answer()
+
+    from app.modules.personal_posts_manager import get_user_posts
+
+    posts = await get_user_posts(callback.from_user.id, db, limit=20)
+
+    if not posts:
+        await callback.message.edit_text(
+            "📚 <b>Ваши заметки</b>\n\n"
+            "У вас пока нет сохранённых заметок.\n"
+            "Создайте первую!",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="✍️ Создать заметку", callback_data="create_personal_post")],
+                [InlineKeyboardButton(text="« Назад", callback_data="show_personal_posts")],
+            ])
+        )
+        return
+
+    # Формируем список
+    posts_list = "📚 <b>Ваши заметки</b>\n\n"
+    for i, post in enumerate(posts, 1):
+        date_str = post.created_at.strftime("%d.%m.%Y %H:%M")
+        title = post.title or post.content[:50] + "..."
+        method_icon = {"manual": "✍️", "ai_assisted": "🤖", "voice": "🎤"}.get(post.creation_method, "📝")
+
+        posts_list += f"{i}. {method_icon} {date_str}\n   {title}\n\n"
+
+    posts_list += f"<i>Всего заметок: {len(posts)}</i>"
+
+    await callback.message.edit_text(
+        posts_list,
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="✍️ Создать новую", callback_data="create_personal_post")],
+            [InlineKeyboardButton(text="« Назад", callback_data="show_personal_posts")],
+        ])
+    )
+
+
+@router.callback_query(F.data == "back_to_main_menu")
+async def callback_back_to_main_menu(callback: CallbackQuery):
+    """Вернуться в главное меню."""
+    await callback.answer()
+
+    await callback.message.edit_text(
+        "🏠 <b>Главное меню</b>\n\n"
+        "Выберите действие:",
+        parse_mode="HTML",
+        reply_markup=get_main_menu_keyboard()
+    )
+
+
 @router.callback_query(F.data == "show_ai_analysis_menu")
 async def callback_show_ai_analysis_menu(callback: CallbackQuery):
     """Показать меню выбора периода для AI анализа."""

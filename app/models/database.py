@@ -300,6 +300,56 @@ class SystemSettings(Base):
     )
 
 
+class PersonalPost(Base):
+    """Личные посты пользователя (дневник работы с AI)."""
+
+    __tablename__ = "personal_posts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(BigInteger, nullable=False, index=True)  # Telegram user ID
+
+    # Контент
+    title = Column(String(500))  # Опциональный заголовок
+    content = Column(Text, nullable=False)  # Основной текст поста
+    raw_input = Column(Text)  # Оригинальный ввод пользователя (до AI обработки)
+
+    # Метаданные создания
+    creation_method = Column(String(50), nullable=False)  # manual, ai_assisted, voice
+    ai_model_used = Column(String(100))  # Какая модель использовалась для генерации
+    iterations_count = Column(Integer, default=1)  # Сколько итераций потребовалось
+
+    # Категоризация и теги (автоматические и ручные)
+    category = Column(String(100))  # Категория (AI определяет)
+    tags = Column(ARRAY(String))  # Теги для поиска
+    sentiment = Column(String(50))  # positive, neutral, negative (AI анализ)
+
+    # Векторное представление для RAG
+    embedding_vector = Column(ARRAY(Float))  # OpenAI embeddings (1536 dimensions)
+    embedding_model = Column(String(100))  # text-embedding-3-small или другая
+
+    # Связи с публикациями
+    related_article_ids = Column(ARRAY(Integer))  # ID связанных статей
+    similarity_scores = Column(ARRAY(Float))  # Similarity scores для каждой связанной статьи
+
+    # Публикация
+    published = Column(Boolean, default=False)
+    published_at = Column(TIMESTAMP)
+    telegram_message_id = Column(BigInteger)  # ID сообщения в канале
+
+    # Статистика (если опубликовано)
+    views_count = Column(Integer, default=0)
+    reactions_count = Column(Integer, default=0)
+
+    # Timestamps
+    created_at = Column(TIMESTAMP, default=datetime.utcnow, index=True)
+    updated_at = Column(TIMESTAMP, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        Index('idx_personal_posts_user_created', 'user_id', 'created_at'),
+        Index('idx_personal_posts_published', 'published', 'published_at'),
+    )
+
+
 # ====================
 # Database Connection
 # ====================
