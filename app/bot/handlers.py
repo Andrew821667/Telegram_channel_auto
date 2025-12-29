@@ -797,27 +797,18 @@ async def callback_cancel_action(callback: CallbackQuery, db: AsyncSession):
 
 @router.callback_query(F.data.startswith("back_to_draft:"))
 async def callback_back_to_draft(callback: CallbackQuery, db: AsyncSession):
-    """Обработчик кнопки 'Назад' - возвращает к драфту."""
-    await callback.answer()
+    """Обработчик кнопки 'Назад' - возвращает исходную клавиатуру драфта."""
+    await callback.answer("Отменено")
 
     if not await check_admin(callback.from_user.id):
-        await callback.message.answer("⛔️ Нет прав доступа")
         return
 
     draft_id = int(callback.data.split(":")[1])
 
-    # Получаем драфт
-    result = await db.execute(
-        select(PostDraft).where(PostDraft.id == draft_id)
+    # Возвращаем исходную клавиатуру драфта (не отправляем новое сообщение!)
+    await callback.message.edit_reply_markup(
+        reply_markup=get_draft_review_keyboard(draft_id)
     )
-    draft = result.scalar_one_or_none()
-
-    if not draft:
-        await callback.message.answer(f"❌ Драфт #{draft_id} не найден")
-        return
-
-    # Отправляем драфт заново
-    await send_draft_for_review(callback.message.chat.id, draft, db)
 
 
 # ====================
