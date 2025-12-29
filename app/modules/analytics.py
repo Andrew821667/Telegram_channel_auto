@@ -661,3 +661,292 @@ class AnalyticsService:
         except Exception as e:
             logger.error("get_source_recommendations_error", error=str(e), days=days)
             return []
+
+    async def get_best_publish_time(self, days: int = 30) -> Dict:
+        """
+        Анализ: в какое время суток публикации получают больше всего engagement.
+        A/B тестирование времени публикации.
+
+        Args:
+            days: Количество дней для анализа
+
+        Returns:
+            Словарь с рекомендациями по времени публикации
+        """
+        try:
+            date_from = datetime.utcnow() - timedelta(days=days)
+
+            query = text("""
+                SELECT
+                    EXTRACT(HOUR FROM published_at) as hour_of_day,
+                    COUNT(*) as total_posts,
+                    AVG(views) as avg_views,
+                    AVG(forwards) as avg_forwards,
+                    AVG(
+                        COALESCE((reactions->>'useful')::int, 0) +
+                        COALESCE((reactions->>'important')::int, 0) +
+                        COALESCE((reactions->>'controversial')::int, 0)
+                    ) as avg_positive_reactions,
+                    AVG(
+                        (
+                            COALESCE((reactions->>'useful')::int, 0) +
+                            COALESCE((reactions->>'important')::int, 0) +
+                            COALESCE((reactions->>'controversial')::int, 0)
+                        )::float / NULLIF(views, 0)
+                    ) as engagement_rate
+                FROM publications
+                WHERE published_at >= :date_from
+                AND views > 0
+                GROUP BY hour_of_day
+                ORDER BY engagement_rate DESC
+            """)
+
+            result = await self.db.execute(query, {"date_from": date_from})
+
+            hours_stats = []
+            best_hour = None
+            best_engagement = 0
+
+            for row in result.fetchall():
+                hour = int(row.hour_of_day)
+                engagement_rate = row.engagement_rate or 0
+
+                hours_stats.append({
+                    "hour": hour,
+                    "total_posts": row.total_posts,
+                    "avg_views": round(row.avg_views or 0, 1),
+                    "avg_forwards": round(row.avg_forwards or 0, 1),
+                    "avg_positive_reactions": round(row.avg_positive_reactions or 0, 1),
+                    "engagement_rate": round(engagement_rate * 100, 2)  # В процентах
+                })
+
+                if engagement_rate > best_engagement:
+                    best_engagement = engagement_rate
+                    best_hour = hour
+
+            # Формируем рекомендацию
+            if best_hour is not None:
+                recommendation = f"Лучшее время для публикации: {best_hour:02d}:00-{(best_hour+1):02d}:00 MSK"
+            else:
+                recommendation = "Недостаточно данных для рекомендации"
+
+            return {
+                "best_hour": best_hour,
+                "best_engagement_rate": round(best_engagement * 100, 2) if best_engagement else 0,
+                "recommendation": recommendation,
+                "hours_stats": hours_stats
+            }
+
+        except Exception as e:
+            logger.error("get_best_publish_time_error", error=str(e), days=days)
+            return {
+                "best_hour": None,
+                "best_engagement_rate": 0,
+                "recommendation": "Ошибка анализа",
+                "hours_stats": []
+            }
+
+    async def get_trending_topics(self, days: int = 7, top_n: int = 10) -> List[Dict]:
+        """
+        Анализ трендовых тем на основе топовых постов.
+        Извлекает часто упоминаемые ключевые слова из заголовков.
+
+        Args:
+            days: Количество дней для анализа
+            top_n: Количество топ-тем для возврата
+
+        Returns:
+            Список тем с частотой упоминаний
+        """
+        try:
+            date_from = datetime.utcnow() - timedelta(days=days)
+
+            # Получаем топовые посты за период
+            query = text("""
+                SELECT
+                    d.title,
+                    d.content,
+                    p.views,
+                    (
+                        COALESCE((p.reactions->>'useful')::int, 0) +
+                        COALESCE((p.reactions->>'important')::int, 0)
+                    ) as positive_reactions
+                FROM publications p
+                JOIN post_drafts d ON p.draft_id = d.id
+                WHERE p.published_at >= :date_from
+                AND p.views > 0
+                ORDER BY positive_reactions DESC, p.views DESC
+                LIMIT 30
+            """)
+
+            result = await self.db.execute(query, {"date_from": date_from})
+            posts = result.fetchall()
+
+            # Извлекаем ключевые слова из заголовков
+            from collections import Counter
+            import re
+
+            # Стоп-слова (русские)
+            stop_words = {
+                "в", "и", "на", "с", "по", "для", "о", "от", "к", "у", "из", "за", "над",
+                "под", "при", "что", "как", "это", "весь", "свой", "все", "мой", "наш", "ваш",
+                "их", "его", "её", "этот", "тот", "был", "быть", "есть", "нет", "не", "ни",
+                "чем", "где", "куда", "когда", "почему", "или", "но", "а", "да"
+            }
+
+            words = []
+            for post in posts:
+                # Извлекаем слова из заголовка (min 4 символа)
+                title_words = re.findall(r'\b[а-яёА-ЯЁa-zA-Z]{4,}\b', post.title.lower())
+                words.extend([w for w in title_words if w not in stop_words])
+
+            # Подсчитываем частоту
+            word_counts = Counter(words)
+            trending = []
+
+            for word, count in word_counts.most_common(top_n):
+                trending.append({
+                    "topic": word.capitalize(),
+                    "mentions": count,
+                    "relevance_score": round(count / len(posts) * 100, 1) if posts else 0
+                })
+
+            return trending
+
+        except Exception as e:
+            logger.error("get_trending_topics_error", error=str(e), days=days)
+            return []
+
+    async def get_performance_alerts(self, days: int = 7) -> List[Dict]:
+        """
+        Проверка метрик и генерация алертов о проблемах.
+
+        Args:
+            days: Количество дней для анализа
+
+        Returns:
+            Список алертов с описанием проблем
+        """
+        try:
+            alerts = []
+
+            # 1. Проверка: Engagement rate упал > 20%
+            stats_current = await self.get_period_stats(days)
+            stats_previous = await self.get_period_stats(days * 2)  # Предыдущий период
+
+            if stats_previous['engagement_rate'] > 0:
+                engagement_drop = (
+                    (stats_previous['engagement_rate'] - stats_current['engagement_rate']) /
+                    stats_previous['engagement_rate'] * 100
+                )
+
+                if engagement_drop > 20:
+                    alerts.append({
+                        "severity": "warning",
+                        "type": "engagement_drop",
+                        "message": f"⚠️ Engagement rate упал на {engagement_drop:.1f}% за последнюю неделю",
+                        "details": f"Было: {stats_previous['engagement_rate']:.1f}%, Сейчас: {stats_current['engagement_rate']:.1f}%"
+                    })
+
+            # 2. Проверка: Источники с плохим качеством
+            bad_sources = await self.get_source_recommendations(days)
+            critical_sources = [s for s in bad_sources if s.get("severity") == "critical"]
+
+            if critical_sources:
+                source_names = ", ".join([s["source_name"] for s in critical_sources[:3]])
+                alerts.append({
+                    "severity": "critical",
+                    "type": "bad_sources",
+                    "message": f"🚫 Найдены источники с критическим качеством",
+                    "details": f"Источники: {source_names}"
+                })
+
+            # 3. Проверка: Низкий approval rate
+            if stats_current['approval_rate'] < 50:
+                alerts.append({
+                    "severity": "info",
+                    "type": "low_approval",
+                    "message": f"💡 Низкий approval rate: {stats_current['approval_rate']:.1f}%",
+                    "details": f"Одобрено {stats_current['approved_drafts']} из {stats_current['total_drafts']} драфтов"
+                })
+
+            # 4. Проверка: Нет публикаций за последние 3 дня
+            if stats_current['total_publications'] == 0 and days >= 3:
+                alerts.append({
+                    "severity": "critical",
+                    "type": "no_publications",
+                    "message": "🚫 Нет публикаций за последние дни",
+                    "details": "Проверьте работу автоматического workflow"
+                })
+
+            return alerts
+
+        except Exception as e:
+            logger.error("get_performance_alerts_error", error=str(e), days=days)
+            return []
+
+    async def get_views_and_forwards_stats(self, days: int = 7) -> Dict:
+        """
+        Статистика по views и forwards (доступно после сбора метрик из Telegram).
+
+        Args:
+            days: Количество дней для анализа
+
+        Returns:
+            Словарь со статистикой views/forwards
+        """
+        try:
+            date_from = datetime.utcnow() - timedelta(days=days)
+
+            query = text("""
+                SELECT
+                    COUNT(*) as total_posts,
+                    SUM(views) as total_views,
+                    SUM(forwards) as total_forwards,
+                    AVG(views) as avg_views,
+                    AVG(forwards) as avg_forwards,
+                    MAX(views) as max_views,
+                    MAX(forwards) as max_forwards
+                FROM publications
+                WHERE published_at >= :date_from
+                AND views > 0
+            """)
+
+            result = await self.db.execute(query, {"date_from": date_from})
+            row = result.fetchone()
+
+            if row and row.total_posts > 0:
+                return {
+                    "total_posts": row.total_posts,
+                    "total_views": row.total_views or 0,
+                    "total_forwards": row.total_forwards or 0,
+                    "avg_views": round(row.avg_views or 0, 1),
+                    "avg_forwards": round(row.avg_forwards or 0, 1),
+                    "max_views": row.max_views or 0,
+                    "max_forwards": row.max_forwards or 0,
+                    "viral_coefficient": round((row.total_forwards or 0) / (row.total_views or 1) * 100, 2)  # % постов которые форвардят
+                }
+            else:
+                return {
+                    "total_posts": 0,
+                    "total_views": 0,
+                    "total_forwards": 0,
+                    "avg_views": 0,
+                    "avg_forwards": 0,
+                    "max_views": 0,
+                    "max_forwards": 0,
+                    "viral_coefficient": 0
+                }
+
+        except Exception as e:
+            logger.error("get_views_and_forwards_stats_error", error=str(e), days=days)
+            return {
+                "total_posts": 0,
+                "total_views": 0,
+                "total_forwards": 0,
+                "avg_views": 0,
+                "avg_forwards": 0,
+                "max_views": 0,
+                "max_forwards": 0,
+                "viral_coefficient": 0
+            }

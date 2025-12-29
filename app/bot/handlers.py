@@ -1450,7 +1450,11 @@ def format_analytics_report(
     sources: List[Dict],
     weekday_stats: Dict,
     vector_stats: Optional[Dict],
-    source_recommendations: Optional[List[Dict]] = None
+    source_recommendations: Optional[List[Dict]] = None,
+    views_stats: Optional[Dict] = None,
+    best_time: Optional[Dict] = None,
+    trending_topics: Optional[List[Dict]] = None,
+    alerts: Optional[List[Dict]] = None
 ) -> str:
     """
     Форматировать красивый отчёт аналитики.
@@ -1624,6 +1628,43 @@ def format_analytics_report(
         if not source_recommendations:
             report += "✅ Все источники работают хорошо!\n"
 
+    # Views и Forwards статистика
+    if views_stats and views_stats.get('total_views', 0) > 0:
+        report += "\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        report += "📈 <b>Просмотры и Форварды:</b>\n\n"
+        report += f"├─ 👁️ Всего просмотров: {views_stats['total_views']:,}\n"
+        report += f"├─ 📤 Всего форвардов: {views_stats['total_forwards']:,}\n"
+        report += f"├─ 📊 Avg просмотров/пост: {views_stats['avg_views']}\n"
+        report += f"├─ 📊 Avg форвардов/пост: {views_stats['avg_forwards']}\n"
+        report += f"├─ 🔥 Макс просмотров: {views_stats['max_views']:,}\n"
+        report += f"├─ 🔥 Макс форвардов: {views_stats['max_forwards']:,}\n"
+        report += f"└─ 🌊 Viral coefficient: {views_stats['viral_coefficient']}%\n"
+
+    # A/B тестирование времени публикации
+    if best_time and best_time.get('best_hour') is not None:
+        report += "\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        report += "⏰ <b>Лучшее время для публикации:</b>\n\n"
+        report += f"🎯 {best_time['recommendation']}\n"
+        report += f"├─ Engagement rate: {best_time['best_engagement_rate']}%\n"
+        report += f"└─ На основе анализа за 30 дней\n"
+
+    # Трендовые темы
+    if trending_topics:
+        report += "\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        report += "🔥 <b>Трендовые темы недели:</b>\n\n"
+        for i, topic in enumerate(trending_topics[:5], 1):
+            report += f"{i}. <b>{topic['topic']}</b>\n"
+            report += f"   ├─ Упоминаний: {topic['mentions']}\n"
+            report += f"   └─ Relevance: {topic['relevance_score']}%\n"
+
+    # Алерты и предупреждения
+    if alerts:
+        report += "\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        report += "🚨 <b>Алерты и предупреждения:</b>\n\n"
+        for alert in alerts:
+            report += f"{alert['message']}\n"
+            report += f"   └─ {alert['details']}\n\n"
+
     report += "\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
     report += f"📅 Обновлено: {datetime.now().strftime('%d.%m.%Y %H:%M')}\n"
 
@@ -1677,7 +1718,7 @@ async def callback_analytics(callback: CallbackQuery, db: AsyncSession):
         # Создаём сервис аналитики
         analytics = AnalyticsService(db)
 
-        # Собираем все данные
+        # Собираем все данные (базовые + новые)
         stats = await analytics.get_period_stats(days)
         top_posts = await analytics.get_top_posts(3, days)
         worst_posts = await analytics.get_worst_posts(3, days)
@@ -1685,6 +1726,12 @@ async def callback_analytics(callback: CallbackQuery, db: AsyncSession):
         weekday_stats = await analytics.get_weekday_stats(min(days, 30))  # Максимум 30 дней для статистики по дням
         vector_stats = await analytics.get_vector_db_stats()
         source_recommendations = await analytics.get_source_recommendations(min(days, 30))
+
+        # НОВЫЕ методы аналитики
+        views_stats = await analytics.get_views_and_forwards_stats(days)
+        best_time = await analytics.get_best_publish_time(min(days, 30))
+        trending_topics = await analytics.get_trending_topics(days, top_n=5)
+        alerts = await analytics.get_performance_alerts(days)
 
         # Форматируем отчёт
         report = format_analytics_report(
@@ -1694,7 +1741,11 @@ async def callback_analytics(callback: CallbackQuery, db: AsyncSession):
             sources=sources,
             weekday_stats=weekday_stats,
             vector_stats=vector_stats,
-            source_recommendations=source_recommendations
+            source_recommendations=source_recommendations,
+            views_stats=views_stats,
+            best_time=best_time,
+            trending_topics=trending_topics,
+            alerts=alerts
         )
 
 
@@ -1730,6 +1781,69 @@ async def callback_analytics(callback: CallbackQuery, db: AsyncSession):
         )
 
 
+@router.message(Command("alerts"))
+async def cmd_alerts(message: Message, db: AsyncSession):
+    """Проверить алерты и предупреждения о проблемах."""
+
+    if not await check_admin(message.from_user.id):
+        await message.answer("⛔ У вас нет доступа к этой команде")
+        return
+
+    await message.answer("🔍 Проверяю метрики...")
+
+    try:
+        analytics = AnalyticsService(db)
+
+        # Проверяем за последние 7 дней
+        alerts = await analytics.get_performance_alerts(days=7)
+
+        if not alerts:
+            await message.answer(
+                "✅ <b>Всё в порядке!</b>\n\n"
+                "Проблем не обнаружено. Система работает нормально.",
+                parse_mode="HTML"
+            )
+        else:
+            # Формируем отчёт с алертами
+            report = "🚨 <b>Обнаружены проблемы:</b>\n\n"
+
+            # Группируем по severity
+            critical = [a for a in alerts if a.get('severity') == 'critical']
+            warnings = [a for a in alerts if a.get('severity') == 'warning']
+            info = [a for a in alerts if a.get('severity') == 'info']
+
+            if critical:
+                report += "🔴 <b>КРИТИЧЕСКИЕ:</b>\n"
+                for alert in critical:
+                    report += f"{alert['message']}\n"
+                    report += f"   └─ {alert['details']}\n\n"
+
+            if warnings:
+                report += "⚠️ <b>ПРЕДУПРЕЖДЕНИЯ:</b>\n"
+                for alert in warnings:
+                    report += f"{alert['message']}\n"
+                    report += f"   └─ {alert['details']}\n\n"
+
+            if info:
+                report += "💡 <b>ИНФОРМАЦИЯ:</b>\n"
+                for alert in info:
+                    report += f"{alert['message']}\n"
+                    report += f"   └─ {alert['details']}\n\n"
+
+            report += f"\n📅 Проверено: {datetime.now().strftime('%d.%m.%Y %H:%M')}"
+
+            await message.answer(report, parse_mode="HTML")
+
+        logger.info("alerts_checked", user_id=message.from_user.id, alerts_count=len(alerts))
+
+    except Exception as e:
+        logger.error("alerts_error", error=str(e))
+        await message.answer(
+            "❌ Произошла ошибка при проверке алертов. Попробуйте позже.",
+            parse_mode="HTML"
+        )
+
+
 # ====================
 # Настройка команд бота
 # ====================
@@ -1741,6 +1855,7 @@ async def setup_bot_commands():
         BotCommand(command="drafts", description="📝 Новые драфты"),
         BotCommand(command="fetch", description="🔄 Запустить сбор новостей"),
         BotCommand(command="analytics", description="📊 Аналитика канала"),
+        BotCommand(command="alerts", description="🚨 Проверить проблемы"),
         BotCommand(command="stats", description="📈 Статистика системы"),
         BotCommand(command="help", description="❓ Помощь"),
     ]

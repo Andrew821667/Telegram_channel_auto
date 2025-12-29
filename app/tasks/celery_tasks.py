@@ -547,8 +547,132 @@ app.conf.beat_schedule = {
         'task': 'daily_workflow_task',
         'schedule': crontab(hour=10, minute=0, day_of_week='0,6'),  # Сб-Вс 10:00
     },
+
+    # СБОР TELEGRAM МЕТРИК: каждые 6 часов
+    'collect-telegram-metrics': {
+        'task': 'collect_telegram_metrics_task',
+        'schedule': crontab(minute=0, hour='*/6'),  # Каждые 6 часов: 00:00, 06:00, 12:00, 18:00 MSK
+    },
 }
 
+
+# ====================
+# Сбор Telegram метрик
+# ====================
+
+@app.task(name="collect_telegram_metrics_task", max_retries=2, autoretry_for=(Exception,), retry_backoff=300)
+def collect_telegram_metrics_task():
+    """
+    Автоматический сбор метрик из Telegram (views, forwards).
+    Запускается каждые 6 часов.
+
+    Returns:
+        Dict с результатами сбора
+    """
+    logger.info("collect_telegram_metrics_task_started")
+
+    async def collect_metrics():
+        from app.models.database import get_db, Publication
+        from sqlalchemy import select
+        from datetime import datetime, timedelta
+        from telethon import TelegramClient
+        from app.config import settings
+
+        try:
+            # Подключаемся к Telegram через Telethon (MTProto API)
+            # Используем ту же сессию что и для сбора новостей
+            client = TelegramClient(
+                'telegram_bot',
+                settings.telegram_api_id,
+                settings.telegram_api_hash
+            )
+
+            await client.start()
+
+            # Получаем публикации за последние 30 дней
+            async for db in get_db():
+                date_from = datetime.utcnow() - timedelta(days=30)
+
+                result = await db.execute(
+                    select(Publication)
+                    .where(Publication.published_at >= date_from)
+                    .order_by(Publication.published_at.desc())
+                )
+                publications = result.scalars().all()
+
+                updated_count = 0
+                errors_count = 0
+
+                for pub in publications:
+                    try:
+                        # Получаем информацию о сообщении из Telegram через MTProto
+                        # channel_id может быть username или numeric ID
+                        message = await client.get_messages(
+                            entity=pub.channel_id,
+                            ids=pub.message_id
+                        )
+
+                        if message:
+                            # Обновляем views и forwards
+                            old_views = pub.views or 0
+                            old_forwards = pub.forwards or 0
+
+                            pub.views = message.views or 0
+                            pub.forwards = message.forwards or 0
+
+                            # Логируем только если значения изменились
+                            if pub.views != old_views or pub.forwards != old_forwards:
+                                logger.info(
+                                    "metrics_updated",
+                                    pub_id=pub.id,
+                                    message_id=pub.message_id,
+                                    views=pub.views,
+                                    forwards=pub.forwards,
+                                    views_delta=pub.views - old_views,
+                                    forwards_delta=pub.forwards - old_forwards
+                                )
+                                updated_count += 1
+
+                    except Exception as e:
+                        logger.warning(
+                            "collect_metrics_error_single",
+                            pub_id=pub.id,
+                            message_id=pub.message_id,
+                            error=str(e)
+                        )
+                        errors_count += 1
+                        continue
+
+                # Сохраняем изменения
+                await db.commit()
+
+                logger.info(
+                    "collect_telegram_metrics_task_completed",
+                    total_publications=len(publications),
+                    updated=updated_count,
+                    errors=errors_count
+                )
+
+                # Отключаемся от Telegram
+                await client.disconnect()
+
+                return {
+                    "status": "success",
+                    "total_publications": len(publications),
+                    "updated": updated_count,
+                    "errors": errors_count
+                }
+
+        except Exception as e:
+            logger.error("collect_telegram_metrics_task_error", error=str(e))
+            raise
+
+    try:
+        result = run_async(collect_metrics())
+        return result
+    except Exception as e:
+        logger.error("collect_telegram_metrics_task_failed", error=str(e))
+        raise
 
 
 # ====================
