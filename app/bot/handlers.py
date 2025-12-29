@@ -779,6 +779,22 @@ async def callback_cancel_edit(callback: CallbackQuery, state: FSMContext):
     await callback.answer("Отменено")
 
 
+@router.callback_query(F.data.startswith("cancel:"))
+async def callback_cancel_action(callback: CallbackQuery, db: AsyncSession):
+    """Обработчик кнопки 'Отмена' в диалогах подтверждения (publish/reject)."""
+    await callback.answer("Отменено")
+
+    if not await check_admin(callback.from_user.id):
+        return
+
+    draft_id = int(callback.data.split(":")[1])
+
+    # Возвращаем исходную клавиатуру драфта (отменяем действие)
+    await callback.message.edit_reply_markup(
+        reply_markup=get_draft_review_keyboard(draft_id)
+    )
+
+
 @router.callback_query(F.data.startswith("back_to_draft:"))
 async def callback_back_to_draft(callback: CallbackQuery, db: AsyncSession):
     """Обработчик кнопки 'Назад' - возвращает к драфту."""
