@@ -29,7 +29,7 @@ DEFAULT_SETTINGS = {
 
     # Модели LLM
     "llm.analysis.model": {"value": "gpt-4o", "type": "string", "category": "llm", "description": "Модель для AI анализа"},
-    "llm.draft_generation.model": {"value": "sonar", "type": "string", "category": "llm", "description": "Модель для генерации драфтов"},
+    "llm.draft_generation.model": {"value": "gpt-4o-mini", "type": "string", "category": "llm", "description": "Модель для генерации драфтов"},
     "llm.ranking.model": {"value": "gpt-4o-mini", "type": "string", "category": "llm", "description": "Модель для ranking статей"},
 
     # DALL-E генерация
