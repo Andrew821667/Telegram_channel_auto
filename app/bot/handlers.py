@@ -3006,7 +3006,7 @@ async def callback_publish_post(callback: CallbackQuery, db: AsyncSession):
 
         # Публикуем (теперь безопасно использовать HTML parse mode)
         message = await callback.bot.send_message(
-            chat_id=settings.channel_id,
+            chat_id=settings.telegram_channel_id,
             text=publish_text,
             parse_mode="HTML"
         )
