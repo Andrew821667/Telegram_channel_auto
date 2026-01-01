@@ -18,7 +18,7 @@ from app.models.database import (
     RawArticle,
     SystemSettings,
 )
-from app.modules.settings_manager import SettingsManager
+from app.modules.settings_manager import get_setting, set_setting
 from app.config import settings as app_settings
 
 logger = structlog.get_logger()
@@ -406,44 +406,44 @@ async def get_settings(
 ):
     """Get all system settings."""
     try:
-        settings_mgr = SettingsManager(db)
+
 
         # Get all settings grouped by category
         sources = {
-            "google_news": await settings_mgr.get("source_google_news_enabled", True),
-            "habr": await settings_mgr.get("source_habr_enabled", True),
-            "perplexity": await settings_mgr.get("source_perplexity_enabled", True),
-            "telegram": await settings_mgr.get("source_telegram_enabled", True),
+            "google_news": await get_setting("source_google_news_enabled", db, True),
+            "habr": await get_setting("source_habr_enabled", db, True),
+            "perplexity": await get_setting("source_perplexity_enabled", db, True),
+            "telegram": await get_setting("source_telegram_enabled", db, True),
         }
 
         llm_models = {
-            "analysis_model": await settings_mgr.get("llm_analysis_model", "gpt-4o-mini"),
-            "generation_model": await settings_mgr.get("llm_generation_model", "gpt-4o"),
-            "ranking_model": await settings_mgr.get("llm_ranking_model", "gpt-4o-mini"),
+            "analysis_model": await get_setting("llm_analysis_model", db, "gpt-4o-mini"),
+            "generation_model": await get_setting("llm_generation_model", db, "gpt-4o"),
+            "ranking_model": await get_setting("llm_ranking_model", db, "gpt-4o-mini"),
         }
 
         dalle = {
-            "enabled": await settings_mgr.get("dalle_enabled", True),
-            "model": await settings_mgr.get("dalle_model", "dall-e-3"),
-            "quality": await settings_mgr.get("dalle_quality", "standard"),
-            "size": await settings_mgr.get("dalle_size", "1024x1024"),
+            "enabled": await get_setting("dalle_enabled", db, True),
+            "model": await get_setting("dalle_model", db, "dall-e-3"),
+            "quality": await get_setting("dalle_quality", db, "standard"),
+            "size": await get_setting("dalle_size", db, "1024x1024"),
         }
 
         auto_publish = {
-            "enabled": await settings_mgr.get("auto_publish_enabled", True),
-            "max_per_day": await settings_mgr.get("auto_publish_max_per_day", 5),
-            "schedule": await settings_mgr.get("auto_publish_schedule", ["09:00", "14:00", "18:00"]),
+            "enabled": await get_setting("auto_publish_enabled", db, True),
+            "max_per_day": await get_setting("auto_publish_max_per_day", db, 5),
+            "schedule": await get_setting("auto_publish_schedule", db, ["09:00", "14:00", "18:00"]),
         }
 
         filtering = {
-            "min_quality_score": await settings_mgr.get("min_quality_score", 7.0),
-            "min_content_length": await settings_mgr.get("min_content_length", 300),
-            "similarity_threshold": await settings_mgr.get("similarity_threshold", 0.85),
+            "min_quality_score": await get_setting("min_quality_score", db, 7.0),
+            "min_content_length": await get_setting("min_content_length", db, 300),
+            "similarity_threshold": await get_setting("similarity_threshold", db, 0.85),
         }
 
         budget = {
-            "daily_limit": await settings_mgr.get("budget_daily_limit", 50),
-            "warning_threshold": await settings_mgr.get("budget_warning_threshold", 80),
+            "daily_limit": await get_setting("budget_daily_limit", db, 50),
+            "warning_threshold": await get_setting("budget_warning_threshold", db, 80),
         }
 
         return {
@@ -468,37 +468,37 @@ async def update_settings(
 ):
     """Update system settings."""
     try:
-        settings_mgr = SettingsManager(db)
+
 
         # Update sources
         if "sources" in settings_data:
             for source, enabled in settings_data["sources"].items():
-                await settings_mgr.set(f"source_{source}_enabled", enabled)
+                await set_setting(f"source_{source}_enabled", enabled, db)
 
         # Update LLM models
         if "llm_models" in settings_data:
             for key, value in settings_data["llm_models"].items():
-                await settings_mgr.set(f"llm_{key}", value)
+                await set_setting(f"llm_{key}", value, db)
 
         # Update DALL-E
         if "dalle" in settings_data:
             for key, value in settings_data["dalle"].items():
-                await settings_mgr.set(f"dalle_{key}", value)
+                await set_setting(f"dalle_{key}", value, db)
 
         # Update auto-publish
         if "auto_publish" in settings_data:
             for key, value in settings_data["auto_publish"].items():
-                await settings_mgr.set(f"auto_publish_{key}", value)
+                await set_setting(f"auto_publish_{key}", value, db)
 
         # Update filtering
         if "filtering" in settings_data:
             for key, value in settings_data["filtering"].items():
-                await settings_mgr.set(key, value)
+                await set_setting(key, value, db)
 
         # Update budget
         if "budget" in settings_data:
             for key, value in settings_data["budget"].items():
-                await settings_mgr.set(f"budget_{key}", value)
+                await set_setting(f"budget_{key}", value, db)
 
         await db.commit()
 
