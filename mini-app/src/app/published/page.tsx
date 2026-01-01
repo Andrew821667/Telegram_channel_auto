@@ -3,21 +3,9 @@
 import { useEffect, useState } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { apiMethods } from '@/lib/api'
+import { apiMethods, PublishedArticle } from '@/lib/api'
 import { ArrowLeft, Eye, Heart, TrendingUp, ExternalLink } from 'lucide-react'
 import Link from 'next/link'
-
-interface PublishedArticle {
-  id: number
-  title: string
-  content: string
-  published_at: string
-  views: number
-  reactions: number
-  engagement_rate: number
-  source: string
-  quality_score?: number
-}
 
 export default function PublishedPage() {
   const [articles, setArticles] = useState<PublishedArticle[]>([])
@@ -143,15 +131,15 @@ export default function PublishedPage() {
                         </span>
                         <span className="px-2 py-1 bg-purple-100 text-purple-700 rounded flex items-center gap-1">
                           <Eye className="w-3 h-3" />
-                          {article.views}
+                          {article.views ?? 0}
                         </span>
                         <span className="px-2 py-1 bg-pink-100 text-pink-700 rounded flex items-center gap-1">
                           <Heart className="w-3 h-3" />
-                          {article.reactions}
+                          {article.reactions ?? 0}
                         </span>
                         <span className="px-2 py-1 bg-green-100 text-green-700 rounded flex items-center gap-1">
                           <TrendingUp className="w-3 h-3" />
-                          {article.engagement_rate.toFixed(1)}%
+                          {(article.engagement_rate ?? 0).toFixed(1)}%
                         </span>
                         <span className="text-muted-foreground">
                           {formatDate(article.published_at)}
@@ -199,21 +187,21 @@ export default function PublishedPage() {
                   <div className="p-3 bg-purple-50 rounded-lg border border-purple-200 text-center">
                     <Eye className="w-5 h-5 text-purple-600 mx-auto mb-1" />
                     <p className="text-lg font-bold text-purple-900">
-                      {selectedArticle.views}
+                      {selectedArticle.views ?? 0}
                     </p>
                     <p className="text-xs text-purple-700">Просмотры</p>
                   </div>
                   <div className="p-3 bg-pink-50 rounded-lg border border-pink-200 text-center">
                     <Heart className="w-5 h-5 text-pink-600 mx-auto mb-1" />
                     <p className="text-lg font-bold text-pink-900">
-                      {selectedArticle.reactions}
+                      {selectedArticle.reactions ?? 0}
                     </p>
                     <p className="text-xs text-pink-700">Реакции</p>
                   </div>
                   <div className="p-3 bg-green-50 rounded-lg border border-green-200 text-center">
                     <TrendingUp className="w-5 h-5 text-green-600 mx-auto mb-1" />
                     <p className="text-lg font-bold text-green-900">
-                      {selectedArticle.engagement_rate.toFixed(1)}%
+                      {(selectedArticle.engagement_rate ?? 0).toFixed(1)}%
                     </p>
                     <p className="text-xs text-green-700">Вовлечённость</p>
                   </div>
