@@ -3380,12 +3380,24 @@ docker compose -f docker-compose.production.yml up -d postgres redis qdrant app 
   - Настроен on-demand Celery worker через cron (3 запуска в день)
   - Добавлены скрипты автоматизации и полная документация
 
+- ✅ Session 17.1: Подготовка Mini App к деплою на Vercel (завершено, 2026-01-01)
+  - Исправлена опечатка в package.json (lucide-react версия)
+  - Создан vercel.json с конфигурацией для Telegram WebApp
+  - Добавлена полная документация: VERCEL_DEPLOY.md (350+ строк)
+  - Добавлена быстрая шпаргалка: QUICK_START.md
+  - Инструкции по работе с ngrok для локального backend
+
 **Следующие шаги:**
-- [ ] Тестирование production конфигурации на 2GB сервере
-- [ ] Деплой основного бота на production
-- [ ] Деплой Mini App на Vercel
+- [ ] **Деплой Mini App на Vercel** (следуйте `mini-app/QUICK_START.md`)
+  - Импорт проекта в Vercel (Root Directory: `mini-app`)
+  - Настройка Environment Variables
+  - Интеграция с Telegram Bot через BotFather
+  - Опционально: настройка ngrok для локального backend
 - [ ] Тестирование Mini App с реальными данными
 - [ ] Доработка UI/UX по результатам тестирования
+- [ ] Расширенная аналитика (Вариант Б): экспорт PDF/Excel, A/B тестирование, Smart Alerts
+- [ ] Тестирование production конфигурации на 2GB сервере
+- [ ] Деплой основного бота на production
 - [ ] Мониторинг потребления памяти в production
 
 **Неделя 5+:**
