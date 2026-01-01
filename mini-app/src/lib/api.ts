@@ -14,10 +14,11 @@ api.interceptors.request.use((config) => {
   if (typeof window !== 'undefined' && window.Telegram?.WebApp) {
     const initDataUnsafe = window.Telegram.WebApp.initDataUnsafe
     // Send user data as JSON
-    if (initDataUnsafe && initDataUnsafe.user) {
+    if (initDataUnsafe?.user?.id) {
       config.headers['X-Telegram-Init-Data'] = JSON.stringify(initDataUnsafe)
     } else {
       // Fallback: send minimal data for development
+      console.warn('[Mini App] No Telegram user data, using fallback')
       config.headers['X-Telegram-Init-Data'] = JSON.stringify({
         user: {
           id: 0,
