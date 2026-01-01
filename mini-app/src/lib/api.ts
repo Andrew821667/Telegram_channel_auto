@@ -54,6 +54,7 @@ export interface PublishedArticle {
   reactions?: number
   engagement_rate?: number
   source: string
+  quality_score?: number
 }
 
 export interface DashboardStats {
