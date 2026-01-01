@@ -410,40 +410,48 @@ async def get_settings(
 
         # Get all settings grouped by category
         sources = {
-            "google_news": await get_setting("source_google_news_enabled", db, True),
-            "habr": await get_setting("source_habr_enabled", db, True),
-            "perplexity": await get_setting("source_perplexity_enabled", db, True),
-            "telegram": await get_setting("source_telegram_enabled", db, True),
+            "google_news_ru": await get_setting("sources.google_news_ru.enabled", db, True),
+            "google_news_en": await get_setting("sources.google_news_en.enabled", db, True),
+            "habr": await get_setting("sources.habr.enabled", db, True),
+            "perplexity_ru": await get_setting("sources.perplexity_ru.enabled", db, True),
+            "perplexity_en": await get_setting("sources.perplexity_en.enabled", db, True),
+            "telegram_channels": await get_setting("sources.telegram_channels.enabled", db, False),
         }
 
         llm_models = {
-            "analysis_model": await get_setting("llm_analysis_model", db, "gpt-4o-mini"),
-            "generation_model": await get_setting("llm_generation_model", db, "gpt-4o"),
-            "ranking_model": await get_setting("llm_ranking_model", db, "gpt-4o-mini"),
+            "analysis": await get_setting("llm.analysis.model", db, "gpt-4o"),
+            "draft_generation": await get_setting("llm.draft_generation.model", db, "gpt-4o-mini"),
+            "ranking": await get_setting("llm.ranking.model", db, "gpt-4o-mini"),
         }
 
         dalle = {
-            "enabled": await get_setting("dalle_enabled", db, True),
-            "model": await get_setting("dalle_model", db, "dall-e-3"),
-            "quality": await get_setting("dalle_quality", db, "standard"),
-            "size": await get_setting("dalle_size", db, "1024x1024"),
+            "enabled": await get_setting("dalle.enabled", db, False),
+            "model": await get_setting("dalle.model", db, "dall-e-3"),
+            "quality": await get_setting("dalle.quality", db, "standard"),
+            "size": await get_setting("dalle.size", db, "1024x1024"),
+            "auto_generate": await get_setting("dalle.auto_generate", db, False),
+            "ask_on_review": await get_setting("dalle.ask_on_review", db, True),
         }
 
         auto_publish = {
-            "enabled": await get_setting("auto_publish_enabled", db, True),
-            "max_per_day": await get_setting("auto_publish_max_per_day", db, 5),
-            "schedule": await get_setting("auto_publish_schedule", db, ["09:00", "14:00", "18:00"]),
+            "enabled": await get_setting("auto_publish.enabled", db, False),
+            "mode": await get_setting("auto_publish.mode", db, "best_time"),
+            "max_per_day": await get_setting("auto_publish.max_per_day", db, 3),
+            "weekdays_only": await get_setting("auto_publish.weekdays_only", db, False),
+            "skip_holidays": await get_setting("auto_publish.skip_holidays", db, False),
         }
 
         filtering = {
-            "min_quality_score": await get_setting("min_quality_score", db, 7.0),
-            "min_content_length": await get_setting("min_content_length", db, 300),
-            "similarity_threshold": await get_setting("similarity_threshold", db, 0.85),
+            "min_score": await get_setting("quality.min_score", db, 0.6),
+            "min_content_length": await get_setting("quality.min_content_length", db, 300),
+            "similarity_threshold": await get_setting("quality.similarity_threshold", db, 0.85),
         }
 
         budget = {
-            "daily_limit": await get_setting("budget_daily_limit", db, 50),
-            "warning_threshold": await get_setting("budget_warning_threshold", db, 80),
+            "max_per_month": await get_setting("budget.max_per_month", db, 10.0),
+            "warning_threshold": await get_setting("budget.warning_threshold", db, 8.0),
+            "stop_on_exceed": await get_setting("budget.stop_on_exceed", db, False),
+            "switch_to_cheap": await get_setting("budget.switch_to_cheap", db, True),
         }
 
         return {
@@ -473,32 +481,32 @@ async def update_settings(
         # Update sources
         if "sources" in settings_data:
             for source, enabled in settings_data["sources"].items():
-                await set_setting(f"source_{source}_enabled", enabled, db)
+                await set_setting(f"sources.{source}.enabled", enabled, db)
 
         # Update LLM models
         if "llm_models" in settings_data:
             for key, value in settings_data["llm_models"].items():
-                await set_setting(f"llm_{key}", value, db)
+                await set_setting(f"llm.{key}.model", value, db)
 
         # Update DALL-E
         if "dalle" in settings_data:
             for key, value in settings_data["dalle"].items():
-                await set_setting(f"dalle_{key}", value, db)
+                await set_setting(f"dalle.{key}", value, db)
 
         # Update auto-publish
         if "auto_publish" in settings_data:
             for key, value in settings_data["auto_publish"].items():
-                await set_setting(f"auto_publish_{key}", value, db)
+                await set_setting(f"auto_publish.{key}", value, db)
 
         # Update filtering
         if "filtering" in settings_data:
             for key, value in settings_data["filtering"].items():
-                await set_setting(key, value, db)
+                await set_setting(f"quality.{key}", value, db)
 
         # Update budget
         if "budget" in settings_data:
             for key, value in settings_data["budget"].items():
-                await set_setting(f"budget_{key}", value, db)
+                await set_setting(f"budget.{key}", value, db)
 
         await db.commit()
 
