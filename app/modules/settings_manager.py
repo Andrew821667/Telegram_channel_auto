@@ -209,7 +209,7 @@ async def get_llm_model(operation: str, db: AsyncSession) -> str:
     key = f"llm.{operation}.model"
     defaults = {
         "analysis": "gpt-4o",
-        "draft_generation": "sonar",
+        "draft_generation": "gpt-4o-mini",
         "ranking": "gpt-4o-mini"
     }
     return await get_setting(key, db, default=defaults.get(operation, "gpt-4o-mini"))

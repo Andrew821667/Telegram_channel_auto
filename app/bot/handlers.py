@@ -1898,7 +1898,7 @@ async def callback_settings_llm(callback: CallbackQuery, db: AsyncSession):
     from app.modules.settings_manager import get_setting
 
     current_analysis = await get_setting("llm.analysis.model", db, default="gpt-4o")
-    current_draft = await get_setting("llm.draft_generation.model", db, default="sonar")
+    current_draft = await get_setting("llm.draft_generation.model", db, default="gpt-4o-mini")
     current_ranking = await get_setting("llm.ranking.model", db, default="gpt-4o-mini")
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
@@ -1941,7 +1941,6 @@ async def callback_llm_select(callback: CallbackQuery, db: AsyncSession):
     models = [
         ("gpt-4o", "GPT-4o (самая умная)"),
         ("gpt-4o-mini", "GPT-4o-mini (быстрая)"),
-        ("sonar", "Perplexity Sonar (поиск)")
     ]
 
     buttons = []
@@ -1962,7 +1961,7 @@ async def callback_llm_select(callback: CallbackQuery, db: AsyncSession):
         "Доступные модели:\n\n"
         "• <b>GPT-4o</b> - самая продвинутая, точная, дорогая (~$15/1M токенов)\n"
         "• <b>GPT-4o-mini</b> - быстрая, дешевая (~$0.15/1M токенов)\n"
-        "• <b>Perplexity Sonar</b> - для поиска и генерации новостей\n\n"
+        ""
         "✅ - выбранная модель\n"
         "Нажмите для изменения:",
         parse_mode="HTML",
