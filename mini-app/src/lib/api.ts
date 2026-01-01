@@ -12,9 +12,19 @@ export const api = axios.create({
 // Add Telegram auth to requests
 api.interceptors.request.use((config) => {
   if (typeof window !== 'undefined' && window.Telegram?.WebApp) {
-    const initData = window.Telegram.WebApp.initDataUnsafe
-    if (initData) {
-      config.headers['X-Telegram-Init-Data'] = JSON.stringify(initData)
+    const initDataUnsafe = window.Telegram.WebApp.initDataUnsafe
+    // Send user data as JSON
+    if (initDataUnsafe && initDataUnsafe.user) {
+      config.headers['X-Telegram-Init-Data'] = JSON.stringify(initDataUnsafe)
+    } else {
+      // Fallback: send minimal data for development
+      config.headers['X-Telegram-Init-Data'] = JSON.stringify({
+        user: {
+          id: 0,
+          first_name: 'Dev',
+          username: 'dev_user'
+        }
+      })
     }
   }
   return config
