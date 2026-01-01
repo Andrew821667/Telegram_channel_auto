@@ -930,27 +930,6 @@ async def callback_show_llm_selection(callback: CallbackQuery):
     )
 
 
-@router.callback_query(F.data.startswith("llm_select:"))
-async def callback_llm_select(callback: CallbackQuery):
-    """Обработчик выбора LLM провайдера."""
-    await callback.answer()
-
-    if not await check_admin(callback.from_user.id):
-        return
-
-    global _selected_llm_provider
-    provider = callback.data.split(":")[1]
-    _selected_llm_provider = provider
-
-    provider_name = "OpenAI (GPT-4o-mini)" if provider == "openai" else "Perplexity (Llama 3.1)"
-
-    await callback.message.edit_text(
-        f"✅ <b>Выбран провайдер: {provider_name}</b>\n\n"
-        f"Теперь все AI-генерации будут использовать {provider_name}.",
-        parse_mode="HTML"
-    )
-
-    logger.info("llm_provider_changed", provider=provider, admin_id=callback.from_user.id)
 
 
 # ====================
