@@ -110,6 +110,11 @@ async def notify_admin(message: str, bot=None):
         bot: Опциональный экземпляр Bot (для использования в Celery tasks)
     """
     try:
+        # Проверяем что admin_id установлен
+        if not settings.telegram_admin_id or settings.telegram_admin_id == 0:
+            logger.warning("notify_admin_no_admin_id", admin_id=settings.telegram_admin_id)
+            return
+
         if bot is None:
             # Импортируем get_bot ЗДЕСЬ чтобы избежать создания aiohttp клиента при импорте модуля
             from app.bot.handlers import get_bot
@@ -121,7 +126,7 @@ async def notify_admin(message: str, bot=None):
             parse_mode="HTML"
         )
     except Exception as e:
-        logger.error("admin_notification_error", error=str(e))
+        logger.error("admin_notification_error", error=str(e), exc_info=True)
 
 
 # ====================
@@ -136,11 +141,15 @@ async def send_fetch_statistics(stats: dict):
         stats: Словарь с количеством новостей по источникам
     """
     try:
+        logger.info("send_fetch_statistics_started", stats_keys=list(stats.keys()) if stats else [])
+
         from app.bot.handlers import get_bot
         from app.config import settings
 
         total_articles = sum(stats.values())
         source_count = len(stats)
+
+        logger.info("send_fetch_statistics_counts", total=total_articles, sources=source_count)
 
         # Формируем детальное сообщение
         message = "📊 <b>Статистика сбора новостей</b>\n\n"
@@ -171,7 +180,15 @@ async def send_fetch_statistics(stats: dict):
 
         message += f"\n⏱️ <i>Время сбора: {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}</i>"
 
+        # Проверяем что admin_id установлен
+        if not settings.telegram_admin_id or settings.telegram_admin_id == 0:
+            logger.warning("send_fetch_statistics_no_admin_id", admin_id=settings.telegram_admin_id)
+            return
+
+        logger.info("send_fetch_statistics_getting_bot")
         bot = get_bot()
+
+        logger.info("send_fetch_statistics_sending", admin_id=settings.telegram_admin_id, message_length=len(message))
         await bot.send_message(
             chat_id=settings.telegram_admin_id,
             text=message,
@@ -181,8 +198,17 @@ async def send_fetch_statistics(stats: dict):
         logger.info("fetch_statistics_sent", total=total_articles, sources=source_count)
 
     except Exception as e:
-        logger.error("send_fetch_statistics_error", error=str(e))
+        logger.error("send_fetch_statistics_error", error=str(e), exc_info=True)
         # Не падаем если статистика не отправилась
+        # Но пробуем отправить уведомление об ошибке админу
+        try:
+            await notify_admin(
+                f"⚠️ <b>Ошибка отправки статистики сбора</b>\n\n"
+                f"Ошибка: {str(e)}\n\n"
+                f"Проверьте логи для деталей."
+            )
+        except:
+            pass  # Если даже notify_admin не работает, молча пропускаем
 
 
 @app.task(max_retries=3, autoretry_for=(Exception,), retry_backoff=60, retry_backoff_max=600)
@@ -218,6 +244,9 @@ def fetch_news_task():
         try:
             async with SessionLocal() as session:
                 stats = await fetch_news(session)
+
+            # Логируем статистику перед отправкой
+            logger.info("fetch_completed_sending_stats", stats=stats, total=sum(stats.values() if stats else []))
 
             # Отправляем статистику админу
             await send_fetch_statistics(stats)
