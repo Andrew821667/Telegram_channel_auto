@@ -97,9 +97,7 @@ export default function SettingsPage() {
     try {
       await apiMethods.updateSettings(settings)
       if (window.Telegram?.WebApp) {
-        window.Telegram.WebApp.showPopup({
-          message: 'Настройки сохранены'
-        })
+        window.Telegram.WebApp.showAlert('Настройки сохранены')
       }
     } catch (error) {
       console.error('Failed to save settings:', error)

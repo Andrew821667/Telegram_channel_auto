@@ -70,9 +70,7 @@ export default function DraftsPage() {
       setSelectedDraft(null)
 
       if (window.Telegram?.WebApp) {
-        window.Telegram.WebApp.showPopup({
-          message: 'Статья одобрена для публикации'
-        })
+        window.Telegram.WebApp.showAlert('Статья одобрена для публикации')
       }
     } catch (error) {
       console.error('Failed to approve draft:', error)
@@ -89,9 +87,7 @@ export default function DraftsPage() {
       setSelectedDraft(null)
 
       if (window.Telegram?.WebApp) {
-        window.Telegram.WebApp.showPopup({
-          message: 'Статья отклонена'
-        })
+        window.Telegram.WebApp.showAlert('Статья отклонена')
       }
     } catch (error) {
       console.error('Failed to reject draft:', error)

@@ -48,6 +48,7 @@ declare global {
         ready: () => void
         expand: () => void
         close: () => void
+        showAlert: (message: string, callback?: () => void) => void
         setHeaderColor: (color: string) => void
         setBackgroundColor: (color: string) => void
         MainButton: {
