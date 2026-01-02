@@ -348,69 +348,61 @@ async def get_published_stats(
         days = {"7d": 7, "30d": 30, "90d": 90}.get(period, 7)
         since = datetime.utcnow() - timedelta(days=days)
 
-        # Total articles in period
-        total = await db.scalar(
-            select(func.count(Publication.id)).where(
-                Publication.published_at >= since
-            )
-        )
-
-        # Total views and reactions
-        views = await db.scalar(
-            select(func.sum(Publication.views)).where(
-                and_(
-                    Publication.published_at >= since,
-                    Publication.views.isnot(None)
-                )
-            )
-        ) or 0
-
-        reactions = await db.scalar(
-            select(func.sum(Publication.reactions)).where(
-                and_(
-                    Publication.published_at >= since,
-                    Publication.reactions.isnot(None)
-                )
-            )
-        ) or 0
-
-        # Average quality score
-        avg_quality = await db.scalar(
-            select(func.avg(Publication.quality_score)).where(
-                and_(
-                    Publication.published_at >= since,
-                    Publication.quality_score.isnot(None)
-                )
-            )
-        ) or 0.0
-
-        # Top performing articles
-        top_articles_query = (
+        # Get all publications in period with drafts
+        query = (
             select(Publication)
+            .options(joinedload(Publication.draft))
             .where(Publication.published_at >= since)
-            .order_by(desc(Publication.views))
-            .limit(10)
         )
+        result = await db.execute(query)
+        publications = result.scalars().all()
 
-        result = await db.execute(top_articles_query)
-        top_articles = [
-            {
-                "id": pub.id,
-                "title": pub.title,
-                "views": pub.views,
-                "reactions": pub.reactions,
-                "published_at": pub.published_at.isoformat(),
-            }
-            for pub in result.scalars().all()
+        # Calculate statistics manually
+        total_articles = len(publications)
+        total_views = sum(pub.views or 0 for pub in publications)
+
+        # Aggregate reactions from JSONB
+        total_reactions = 0
+        for pub in publications:
+            if pub.reactions and isinstance(pub.reactions, dict):
+                total_reactions += sum(pub.reactions.values())
+
+        # Average quality score from drafts
+        quality_scores = [
+            pub.draft.confidence_score
+            for pub in publications
+            if pub.draft and pub.draft.confidence_score is not None
         ]
+        avg_quality_score = sum(quality_scores) / len(quality_scores) if quality_scores else 0.0
+
+        # Engagement rate
+        engagement_rate = (total_reactions / total_views * 100) if total_views > 0 else 0.0
+
+        # Top performing articles by views
+        sorted_pubs = sorted(publications, key=lambda p: p.views or 0, reverse=True)[:10]
+
+        top_articles = []
+        for pub in sorted_pubs:
+            # Calculate reactions for this pub
+            pub_reactions = 0
+            if pub.reactions and isinstance(pub.reactions, dict):
+                pub_reactions = sum(pub.reactions.values())
+
+            top_articles.append({
+                "id": pub.id,
+                "title": pub.draft.title if pub.draft else "No title",
+                "views": pub.views or 0,
+                "reactions": pub_reactions,
+                "published_at": pub.published_at.isoformat(),
+            })
 
         return {
             "period": period,
-            "total_articles": total or 0,
-            "total_views": views,
-            "total_reactions": reactions,
-            "avg_quality_score": round(float(avg_quality), 2),
-            "engagement_rate": round((reactions / views * 100) if views > 0 else 0, 2),
+            "total_articles": total_articles,
+            "total_views": total_views,
+            "total_reactions": total_reactions,
+            "avg_quality_score": round(float(avg_quality_score), 2),
+            "engagement_rate": round(engagement_rate, 2),
             "top_articles": top_articles,
         }
 
