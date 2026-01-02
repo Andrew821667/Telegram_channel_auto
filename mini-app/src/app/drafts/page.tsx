@@ -19,17 +19,38 @@ interface Draft {
   tags?: string[]
 }
 
+interface WorkflowStats {
+  sources_processed: number
+  articles_collected: number
+  passed_filter: number
+  drafts_created: number
+  pending_review: number
+  filter_rate: number
+  period: string
+}
+
 export default function DraftsPage() {
   const [drafts, setDrafts] = useState<Draft[]>([])
   const [selectedDraft, setSelectedDraft] = useState<Draft | null>(null)
   const [loading, setLoading] = useState(true)
   const [actionLoading, setActionLoading] = useState(false)
   const [showRejectDialog, setShowRejectDialog] = useState(false)
+  const [workflowStats, setWorkflowStats] = useState<WorkflowStats | null>(null)
   const router = useRouter()
 
   useEffect(() => {
     loadDrafts()
+    loadWorkflowStats()
   }, [])
+
+  const loadWorkflowStats = async () => {
+    try {
+      const response = await apiMethods.getWorkflowStats()
+      setWorkflowStats(response.data)
+    } catch (error) {
+      console.error('[Drafts] Failed to load workflow stats:', error)
+    }
+  }
 
   const loadDrafts = async () => {
     try {
@@ -152,6 +173,51 @@ export default function DraftsPage() {
             </p>
           </div>
         </div>
+
+        {/* Workflow Statistics */}
+        {workflowStats && (
+          <Card className="bg-gradient-to-r from-blue-50 to-indigo-50 border-blue-200">
+            <CardHeader>
+              <CardTitle className="text-base flex items-center gap-2">
+                📊 Статистика обработки (за {workflowStats.period})
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-sm">
+                <div>
+                  <div className="text-gray-600 text-xs">Источников обработано</div>
+                  <div className="text-lg font-bold text-blue-600">
+                    {workflowStats.sources_processed}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-gray-600 text-xs">Собрано статей</div>
+                  <div className="text-lg font-bold text-blue-600">
+                    {workflowStats.articles_collected}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-gray-600 text-xs">Прошло фильтрацию</div>
+                  <div className="text-lg font-bold text-green-600">
+                    {workflowStats.passed_filter} ({workflowStats.filter_rate}%)
+                  </div>
+                </div>
+                <div>
+                  <div className="text-gray-600 text-xs">Создано драфтов</div>
+                  <div className="text-lg font-bold text-purple-600">
+                    {workflowStats.drafts_created}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-gray-600 text-xs">Ожидает модерации</div>
+                  <div className="text-lg font-bold text-orange-600">
+                    {workflowStats.pending_review}
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {drafts.length === 0 ? (
           <Card>

@@ -161,4 +161,7 @@ export const apiMethods = {
   getSettings: () => api.get<SystemSettings>('/api/miniapp/settings'),
   updateSettings: (settings: Partial<SystemSettings>) =>
     api.put('/api/miniapp/settings', settings),
+
+  // Workflow
+  getWorkflowStats: () => api.get('/api/miniapp/workflow/stats'),
 }
