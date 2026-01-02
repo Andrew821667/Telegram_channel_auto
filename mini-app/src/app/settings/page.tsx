@@ -22,15 +22,15 @@ export default function SettingsPage() {
       setSettings(response.data)
     } catch (error) {
       console.error('Failed to load settings:', error)
-      // Mock data
+      // Mock data - UPDATED to match real API
       setSettings({
         sources: {
           google_news_ru: true,
           google_news_en: true,
           habr: true,
-          perplexity_ru: false,
+          perplexity_ru: true,
           perplexity_en: false,
-          telegram_channels: false,
+          telegram_channels: true,
         },
         llm_models: {
           analysis: 'gpt-4o',
