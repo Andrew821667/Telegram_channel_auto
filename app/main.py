@@ -63,6 +63,17 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error("database_init_error", error=str(e))
 
+    # Инициализация дефолтных настроек
+    try:
+        from app.modules.settings_manager import init_default_settings
+        from app.models.database import get_async_session
+
+        async with get_async_session() as db:
+            await init_default_settings(db)
+        logger.info("default_settings_initialized")
+    except Exception as e:
+        logger.error("settings_init_error", error=str(e))
+
     yield
 
     # Shutdown
