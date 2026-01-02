@@ -8,6 +8,7 @@ from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, Header
 from sqlalchemy import select, func, desc, and_
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import joinedload
 import structlog
 import json
 
@@ -74,25 +75,28 @@ async def get_dashboard_stats(
             select(func.count(Publication.id))
         )
 
-        # Average quality score of published articles
-        avg_quality = await db.scalar(
-            select(func.avg(Publication.quality_score)).where(
-                Publication.quality_score.isnot(None)
-            )
-        ) or 0.0
+        # Average quality score of published articles (from drafts)
+        avg_quality_result = await db.execute(
+            select(func.avg(PostDraft.confidence_score))
+            .join(Publication, Publication.draft_id == PostDraft.id)
+            .where(PostDraft.confidence_score.isnot(None))
+        )
+        avg_quality = avg_quality_result.scalar() or 0.0
 
-        # Total views and reactions
+        # Total views
         total_views = await db.scalar(
             select(func.sum(Publication.views)).where(
                 Publication.views.isnot(None)
             )
         ) or 0
 
-        total_reactions = await db.scalar(
-            select(func.sum(Publication.reactions)).where(
-                Publication.reactions.isnot(None)
-            )
-        ) or 0
+        # Total reactions - need to count from all publications manually since reactions is JSONB
+        pubs_result = await db.execute(select(Publication))
+        all_pubs = pubs_result.scalars().all()
+        total_reactions = 0
+        for pub in all_pubs:
+            if pub.reactions and isinstance(pub.reactions, dict):
+                total_reactions += sum(pub.reactions.values())
 
         # Engagement rate
         engagement_rate = (total_reactions / total_views * 100) if total_views > 0 else 0.0
@@ -105,11 +109,18 @@ async def get_dashboard_stats(
             )
         )
 
-        # Top sources
-        top_sources_query = select(
-            Publication.source,
-            func.count(Publication.id).label('count')
-        ).group_by(Publication.source).order_by(desc('count')).limit(5)
+        # Top sources - join with draft and article
+        top_sources_query = (
+            select(
+                RawArticle.source_name,
+                func.count(Publication.id).label('count')
+            )
+            .join(PostDraft, Publication.draft_id == PostDraft.id)
+            .join(RawArticle, PostDraft.article_id == RawArticle.id)
+            .group_by(RawArticle.source_name)
+            .order_by(desc('count'))
+            .limit(5)
+        )
 
         result = await db.execute(top_sources_query)
         top_sources = [
@@ -148,6 +159,7 @@ async def get_drafts(
     try:
         query = (
             select(PostDraft)
+            .options(joinedload(PostDraft.article))
             .where(PostDraft.status == 'pending_review')
             .order_by(desc(PostDraft.created_at))
             .limit(limit)
@@ -162,13 +174,13 @@ async def get_drafts(
                 "id": draft.id,
                 "title": draft.title,
                 "content": draft.content,
-                "source": draft.source,
-                "ai_summary": draft.ai_summary,
-                "quality_score": draft.quality_score,
+                "source": draft.article.source_name if draft.article else "unknown",
+                "ai_summary": draft.content[:200] + "..." if len(draft.content) > 200 else draft.content,  # First 200 chars as summary
+                "quality_score": draft.confidence_score or 0.0,
                 "created_at": draft.created_at.isoformat(),
                 "status": draft.status,
-                "tags": draft.tags,
-                "sentiment": draft.sentiment,
+                "tags": [],  # Not implemented yet
+                "sentiment": "neutral",  # Not implemented yet
             }
             for draft in drafts
         ]
@@ -186,7 +198,10 @@ async def get_draft(
 ):
     """Get single draft by ID."""
     try:
-        draft = await db.get(PostDraft, draft_id)
+        result = await db.execute(
+            select(PostDraft).options(joinedload(PostDraft.article)).where(PostDraft.id == draft_id)
+        )
+        draft = result.scalar_one_or_none()
 
         if not draft:
             raise HTTPException(status_code=404, detail="Draft not found")
@@ -195,15 +210,15 @@ async def get_draft(
             "id": draft.id,
             "title": draft.title,
             "content": draft.content,
-            "source": draft.source,
-            "original_url": draft.original_url,
-            "ai_summary": draft.ai_summary,
-            "quality_score": draft.quality_score,
+            "source": draft.article.source_name if draft.article else "unknown",
+            "original_url": draft.article.url if draft.article else None,
+            "ai_summary": draft.content[:200] + "..." if len(draft.content) > 200 else draft.content,
+            "quality_score": draft.confidence_score or 0.0,
             "created_at": draft.created_at.isoformat(),
             "status": draft.status,
-            "tags": draft.tags,
-            "sentiment": draft.sentiment,
-            "categories": draft.categories,
+            "tags": [],  # Not implemented yet
+            "sentiment": "neutral",  # Not implemented yet
+            "categories": [],  # Not implemented yet
         }
 
     except HTTPException:
@@ -284,6 +299,9 @@ async def get_published(
     try:
         query = (
             select(Publication)
+            .options(
+                joinedload(Publication.draft).joinedload(PostDraft.article)
+            )
             .order_by(desc(Publication.published_at))
             .limit(limit)
             .offset(offset)
@@ -292,17 +310,23 @@ async def get_published(
         result = await db.execute(query)
         publications = result.scalars().all()
 
+        # Calculate total reactions from JSONB
+        def get_total_reactions(reactions_dict):
+            if not reactions_dict:
+                return 0
+            return sum(reactions_dict.values()) if isinstance(reactions_dict, dict) else 0
+
         return [
             {
                 "id": pub.id,
-                "title": pub.title,
-                "content": pub.content,
+                "title": pub.draft.title if pub.draft else "No title",
+                "content": pub.draft.content if pub.draft else "",
                 "published_at": pub.published_at.isoformat(),
-                "views": pub.views,
-                "reactions": pub.reactions,
-                "engagement_rate": (pub.reactions / pub.views * 100) if pub.views else 0,
-                "source": pub.source,
-                "quality_score": pub.quality_score,
+                "views": pub.views or 0,
+                "reactions": get_total_reactions(pub.reactions),
+                "engagement_rate": (get_total_reactions(pub.reactions) / pub.views * 100) if pub.views and pub.views > 0 else 0,
+                "source": pub.draft.article.source_name if pub.draft and pub.draft.article else "unknown",
+                "quality_score": pub.draft.confidence_score if pub.draft else 0.0,
             }
             for pub in publications
         ]
