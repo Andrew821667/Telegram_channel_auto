@@ -18,6 +18,7 @@ from app.models.database import (
     close_db,
     get_db,
     check_db_connection,
+    AsyncSessionLocal,
     RawArticle,
     PostDraft,
     Publication
@@ -66,10 +67,10 @@ async def lifespan(app: FastAPI):
     # Инициализация дефолтных настроек
     try:
         from app.modules.settings_manager import init_default_settings
-        from app.models.database import get_async_session
 
-        async with get_async_session() as db:
+        async with AsyncSessionLocal() as db:
             await init_default_settings(db)
+            await db.commit()
         logger.info("default_settings_initialized")
     except Exception as e:
         logger.error("settings_init_error", error=str(e))
