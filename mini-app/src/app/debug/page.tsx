@@ -57,7 +57,7 @@ export default function DebugPage() {
           user_id: initData?.user?.id || 'N/A',
           username: initData?.user?.username || 'N/A',
           first_name: initData?.user?.first_name || 'N/A',
-          platform: window.Telegram.WebApp.platform
+          platform: (window.Telegram.WebApp as any).platform || 'unknown'
         })
       } else {
         addLog('Telegram', 'error', 'Telegram WebApp not available')
