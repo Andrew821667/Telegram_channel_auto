@@ -2,6 +2,12 @@ import axios from 'axios'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
+// Log API configuration on module load
+console.log('[API Config] Initializing API client')
+console.log('[API Config] NEXT_PUBLIC_API_URL:', process.env.NEXT_PUBLIC_API_URL)
+console.log('[API Config] Using baseURL:', API_URL)
+console.log('[API Config] NODE_ENV:', process.env.NODE_ENV)
+
 export const api = axios.create({
   baseURL: API_URL,
   headers: {
@@ -12,11 +18,14 @@ export const api = axios.create({
 
 // Add Telegram auth to requests
 api.interceptors.request.use((config) => {
+  console.log('[API Request]', config.method?.toUpperCase(), config.url)
+
   if (typeof window !== 'undefined' && window.Telegram?.WebApp) {
     const initDataUnsafe = window.Telegram.WebApp.initDataUnsafe
     // Send user data as JSON
     if (initDataUnsafe?.user?.id) {
       config.headers['X-Telegram-Init-Data'] = JSON.stringify(initDataUnsafe)
+      console.log('[API Request] Using Telegram user:', initDataUnsafe.user.id)
     } else {
       // Fallback: send minimal data for development
       console.warn('[Mini App] No Telegram user data, using fallback')
@@ -28,9 +37,36 @@ api.interceptors.request.use((config) => {
         }
       })
     }
+  } else {
+    console.warn('[API Request] No Telegram WebApp available, using fallback auth')
+    config.headers['X-Telegram-Init-Data'] = JSON.stringify({
+      user: {
+        id: 0,
+        first_name: 'Dev',
+        username: 'dev_user'
+      }
+    })
   }
+
+  console.log('[API Request] Full URL:', config.baseURL + config.url)
+  console.log('[API Request] Headers:', config.headers)
+
   return config
 })
+
+// Add response/error logging
+api.interceptors.response.use(
+  (response) => {
+    console.log('[API Response] Success:', response.config.url, response.status)
+    return response
+  },
+  (error) => {
+    console.error('[API Response] Error:', error.config?.url)
+    console.error('[API Response] Status:', error.response?.status)
+    console.error('[API Response] Data:', error.response?.data)
+    return Promise.reject(error)
+  }
+)
 
 // API types
 export interface DraftArticle {
