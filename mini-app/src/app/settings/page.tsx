@@ -76,10 +76,16 @@ export default function SettingsPage() {
     try {
       await apiMethods.updateSettings(settings)
       if (window.Telegram?.WebApp) {
-        window.Telegram.WebApp.showAlert('Настройки сохранены')
+        window.Telegram.WebApp.showAlert('Настройки успешно сохранены!')
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to save settings:', error)
+      const errorMessage = error?.response?.data?.detail || error?.message || 'Ошибка при сохранении настроек'
+      if (window.Telegram?.WebApp) {
+        window.Telegram.WebApp.showAlert(`Ошибка: ${errorMessage}`)
+      } else {
+        alert(`Ошибка: ${errorMessage}`)
+      }
     } finally {
       setSaving(false)
     }

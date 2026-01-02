@@ -142,13 +142,51 @@ async def set_setting(key: str, value: Any, db: AsyncSession) -> None:
     setting = result.scalar_one_or_none()
 
     if not setting:
-        raise ValueError(f"Setting '{key}' not found. Initialize defaults first.")
+        # Создаём новую настройку, если её нет
+        # Определяем тип на основе значения
+        value_type = type(value).__name__
+        if value_type == 'bool':
+            value_type = 'bool'
+        elif value_type == 'int':
+            value_type = 'int'
+        elif value_type == 'float':
+            value_type = 'float'
+        elif value_type in ('list', 'dict'):
+            value_type = 'json'
+        else:
+            value_type = 'string'
 
-    # Сериализуем значение
-    setting.value = _serialize_value(value, setting.type)
+        # Определяем категорию из ключа (например, "dalle.enabled" -> "media")
+        category_map = {
+            'sources.': 'sources',
+            'llm.': 'llm',
+            'dalle.': 'media',
+            'auto_publish.': 'publishing',
+            'quality.': 'quality',
+            'budget.': 'budget',
+            'alerts.': 'alerts',
+        }
+        category = 'other'
+        for prefix, cat in category_map.items():
+            if key.startswith(prefix):
+                category = cat
+                break
+
+        setting = SystemSettings(
+            key=key,
+            value=_serialize_value(value, value_type),
+            type=value_type,
+            category=category,
+            description=f"Auto-created setting for {key}"
+        )
+        db.add(setting)
+        logger.info("setting_created", key=key, value=value, type=value_type)
+    else:
+        # Сериализуем значение
+        setting.value = _serialize_value(value, setting.type)
+        logger.info("setting_updated", key=key, value=value)
 
     await db.commit()
-    logger.info("setting_updated", key=key, value=value)
 
 
 async def get_category_settings(category: str, db: AsyncSession) -> Dict[str, Any]:
