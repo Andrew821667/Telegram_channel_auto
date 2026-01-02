@@ -232,6 +232,11 @@ export default function DashboardPage() {
                   Опубликованное
                 </Button>
               </Link>
+              <Link href="/debug">
+                <Button variant="outline" className="w-full border-orange-300 text-orange-700 hover:bg-orange-50">
+                  🔧 Debug
+                </Button>
+              </Link>
             </div>
           </CardContent>
         </Card>
