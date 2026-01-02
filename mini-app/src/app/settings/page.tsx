@@ -18,26 +18,41 @@ export default function SettingsPage() {
 
   const loadSettings = async () => {
     try {
+      console.log('[Settings] Loading from API...')
       const response = await apiMethods.getSettings()
+      console.log('[Settings] Received:', response.data)
       setSettings(response.data)
-    } catch (error) {
-      console.error('Failed to load settings:', error)
-      // Mock data - UPDATED to match real API
-      setSettings({
-        sources: {
-          google_news_ru: true,
-          google_news_en: true,
-          habr: true,
-          perplexity_ru: true,
-          perplexity_en: false,
-          telegram_channels: true,
-        },
-        llm_models: {
-          analysis: 'gpt-4o',
-          draft_generation: 'gpt-4o-mini',
-          ranking: 'gpt-4o-mini',
-        },
-        dalle: {
+    } catch (error: any) {
+      console.error('[Settings] Failed to load:', error)
+      console.error('[Settings] Error details:', {
+        message: error.message,
+        status: error.response?.status,
+        data: error.response?.data
+      })
+
+      // Show error to user
+      if (window.Telegram?.WebApp) {
+        window.Telegram.WebApp.showAlert(`Ошибка загрузки настроек: ${error.message}`)
+      }
+
+      // Mock data ONLY in development
+      if (process.env.NODE_ENV === 'development') {
+        console.warn('[Settings] Using mock data (development mode)')
+        setSettings({
+          sources: {
+            google_news_ru: true,
+            google_news_en: true,
+            habr: true,
+            perplexity_ru: true,
+            perplexity_en: false,
+            telegram_channels: true,
+          },
+          llm_models: {
+            analysis: 'gpt-4o',
+            draft_generation: 'gpt-4o-mini',
+            ranking: 'gpt-4o-mini',
+          },
+          dalle: {
           enabled: false,
           model: 'dall-e-3',
           quality: 'standard',
@@ -63,7 +78,8 @@ export default function SettingsPage() {
           stop_on_exceed: false,
           switch_to_cheap: true,
         },
-      })
+        })
+      }
     } finally {
       setLoading(false)
     }
