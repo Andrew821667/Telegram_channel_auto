@@ -18,35 +18,51 @@ export default function PublishedPage() {
 
   const loadPublished = async () => {
     try {
+      console.log('[Published] Loading from API...')
       const response = await apiMethods.getPublished(50)
+      console.log('[Published] Received', response.data.length, 'articles')
       setArticles(response.data)
-    } catch (error) {
-      console.error('Failed to load published articles:', error)
-      // Mock data for development
-      setArticles([
-        {
-          id: 1,
-          title: 'Новый закон о персональных данных принят Госдумой',
-          content: 'Государственная Дума одобрила законопроект об ужесточении требований к обработке персональных данных...',
-          published_at: new Date(Date.now() - 86400000).toISOString(),
-          views: 1234,
-          reactions: 89,
-          engagement_rate: 7.2,
-          source: 'Google News',
-          quality_score: 8.5,
-        },
-        {
-          id: 2,
-          title: 'ИИ помогает судьям в принятии решений',
-          content: 'Судебная коллегия по экономическим спорам начала использовать AI...',
-          published_at: new Date(Date.now() - 172800000).toISOString(),
-          views: 892,
-          reactions: 54,
-          engagement_rate: 6.1,
-          source: 'Habr',
-          quality_score: 7.8,
-        },
-      ])
+    } catch (error: any) {
+      console.error('[Published] Failed to load:', error)
+      console.error('[Published] Error details:', {
+        message: error.message,
+        response: error.response?.data,
+        status: error.response?.status,
+      })
+
+      // Show error to user
+      if (window.Telegram?.WebApp) {
+        window.Telegram.WebApp.showAlert(`Ошибка загрузки публикаций: ${error.message}`)
+      }
+
+      // Mock data ONLY in development
+      if (process.env.NODE_ENV === 'development') {
+        console.warn('[Published] Using mock data (development mode)')
+        setArticles([
+          {
+            id: 1,
+            title: 'Новый закон о персональных данных принят Госдумой',
+            content: 'Государственная Дума одобрила законопроект об ужесточении требований к обработке персональных данных...',
+            published_at: new Date(Date.now() - 86400000).toISOString(),
+            views: 1234,
+            reactions: 89,
+            engagement_rate: 7.2,
+            source: 'Google News',
+            quality_score: 8.5,
+          },
+          {
+            id: 2,
+            title: 'ИИ помогает судьям в принятии решений',
+            content: 'Судебная коллегия по экономическим спорам начала использовать AI...',
+            published_at: new Date(Date.now() - 172800000).toISOString(),
+            views: 892,
+            reactions: 54,
+            engagement_rate: 6.1,
+            source: 'Habr',
+            quality_score: 7.8,
+          },
+        ])
+      }
     } finally {
       setLoading(false)
     }

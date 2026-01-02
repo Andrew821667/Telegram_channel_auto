@@ -28,20 +28,37 @@ export default function DashboardPage() {
 
   const loadStats = async () => {
     try {
+      console.log('[Dashboard] Loading stats from API:', process.env.NEXT_PUBLIC_API_URL)
       const response = await apiMethods.getDashboardStats()
+      console.log('[Dashboard] API response:', response.data)
       setStats(response.data)
-    } catch (error) {
-      console.error('Failed to load stats:', error)
-      // Use mock data for development
-      setStats({
-        total_drafts: 12,
-        total_published: 145,
-        avg_quality_score: 8.2,
-        total_views: 15420,
-        total_reactions: 892,
-        engagement_rate: 5.8,
-        articles_today: 3,
+    } catch (error: any) {
+      console.error('[Dashboard] Failed to load stats:', error)
+      console.error('[Dashboard] Error details:', {
+        message: error.message,
+        response: error.response?.data,
+        status: error.response?.status,
+        headers: error.response?.headers,
       })
+
+      // Show error to user instead of silent fallback
+      if (window.Telegram?.WebApp) {
+        window.Telegram.WebApp.showAlert(`Ошибка загрузки данных: ${error.message}\n\nAPI URL: ${process.env.NEXT_PUBLIC_API_URL || 'NOT SET'}`)
+      }
+
+      // Use mock data ONLY in development
+      if (process.env.NODE_ENV === 'development') {
+        console.warn('[Dashboard] Using mock data (development mode)')
+        setStats({
+          total_drafts: 12,
+          total_published: 145,
+          avg_quality_score: 8.2,
+          total_views: 15420,
+          total_reactions: 892,
+          engagement_rate: 5.8,
+          articles_today: 3,
+        })
+      }
     } finally {
       setLoading(false)
     }

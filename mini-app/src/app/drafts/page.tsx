@@ -32,31 +32,47 @@ export default function DraftsPage() {
 
   const loadDrafts = async () => {
     try {
+      console.log('[Drafts] Loading from API...')
       const response = await apiMethods.getDrafts(50)
+      console.log('[Drafts] Received', response.data.length, 'drafts')
       setDrafts(response.data)
-    } catch (error) {
-      console.error('Failed to load drafts:', error)
-      // Mock data for development
-      setDrafts([
-        {
-          id: 1,
-          title: 'Новый закон о персональных данных',
-          content: 'Минцифры предложило ужесточить требования к обработке персональных данных...',
-          source: 'Google News',
-          quality_score: 8.5,
-          created_at: new Date().toISOString(),
-          tags: ['ПДн', 'законодательство'],
-        },
-        {
-          id: 2,
-          title: 'ИИ в судебной практике',
-          content: 'Судебная коллегия по экономическим спорам ВС РФ...',
-          source: 'Habr',
-          quality_score: 7.8,
-          created_at: new Date().toISOString(),
-          tags: ['AI', 'суды'],
-        },
-      ])
+    } catch (error: any) {
+      console.error('[Drafts] Failed to load:', error)
+      console.error('[Drafts] Error details:', {
+        message: error.message,
+        response: error.response?.data,
+        status: error.response?.status,
+      })
+
+      // Show error to user
+      if (window.Telegram?.WebApp) {
+        window.Telegram.WebApp.showAlert(`Ошибка загрузки черновиков: ${error.message}`)
+      }
+
+      // Mock data ONLY in development
+      if (process.env.NODE_ENV === 'development') {
+        console.warn('[Drafts] Using mock data (development mode)')
+        setDrafts([
+          {
+            id: 1,
+            title: 'Новый закон о персональных данных',
+            content: 'Минцифры предложило ужесточить требования к обработке персональных данных...',
+            source: 'Google News',
+            quality_score: 8.5,
+            created_at: new Date().toISOString(),
+            tags: ['ПДн', 'законодательство'],
+          },
+          {
+            id: 2,
+            title: 'ИИ в судебной практике',
+            content: 'Судебная коллегия по экономическим спорам ВС РФ...',
+            source: 'Habr',
+            quality_score: 7.8,
+            created_at: new Date().toISOString(),
+            tags: ['AI', 'суды'],
+          },
+        ])
+      }
     } finally {
       setLoading(false)
     }
