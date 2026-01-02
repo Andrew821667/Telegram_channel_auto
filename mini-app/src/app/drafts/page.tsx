@@ -19,16 +19,38 @@ interface Draft {
   tags?: string[]
 }
 
+interface WorkflowStats {
+  sources_processed: number
+  articles_collected: number
+  passed_filter: number
+  drafts_created: number
+  pending_review: number
+  filter_rate: number
+  period: string
+}
+
 export default function DraftsPage() {
   const [drafts, setDrafts] = useState<Draft[]>([])
   const [selectedDraft, setSelectedDraft] = useState<Draft | null>(null)
   const [loading, setLoading] = useState(true)
   const [actionLoading, setActionLoading] = useState(false)
+  const [showRejectDialog, setShowRejectDialog] = useState(false)
+  const [workflowStats, setWorkflowStats] = useState<WorkflowStats | null>(null)
   const router = useRouter()
 
   useEffect(() => {
     loadDrafts()
+    loadWorkflowStats()
   }, [])
+
+  const loadWorkflowStats = async () => {
+    try {
+      const response = await apiMethods.getWorkflowStats()
+      setWorkflowStats(response.data)
+    } catch (error) {
+      console.error('[Drafts] Failed to load workflow stats:', error)
+    }
+  }
 
   const loadDrafts = async () => {
     try {
@@ -95,12 +117,13 @@ export default function DraftsPage() {
     }
   }
 
-  const handleReject = async (id: number) => {
+  const handleReject = async (id: number, reason?: string) => {
     setActionLoading(true)
     try {
-      await apiMethods.rejectDraft(id)
+      await apiMethods.rejectDraft(id, reason)
       setDrafts(drafts.filter(d => d.id !== id))
       setSelectedDraft(null)
+      setShowRejectDialog(false)
 
       if (window.Telegram?.WebApp) {
         window.Telegram.WebApp.showAlert('Статья отклонена')
@@ -111,6 +134,16 @@ export default function DraftsPage() {
       setActionLoading(false)
     }
   }
+
+  const rejectReasons = [
+    { value: 'low_quality', label: 'Низкое качество контента' },
+    { value: 'not_relevant', label: 'Не по теме канала' },
+    { value: 'duplicate', label: 'Дубликат существующей статьи' },
+    { value: 'bad_source', label: 'Ненадежный источник' },
+    { value: 'outdated', label: 'Устаревшая информация' },
+    { value: 'poor_analysis', label: 'Плохой AI-анализ' },
+    { value: 'other', label: 'Другая причина' }
+  ]
 
   if (loading) {
     return (
@@ -140,6 +173,51 @@ export default function DraftsPage() {
             </p>
           </div>
         </div>
+
+        {/* Workflow Statistics */}
+        {workflowStats && (
+          <Card className="bg-gradient-to-r from-blue-50 to-indigo-50 border-blue-200">
+            <CardHeader>
+              <CardTitle className="text-base flex items-center gap-2">
+                📊 Статистика обработки (за {workflowStats.period})
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-sm">
+                <div>
+                  <div className="text-gray-600 text-xs">Источников обработано</div>
+                  <div className="text-lg font-bold text-blue-600">
+                    {workflowStats.sources_processed}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-gray-600 text-xs">Собрано статей</div>
+                  <div className="text-lg font-bold text-blue-600">
+                    {workflowStats.articles_collected}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-gray-600 text-xs">Прошло фильтрацию</div>
+                  <div className="text-lg font-bold text-green-600">
+                    {workflowStats.passed_filter} ({workflowStats.filter_rate}%)
+                  </div>
+                </div>
+                <div>
+                  <div className="text-gray-600 text-xs">Создано драфтов</div>
+                  <div className="text-lg font-bold text-purple-600">
+                    {workflowStats.drafts_created}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-gray-600 text-xs">Ожидает модерации</div>
+                  <div className="text-lg font-bold text-orange-600">
+                    {workflowStats.pending_review}
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {drafts.length === 0 ? (
           <Card>
@@ -214,9 +292,34 @@ export default function DraftsPage() {
                       Оценка: {selectedDraft.quality_score.toFixed(1)}/10
                     </span>
                   )}
+                  <span className="text-xs px-2 py-1 bg-gray-100 text-gray-700 rounded">
+                    {new Date(selectedDraft.created_at).toLocaleDateString('ru-RU', {
+                      day: 'numeric',
+                      month: 'short',
+                      hour: '2-digit',
+                      minute: '2-digit'
+                    })}
+                  </span>
                 </div>
               </CardHeader>
               <CardContent className="space-y-4">
+                {/* Original URL */}
+                {(selectedDraft as any).original_url && (
+                  <div className="p-3 bg-gray-50 rounded-lg border border-gray-200">
+                    <p className="text-xs font-medium text-gray-600 mb-1">
+                      📎 Источник:
+                    </p>
+                    <a
+                      href={(selectedDraft as any).original_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs text-blue-600 hover:underline break-all"
+                    >
+                      {(selectedDraft as any).original_url}
+                    </a>
+                  </div>
+                )}
+
                 {selectedDraft.ai_summary && (
                   <div className="p-3 bg-blue-50 rounded-lg border border-blue-200">
                     <p className="text-sm font-medium text-blue-900 mb-1">
@@ -254,7 +357,7 @@ export default function DraftsPage() {
                 <div className="grid grid-cols-2 gap-3 pt-4">
                   <Button
                     variant="destructive"
-                    onClick={() => handleReject(selectedDraft.id)}
+                    onClick={() => setShowRejectDialog(true)}
                     disabled={actionLoading}
                     className="w-full"
                   >
@@ -270,6 +373,41 @@ export default function DraftsPage() {
                     Одобрить
                   </Button>
                 </div>
+              </CardContent>
+            </Card>
+          </div>
+        )}
+
+        {/* Reject Dialog */}
+        {showRejectDialog && selectedDraft && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+            <Card className="w-full max-w-md">
+              <CardHeader>
+                <CardTitle>Причина отклонения</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <p className="text-sm text-muted-foreground mb-4">
+                  Выберите причину отклонения статьи:
+                </p>
+                {rejectReasons.map((reason) => (
+                  <Button
+                    key={reason.value}
+                    variant="outline"
+                    className="w-full justify-start"
+                    onClick={() => handleReject(selectedDraft.id, reason.value)}
+                    disabled={actionLoading}
+                  >
+                    {reason.label}
+                  </Button>
+                ))}
+                <Button
+                  variant="ghost"
+                  className="w-full mt-4"
+                  onClick={() => setShowRejectDialog(false)}
+                  disabled={actionLoading}
+                >
+                  Отмена
+                </Button>
               </CardContent>
             </Card>
           </div>

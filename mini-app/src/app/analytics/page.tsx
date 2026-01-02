@@ -48,35 +48,51 @@ export default function AnalyticsPage() {
   const loadStats = async () => {
     setLoading(true)
     try {
+      console.log('[Analytics] Loading stats for period:', period)
       const response = await apiMethods.getPublishedStats(period)
+      console.log('[Analytics] Received stats:', response.data)
       setStats(response.data)
-    } catch (error) {
-      console.error('Failed to load stats:', error)
-      // Mock data
-      setStats({
-        period,
-        total_articles: 45,
-        total_views: 12500,
-        total_reactions: 680,
-        avg_quality_score: 8.2,
-        engagement_rate: 5.4,
-        top_articles: [
-          {
-            id: 1,
-            title: 'Верховный суд разъяснил вопросы применения ИИ',
-            views: 2340,
-            reactions: 156,
-            published_at: new Date().toISOString(),
-          },
-          {
-            id: 2,
-            title: 'Новые требования к обработке ПДн в 2025',
-            views: 1980,
-            reactions: 124,
-            published_at: new Date().toISOString(),
-          },
-        ],
+    } catch (error: any) {
+      console.error('[Analytics] Failed to load stats:', error)
+      console.error('[Analytics] Error details:', {
+        message: error.message,
+        status: error.response?.status,
+        data: error.response?.data
       })
+
+      // Show error to user
+      if (window.Telegram?.WebApp) {
+        window.Telegram.WebApp.showAlert(`Ошибка загрузки аналитики: ${error.message}`)
+      }
+
+      // Mock data ONLY in development
+      if (process.env.NODE_ENV === 'development') {
+        console.warn('[Analytics] Using mock data (development mode)')
+        setStats({
+          period,
+          total_articles: 45,
+          total_views: 12500,
+          total_reactions: 680,
+          avg_quality_score: 8.2,
+          engagement_rate: 5.4,
+          top_articles: [
+            {
+              id: 1,
+              title: 'Верховный суд разъяснил вопросы применения ИИ',
+              views: 2340,
+              reactions: 156,
+              published_at: new Date().toISOString(),
+            },
+            {
+              id: 2,
+              title: 'Новые требования к обработке ПДн в 2025',
+              views: 1980,
+              reactions: 124,
+              published_at: new Date().toISOString(),
+            },
+          ],
+        })
+      }
     } finally {
       setLoading(false)
     }

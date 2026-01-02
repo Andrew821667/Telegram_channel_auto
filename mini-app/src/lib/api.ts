@@ -148,7 +148,8 @@ export const apiMethods = {
   getDrafts: (limit = 50) => api.get<DraftArticle[]>(`/api/miniapp/drafts?limit=${limit}`),
   getDraft: (id: number) => api.get<DraftArticle>(`/api/miniapp/drafts/${id}`),
   approveDraft: (id: number) => api.post(`/api/miniapp/drafts/${id}/approve`),
-  rejectDraft: (id: number) => api.post(`/api/miniapp/drafts/${id}/reject`),
+  rejectDraft: (id: number, reason?: string) =>
+    api.post(`/api/miniapp/drafts/${id}/reject`, { reason }),
 
   // Published
   getPublished: (limit = 50, offset = 0) =>
@@ -160,4 +161,7 @@ export const apiMethods = {
   getSettings: () => api.get<SystemSettings>('/api/miniapp/settings'),
   updateSettings: (settings: Partial<SystemSettings>) =>
     api.put('/api/miniapp/settings', settings),
+
+  // Workflow
+  getWorkflowStats: () => api.get('/api/miniapp/workflow/stats'),
 }

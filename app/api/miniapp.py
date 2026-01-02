@@ -542,3 +542,61 @@ async def update_settings(
         logger.error("update_settings_error", error=str(e))
         await db.rollback()
         raise HTTPException(status_code=500, detail="Failed to update settings")
+
+
+@router.get("/workflow/stats")
+async def get_workflow_stats(
+    db: AsyncSession = Depends(get_db),
+    user: Dict = Depends(verify_telegram_user)
+):
+    """Get statistics from the last workflow run."""
+    try:
+        from app.models.database import RawArticle, PostDraft
+
+        # Get counts for last 24 hours
+        last_24h = datetime.utcnow() - timedelta(hours=24)
+
+        # Articles collected
+        articles_result = await db.execute(
+            select(func.count(RawArticle.id))
+            .where(RawArticle.fetched_at >= last_24h)
+        )
+        articles_collected = articles_result.scalar() or 0
+
+        # Drafts created
+        drafts_result = await db.execute(
+            select(func.count(PostDraft.id))
+            .where(PostDraft.created_at >= last_24h)
+        )
+        drafts_created = drafts_result.scalar() or 0
+
+        # Pending review
+        pending_result = await db.execute(
+            select(func.count(PostDraft.id))
+            .where(PostDraft.status == 'pending_review')
+        )
+        pending_review = pending_result.scalar() or 0
+
+        # Sources count (active sources)
+        sources_result = await db.execute(
+            select(func.count(func.distinct(RawArticle.source_name)))
+            .where(RawArticle.fetched_at >= last_24h)
+        )
+        sources_count = sources_result.scalar() or 0
+
+        # Filter rate
+        filter_rate = (drafts_created / articles_collected * 100) if articles_collected > 0 else 0
+
+        return {
+            "sources_processed": sources_count,
+            "articles_collected": articles_collected,
+            "passed_filter": drafts_created,
+            "drafts_created": drafts_created,
+            "pending_review": pending_review,
+            "filter_rate": round(filter_rate, 1),
+            "period": "24h"
+        }
+
+    except Exception as e:
+        logger.error("get_workflow_stats_error", error=str(e))
+        raise HTTPException(status_code=500, detail="Failed to load workflow statistics")
