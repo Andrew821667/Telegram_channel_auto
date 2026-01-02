@@ -391,9 +391,12 @@ async def get_published_stats(
             top_articles.append({
                 "id": pub.id,
                 "title": pub.draft.title if pub.draft else "No title",
+                "content": pub.draft.content if pub.draft else "",
                 "views": pub.views or 0,
                 "reactions": pub_reactions,
                 "published_at": pub.published_at.isoformat(),
+                "message_id": pub.message_id,
+                "channel_id": pub.channel_id,
             })
 
         # Daily stats for charts
