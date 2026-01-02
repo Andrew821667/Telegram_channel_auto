@@ -48,7 +48,7 @@ api.interceptors.request.use((config) => {
     })
   }
 
-  console.log('[API Request] Full URL:', config.baseURL + config.url)
+  console.log('[API Request] Full URL:', (config.baseURL || '') + (config.url || ''))
   console.log('[API Request] Headers:', config.headers)
 
   return config
