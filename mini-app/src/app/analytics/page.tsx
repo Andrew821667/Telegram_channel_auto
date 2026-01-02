@@ -5,8 +5,14 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { apiMethods } from '@/lib/api'
 import { formatNumber } from '@/lib/utils'
-import { ArrowLeft, TrendingUp, Eye, Heart } from 'lucide-react'
+import { ArrowLeft, TrendingUp, Eye, Heart, X, ExternalLink } from 'lucide-react'
 import Link from 'next/link'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import {
   LineChart,
   Line,
@@ -30,9 +36,12 @@ interface PublishedStats {
   top_articles: Array<{
     id: number
     title: string
+    content: string
     views: number
     reactions: number
     published_at: string
+    message_id?: number
+    channel_id?: string
   }>
   daily_stats: Array<{
     date: string
@@ -46,10 +55,19 @@ export default function AnalyticsPage() {
   const [period, setPeriod] = useState<'7d' | '30d' | '90d'>('7d')
   const [stats, setStats] = useState<PublishedStats | null>(null)
   const [loading, setLoading] = useState(true)
+  const [selectedArticle, setSelectedArticle] = useState<PublishedStats['top_articles'][0] | null>(null)
 
   useEffect(() => {
     loadStats()
   }, [period])
+
+  const openInTelegram = (article: PublishedStats['top_articles'][0]) => {
+    if (article.channel_id && article.message_id) {
+      const channelUsername = article.channel_id.replace('@', '')
+      const url = `https://t.me/${channelUsername}/${article.message_id}`
+      window.open(url, '_blank')
+    }
+  }
 
   const loadStats = async () => {
     setLoading(true)
@@ -85,16 +103,22 @@ export default function AnalyticsPage() {
             {
               id: 1,
               title: 'Верховный суд разъяснил вопросы применения ИИ',
+              content: 'Верховный суд РФ опубликовал разъяснения по применению искусственного интеллекта...',
               views: 2340,
               reactions: 156,
               published_at: new Date().toISOString(),
+              message_id: 123,
+              channel_id: '@test_channel',
             },
             {
               id: 2,
               title: 'Новые требования к обработке ПДн в 2025',
+              content: 'С 1 января 2025 года вступают в силу новые требования...',
               views: 1980,
               reactions: 124,
               published_at: new Date().toISOString(),
+              message_id: 124,
+              channel_id: '@test_channel',
             },
           ],
           daily_stats: [
@@ -269,7 +293,8 @@ export default function AnalyticsPage() {
               {stats?.top_articles?.map((article, index) => (
                 <div
                   key={article.id}
-                  className="flex items-start gap-3 p-3 bg-gray-50 rounded-lg"
+                  onClick={() => setSelectedArticle(article)}
+                  className="flex items-start gap-3 p-3 bg-gray-50 rounded-lg cursor-pointer hover:bg-gray-100 transition-colors"
                 >
                   <div className="flex items-center justify-center w-8 h-8 bg-primary text-white rounded-full font-bold flex-shrink-0">
                     {index + 1}
@@ -325,6 +350,65 @@ export default function AnalyticsPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Article preview dialog */}
+      <Dialog open={!!selectedArticle} onOpenChange={() => setSelectedArticle(null)}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="text-lg">
+              {selectedArticle?.title}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="px-6 pb-6 space-y-4">
+            {/* Stats */}
+            <div className="flex gap-6 text-sm text-muted-foreground border-b pb-3">
+              <span className="flex items-center gap-1">
+                <Eye className="w-4 h-4" />
+                {formatNumber(selectedArticle?.views || 0)} просмотров
+              </span>
+              <span className="flex items-center gap-1">
+                <Heart className="w-4 h-4" />
+                {formatNumber(selectedArticle?.reactions || 0)} реакций
+              </span>
+              <span>
+                {selectedArticle?.published_at &&
+                  new Date(selectedArticle.published_at).toLocaleDateString('ru-RU', {
+                    day: 'numeric',
+                    month: 'long',
+                    year: 'numeric',
+                  })}
+              </span>
+            </div>
+
+            {/* Content */}
+            <div className="prose prose-sm max-w-none">
+              <p className="whitespace-pre-wrap text-sm leading-relaxed">
+                {selectedArticle?.content}
+              </p>
+            </div>
+
+            {/* Actions */}
+            <div className="flex gap-2 pt-3 border-t">
+              {selectedArticle?.message_id && selectedArticle?.channel_id && (
+                <Button
+                  onClick={() => selectedArticle && openInTelegram(selectedArticle)}
+                  variant="default"
+                  className="flex items-center gap-2"
+                >
+                  <ExternalLink className="w-4 h-4" />
+                  Открыть в канале
+                </Button>
+              )}
+              <Button
+                onClick={() => setSelectedArticle(null)}
+                variant="outline"
+              >
+                Закрыть
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
