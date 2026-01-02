@@ -396,6 +396,31 @@ async def get_published_stats(
                 "published_at": pub.published_at.isoformat(),
             })
 
+        # Daily stats for charts
+        from collections import defaultdict
+        daily_data = defaultdict(lambda: {"views": 0, "reactions": 0, "articles": 0})
+
+        for pub in publications:
+            # Group by date
+            date_key = pub.published_at.strftime("%d.%m")
+            daily_data[date_key]["views"] += pub.views or 0
+            daily_data[date_key]["articles"] += 1
+
+            # Add reactions
+            if pub.reactions and isinstance(pub.reactions, dict):
+                daily_data[date_key]["reactions"] += sum(pub.reactions.values())
+
+        # Convert to sorted list
+        daily_stats = [
+            {
+                "date": date,
+                "views": data["views"],
+                "reactions": data["reactions"],
+                "articles": data["articles"]
+            }
+            for date, data in sorted(daily_data.items())
+        ]
+
         return {
             "period": period,
             "total_articles": total_articles,
@@ -404,6 +429,7 @@ async def get_published_stats(
             "avg_quality_score": round(float(avg_quality_score), 2),
             "engagement_rate": round(engagement_rate, 2),
             "top_articles": top_articles,
+            "daily_stats": daily_stats,
         }
 
     except Exception as e:

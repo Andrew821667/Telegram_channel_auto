@@ -34,6 +34,12 @@ interface PublishedStats {
     reactions: number
     published_at: string
   }>
+  daily_stats: Array<{
+    date: string
+    views: number
+    reactions: number
+    articles: number
+  }>
 }
 
 export default function AnalyticsPage() {
@@ -91,22 +97,21 @@ export default function AnalyticsPage() {
               published_at: new Date().toISOString(),
             },
           ],
+          daily_stats: [
+            { date: '01.12', views: 450, reactions: 28, articles: 3 },
+            { date: '02.12', views: 680, reactions: 42, articles: 4 },
+            { date: '03.12', views: 520, reactions: 31, articles: 3 },
+            { date: '04.12', views: 890, reactions: 58, articles: 5 },
+            { date: '05.12', views: 720, reactions: 45, articles: 4 },
+            { date: '06.12', views: 960, reactions: 64, articles: 6 },
+            { date: '07.12', views: 810, reactions: 52, articles: 4 },
+          ],
         })
       }
     } finally {
       setLoading(false)
     }
   }
-
-  const mockChartData = [
-    { date: '01.12', views: 450, reactions: 28, articles: 3 },
-    { date: '02.12', views: 680, reactions: 42, articles: 4 },
-    { date: '03.12', views: 520, reactions: 31, articles: 3 },
-    { date: '04.12', views: 890, reactions: 58, articles: 5 },
-    { date: '05.12', views: 720, reactions: 45, articles: 4 },
-    { date: '06.12', views: 960, reactions: 64, articles: 6 },
-    { date: '07.12', views: 810, reactions: 52, articles: 4 },
-  ]
 
   if (loading) {
     return (
@@ -204,51 +209,55 @@ export default function AnalyticsPage() {
         </div>
 
         {/* Charts */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Динамика просмотров и реакций</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ResponsiveContainer width="100%" height={250}>
-              <LineChart data={mockChartData}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="date" />
-                <YAxis />
-                <Tooltip />
-                <Legend />
-                <Line
-                  type="monotone"
-                  dataKey="views"
-                  stroke="#3b82f6"
-                  name="Просмотры"
-                />
-                <Line
-                  type="monotone"
-                  dataKey="reactions"
-                  stroke="#10b981"
-                  name="Реакции"
-                />
-              </LineChart>
-            </ResponsiveContainer>
-          </CardContent>
-        </Card>
+        {stats?.daily_stats && stats.daily_stats.length > 0 && (
+          <>
+            <Card>
+              <CardHeader>
+                <CardTitle>Динамика просмотров и реакций</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <ResponsiveContainer width="100%" height={250}>
+                  <LineChart data={stats.daily_stats}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="date" />
+                    <YAxis />
+                    <Tooltip />
+                    <Legend />
+                    <Line
+                      type="monotone"
+                      dataKey="views"
+                      stroke="#3b82f6"
+                      name="Просмотры"
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="reactions"
+                      stroke="#10b981"
+                      name="Реакции"
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              </CardContent>
+            </Card>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Публикации по дням</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ResponsiveContainer width="100%" height={200}>
-              <BarChart data={mockChartData}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="date" />
-                <YAxis />
-                <Tooltip />
-                <Bar dataKey="articles" fill="#3b82f6" name="Статьи" />
-              </BarChart>
-            </ResponsiveContainer>
-          </CardContent>
-        </Card>
+            <Card>
+              <CardHeader>
+                <CardTitle>Публикации по дням</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <ResponsiveContainer width="100%" height={200}>
+                  <BarChart data={stats.daily_stats}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="date" />
+                    <YAxis />
+                    <Tooltip />
+                    <Bar dataKey="articles" fill="#3b82f6" name="Статьи" />
+                  </BarChart>
+                </ResponsiveContainer>
+              </CardContent>
+            </Card>
+          </>
+        )}
 
         {/* Top articles */}
         <Card>
