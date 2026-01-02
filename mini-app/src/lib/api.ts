@@ -71,30 +71,35 @@ export interface DashboardStats {
 export interface SystemSettings {
   sources: Record<string, boolean>
   llm_models: {
-    analysis_model: string
-    generation_model: string
-    ranking_model: string
+    analysis: string
+    draft_generation: string
+    ranking: string
   }
   dalle: {
     enabled: boolean
     model: string
     quality: string
     size: string
+    auto_generate: boolean
+    ask_on_review: boolean
   }
   auto_publish: {
     enabled: boolean
+    mode: string
     max_per_day: number
-    schedule: string[]
+    weekdays_only: boolean
+    skip_holidays: boolean
   }
-  notifications: Record<string, any>
   filtering: {
-    min_quality_score: number
+    min_score: number
     min_content_length: number
     similarity_threshold: number
   }
   budget: {
-    daily_limit: number
+    max_per_month: number
     warning_threshold: number
+    stop_on_exceed: boolean
+    switch_to_cheap: boolean
   }
 }
 

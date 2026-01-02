@@ -3,38 +3,9 @@
 import { useEffect, useState } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { apiMethods } from '@/lib/api'
+import { apiMethods, SystemSettings } from '@/lib/api'
 import { ArrowLeft, Save } from 'lucide-react'
 import Link from 'next/link'
-
-interface SystemSettings {
-  sources: Record<string, boolean>
-  llm_models: {
-    analysis_model: string
-    generation_model: string
-    ranking_model: string
-  }
-  dalle: {
-    enabled: boolean
-    model: string
-    quality: string
-    size: string
-  }
-  auto_publish: {
-    enabled: boolean
-    max_per_day: number
-    schedule: string[]
-  }
-  filtering: {
-    min_quality_score: number
-    min_content_length: number
-    similarity_threshold: number
-  }
-  budget: {
-    daily_limit: number
-    warning_threshold: number
-  }
-}
 
 export default function SettingsPage() {
   const [settings, setSettings] = useState<SystemSettings | null>(null)
@@ -54,35 +25,43 @@ export default function SettingsPage() {
       // Mock data
       setSettings({
         sources: {
-          google_news: true,
+          google_news_ru: true,
+          google_news_en: true,
           habr: true,
-          perplexity: false,
-          telegram: true,
+          perplexity_ru: false,
+          perplexity_en: false,
+          telegram_channels: false,
         },
         llm_models: {
-          analysis_model: 'gpt-4o-mini',
-          generation_model: 'gpt-4o',
-          ranking_model: 'gpt-4o-mini',
+          analysis: 'gpt-4o',
+          draft_generation: 'gpt-4o-mini',
+          ranking: 'gpt-4o-mini',
         },
         dalle: {
-          enabled: true,
+          enabled: false,
           model: 'dall-e-3',
           quality: 'standard',
           size: '1024x1024',
+          auto_generate: false,
+          ask_on_review: true,
         },
         auto_publish: {
-          enabled: true,
-          max_per_day: 5,
-          schedule: ['09:00', '14:00', '18:00'],
+          enabled: false,
+          mode: 'best_time',
+          max_per_day: 3,
+          weekdays_only: false,
+          skip_holidays: false,
         },
         filtering: {
-          min_quality_score: 7.0,
+          min_score: 0.6,
           min_content_length: 300,
           similarity_threshold: 0.85,
         },
         budget: {
-          daily_limit: 50,
-          warning_threshold: 80,
+          max_per_month: 10.0,
+          warning_threshold: 8.0,
+          stop_on_exceed: false,
+          switch_to_cheap: true,
         },
       })
     } finally {
@@ -197,25 +176,34 @@ export default function SettingsPage() {
             <CardTitle>Источники новостей</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
-            {Object.entries(settings?.sources || {}).map(([source, enabled]) => (
-              <div key={source} className="flex items-center justify-between">
-                <span className="capitalize">
-                  {source.replace('_', ' ').replace('google news', 'Google News')}
-                </span>
-                <button
-                  onClick={() => toggleSource(source)}
-                  className={`w-12 h-6 rounded-full transition-colors ${
-                    enabled ? 'bg-green-500' : 'bg-gray-300'
-                  }`}
-                >
-                  <div
-                    className={`w-5 h-5 bg-white rounded-full shadow transition-transform ${
-                      enabled ? 'translate-x-6' : 'translate-x-1'
+            {Object.entries(settings?.sources || {}).map(([source, enabled]) => {
+              const sourceNames: Record<string, string> = {
+                google_news_ru: 'Google News (RU)',
+                google_news_en: 'Google News (EN)',
+                habr: 'Habr',
+                perplexity_ru: 'Perplexity (RU)',
+                perplexity_en: 'Perplexity (EN)',
+                telegram_channels: 'Telegram каналы',
+              }
+
+              return (
+                <div key={source} className="flex items-center justify-between">
+                  <span>{sourceNames[source] || source}</span>
+                  <button
+                    onClick={() => toggleSource(source)}
+                    className={`w-12 h-6 rounded-full transition-colors ${
+                      enabled ? 'bg-green-500' : 'bg-gray-300'
                     }`}
-                  />
-                </button>
-              </div>
-            ))}
+                  >
+                    <div
+                      className={`w-5 h-5 bg-white rounded-full shadow transition-transform ${
+                        enabled ? 'translate-x-6' : 'translate-x-1'
+                      }`}
+                    />
+                  </button>
+                </div>
+              )
+            })}
           </CardContent>
         </Card>
 
@@ -230,13 +218,13 @@ export default function SettingsPage() {
                 Модель для анализа
               </label>
               <select
-                value={settings?.llm_models.analysis_model}
+                value={settings?.llm_models.analysis}
                 onChange={(e) =>
                   setSettings({
                     ...settings!,
                     llm_models: {
                       ...settings!.llm_models,
-                      analysis_model: e.target.value,
+                      analysis: e.target.value,
                     },
                   })
                 }
@@ -244,22 +232,21 @@ export default function SettingsPage() {
               >
                 <option value="gpt-4o-mini">GPT-4o Mini</option>
                 <option value="gpt-4o">GPT-4o</option>
-                <option value="gpt-4">GPT-4</option>
               </select>
             </div>
 
             <div>
               <label className="text-sm font-medium mb-2 block">
-                Модель для генерации
+                Модель для генерации драфтов
               </label>
               <select
-                value={settings?.llm_models.generation_model}
+                value={settings?.llm_models.draft_generation}
                 onChange={(e) =>
                   setSettings({
                     ...settings!,
                     llm_models: {
                       ...settings!.llm_models,
-                      generation_model: e.target.value,
+                      draft_generation: e.target.value,
                     },
                   })
                 }
@@ -267,7 +254,6 @@ export default function SettingsPage() {
               >
                 <option value="gpt-4o-mini">GPT-4o Mini</option>
                 <option value="gpt-4o">GPT-4o</option>
-                <option value="gpt-4">GPT-4</option>
               </select>
             </div>
 
@@ -276,13 +262,13 @@ export default function SettingsPage() {
                 Модель для ранжирования
               </label>
               <select
-                value={settings?.llm_models.ranking_model}
+                value={settings?.llm_models.ranking}
                 onChange={(e) =>
                   setSettings({
                     ...settings!,
                     llm_models: {
                       ...settings!.llm_models,
-                      ranking_model: e.target.value,
+                      ranking: e.target.value,
                     },
                   })
                 }
@@ -290,7 +276,6 @@ export default function SettingsPage() {
               >
                 <option value="gpt-4o-mini">GPT-4o Mini</option>
                 <option value="gpt-4o">GPT-4o</option>
-                <option value="gpt-4">GPT-4</option>
               </select>
             </div>
           </CardContent>
@@ -319,6 +304,18 @@ export default function SettingsPage() {
             </div>
 
             <div>
+              <label className="text-sm font-medium mb-2 block">Модель</label>
+              <select
+                value={settings?.dalle.model}
+                onChange={(e) => updateDalle('model', e.target.value)}
+                className="w-full p-2 border rounded"
+              >
+                <option value="dall-e-3">DALL-E 3</option>
+                <option value="dall-e-2">DALL-E 2</option>
+              </select>
+            </div>
+
+            <div>
               <label className="text-sm font-medium mb-2 block">Качество</label>
               <select
                 value={settings?.dalle.quality}
@@ -337,10 +334,42 @@ export default function SettingsPage() {
                 onChange={(e) => updateDalle('size', e.target.value)}
                 className="w-full p-2 border rounded"
               >
-                <option value="1024x1024">1024x1024</option>
-                <option value="1024x1792">1024x1792</option>
-                <option value="1792x1024">1792x1024</option>
+                <option value="1024x1024">1024x1024 (квадрат)</option>
+                <option value="1024x1792">1024x1792 (вертикаль)</option>
+                <option value="1792x1024">1792x1024 (горизонт)</option>
               </select>
+            </div>
+
+            <div className="flex items-center justify-between">
+              <span className="text-sm">Авто-генерация для всех постов</span>
+              <button
+                onClick={() => updateDalle('auto_generate', !settings?.dalle.auto_generate)}
+                className={`w-12 h-6 rounded-full transition-colors ${
+                  settings?.dalle.auto_generate ? 'bg-green-500' : 'bg-gray-300'
+                }`}
+              >
+                <div
+                  className={`w-5 h-5 bg-white rounded-full shadow transition-transform ${
+                    settings?.dalle.auto_generate ? 'translate-x-6' : 'translate-x-1'
+                  }`}
+                />
+              </button>
+            </div>
+
+            <div className="flex items-center justify-between">
+              <span className="text-sm">Спрашивать при модерации</span>
+              <button
+                onClick={() => updateDalle('ask_on_review', !settings?.dalle.ask_on_review)}
+                className={`w-12 h-6 rounded-full transition-colors ${
+                  settings?.dalle.ask_on_review ? 'bg-green-500' : 'bg-gray-300'
+                }`}
+              >
+                <div
+                  className={`w-5 h-5 bg-white rounded-full shadow transition-transform ${
+                    settings?.dalle.ask_on_review ? 'translate-x-6' : 'translate-x-1'
+                  }`}
+                />
+              </button>
             </div>
           </CardContent>
         </Card>
@@ -372,6 +401,19 @@ export default function SettingsPage() {
             </div>
 
             <div>
+              <label className="text-sm font-medium mb-2 block">Режим публикации</label>
+              <select
+                value={settings?.auto_publish.mode}
+                onChange={(e) => updateAutoPublish('mode', e.target.value)}
+                className="w-full p-2 border rounded"
+              >
+                <option value="best_time">Лучшее время</option>
+                <option value="schedule">По расписанию</option>
+                <option value="even">Равномерно</option>
+              </select>
+            </div>
+
+            <div>
               <label className="text-sm font-medium mb-2 block">
                 Макс. статей в день
               </label>
@@ -386,6 +428,42 @@ export default function SettingsPage() {
                 max="20"
               />
             </div>
+
+            <div className="flex items-center justify-between">
+              <span className="text-sm">Только в будни</span>
+              <button
+                onClick={() =>
+                  updateAutoPublish('weekdays_only', !settings?.auto_publish.weekdays_only)
+                }
+                className={`w-12 h-6 rounded-full transition-colors ${
+                  settings?.auto_publish.weekdays_only ? 'bg-green-500' : 'bg-gray-300'
+                }`}
+              >
+                <div
+                  className={`w-5 h-5 bg-white rounded-full shadow transition-transform ${
+                    settings?.auto_publish.weekdays_only ? 'translate-x-6' : 'translate-x-1'
+                  }`}
+                />
+              </button>
+            </div>
+
+            <div className="flex items-center justify-between">
+              <span className="text-sm">Пропускать праздники</span>
+              <button
+                onClick={() =>
+                  updateAutoPublish('skip_holidays', !settings?.auto_publish.skip_holidays)
+                }
+                className={`w-12 h-6 rounded-full transition-colors ${
+                  settings?.auto_publish.skip_holidays ? 'bg-green-500' : 'bg-gray-300'
+                }`}
+              >
+                <div
+                  className={`w-5 h-5 bg-white rounded-full shadow transition-transform ${
+                    settings?.auto_publish.skip_holidays ? 'translate-x-6' : 'translate-x-1'
+                  }`}
+                />
+              </button>
+            </div>
           </CardContent>
         </Card>
 
@@ -397,17 +475,17 @@ export default function SettingsPage() {
           <CardContent className="space-y-4">
             <div>
               <label className="text-sm font-medium mb-2 block">
-                Мин. оценка качества: {settings?.filtering.min_quality_score}
+                Мин. оценка качества: {settings?.filtering.min_score?.toFixed(1)}
               </label>
               <input
                 type="range"
-                value={settings?.filtering.min_quality_score}
+                value={settings?.filtering.min_score}
                 onChange={(e) =>
-                  updateFiltering('min_quality_score', parseFloat(e.target.value))
+                  updateFiltering('min_score', parseFloat(e.target.value))
                 }
                 className="w-full"
                 min="0"
-                max="10"
+                max="1"
                 step="0.1"
               />
             </div>
@@ -431,7 +509,7 @@ export default function SettingsPage() {
 
             <div>
               <label className="text-sm font-medium mb-2 block">
-                Порог схожести: {settings?.filtering.similarity_threshold}
+                Порог схожести: {settings?.filtering.similarity_threshold?.toFixed(2)}
               </label>
               <input
                 type="range"
@@ -456,35 +534,72 @@ export default function SettingsPage() {
           <CardContent className="space-y-4">
             <div>
               <label className="text-sm font-medium mb-2 block">
-                Дневной лимит ($)
+                Макс. бюджет в месяц ($)
               </label>
               <input
                 type="number"
-                value={settings?.budget.daily_limit}
+                value={settings?.budget.max_per_month}
                 onChange={(e) =>
-                  updateBudget('daily_limit', parseInt(e.target.value))
+                  updateBudget('max_per_month', parseFloat(e.target.value))
                 }
                 className="w-full p-2 border rounded"
                 min="1"
                 max="1000"
+                step="0.5"
               />
             </div>
 
             <div>
               <label className="text-sm font-medium mb-2 block">
-                Порог предупреждения (%)
+                Порог предупреждения ($)
               </label>
               <input
                 type="number"
                 value={settings?.budget.warning_threshold}
                 onChange={(e) =>
-                  updateBudget('warning_threshold', parseInt(e.target.value))
+                  updateBudget('warning_threshold', parseFloat(e.target.value))
                 }
                 className="w-full p-2 border rounded"
-                min="50"
-                max="100"
-                step="5"
+                min="1"
+                max="1000"
+                step="0.5"
               />
+            </div>
+
+            <div className="flex items-center justify-between">
+              <span className="text-sm">Остановить при превышении лимита</span>
+              <button
+                onClick={() =>
+                  updateBudget('stop_on_exceed', !settings?.budget.stop_on_exceed)
+                }
+                className={`w-12 h-6 rounded-full transition-colors ${
+                  settings?.budget.stop_on_exceed ? 'bg-green-500' : 'bg-gray-300'
+                }`}
+              >
+                <div
+                  className={`w-5 h-5 bg-white rounded-full shadow transition-transform ${
+                    settings?.budget.stop_on_exceed ? 'translate-x-6' : 'translate-x-1'
+                  }`}
+                />
+              </button>
+            </div>
+
+            <div className="flex items-center justify-between">
+              <span className="text-sm">Переключиться на дешевые модели</span>
+              <button
+                onClick={() =>
+                  updateBudget('switch_to_cheap', !settings?.budget.switch_to_cheap)
+                }
+                className={`w-12 h-6 rounded-full transition-colors ${
+                  settings?.budget.switch_to_cheap ? 'bg-green-500' : 'bg-gray-300'
+                }`}
+              >
+                <div
+                  className={`w-5 h-5 bg-white rounded-full shadow transition-transform ${
+                    settings?.budget.switch_to_cheap ? 'translate-x-6' : 'translate-x-1'
+                  }`}
+                />
+              </button>
             </div>
           </CardContent>
         </Card>
