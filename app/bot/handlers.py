@@ -1860,6 +1860,7 @@ async def callback_back_to_settings(callback: CallbackQuery, db: AsyncSession):
         [InlineKeyboardButton(text="🔔 Уведомления", callback_data="settings:alerts")],
         [InlineKeyboardButton(text="🎯 Фильтрация и качество", callback_data="settings:quality")],
         [InlineKeyboardButton(text="💰 Бюджет API", callback_data="settings:budget")],
+        [InlineKeyboardButton(text="« Назад", callback_data="back_to_main_menu")],
     ])
 
     await callback.message.edit_text(
