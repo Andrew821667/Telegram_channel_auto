@@ -128,6 +128,9 @@ class Settings(BaseSettings):
     telegram_channel_id: str = Field(default="")
     telegram_channel_id_numeric: int = Field(default=0)
 
+    # Reader Bot (для читателей канала)
+    reader_bot_token: str = Field(default="")
+
     # Telegram Client API (для сбора новостей из каналов)
     telegram_api_id: int = Field(default=0)
     telegram_api_hash: str = Field(default="")
