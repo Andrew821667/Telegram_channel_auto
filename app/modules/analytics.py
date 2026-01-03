@@ -1054,3 +1054,127 @@ class AnalyticsService:
                 "month": {"count": 0, "total_tokens": 0, "total_cost_usd": 0, "by_model": {}},
                 "year": {"count": 0, "total_tokens": 0, "total_cost_usd": 0, "by_model": {}}
             }
+
+    async def get_channel_conversion_stats(self, days: int = 30) -> Dict:
+        """
+        Получить статистику конверсии из канала.
+
+        Отслеживает переходы пользователей из Telegram канала в Mini App:
+        - Общее количество переходов
+        - Уникальные пользователи
+        - Просмотры статей из канала
+        - ТОП статей по переходам
+
+        Args:
+            days: Количество дней для анализа (по умолчанию 30)
+
+        Returns:
+            Словарь со статистикой конверсии
+        """
+        try:
+            date_from = datetime.utcnow() - timedelta(days=days)
+
+            # 1. Общая статистика переходов из канала
+            query_totals = text("""
+                SELECT
+                    COUNT(*) as total_interactions,
+                    COUNT(DISTINCT user_id) as unique_users,
+                    COUNT(CASE WHEN source = 'channel' THEN 1 END) as channel_clicks,
+                    COUNT(CASE WHEN source = 'channel_article' THEN 1 END) as article_views_from_channel,
+                    COUNT(CASE WHEN source IN ('channel', 'channel_article') THEN 1 END) as total_from_channel
+                FROM user_interactions
+                WHERE created_at >= :date_from
+                AND source IN ('channel', 'channel_article')
+            """)
+
+            result_totals = await self.db.execute(query_totals, {"date_from": date_from})
+            row_totals = result_totals.fetchone()
+
+            # 2. ТОП-10 статей по переходам из канала
+            query_top_articles = text("""
+                SELECT
+                    p.id,
+                    d.title,
+                    COUNT(*) as views_from_channel,
+                    COUNT(DISTINCT ui.user_id) as unique_users,
+                    p.published_at
+                FROM user_interactions ui
+                JOIN publications p ON ui.publication_id = p.id
+                JOIN post_drafts d ON p.draft_id = d.id
+                WHERE ui.created_at >= :date_from
+                AND ui.source IN ('channel', 'channel_article')
+                AND ui.publication_id IS NOT NULL
+                GROUP BY p.id, d.title, p.published_at
+                ORDER BY views_from_channel DESC, unique_users DESC
+                LIMIT 10
+            """)
+
+            result_articles = await self.db.execute(query_top_articles, {"date_from": date_from})
+
+            top_articles = []
+            for row in result_articles.fetchall():
+                top_articles.append({
+                    "publication_id": row.id,
+                    "title": row.title,
+                    "views_from_channel": row.views_from_channel,
+                    "unique_users": row.unique_users,
+                    "published_at": row.published_at.isoformat() if row.published_at else None
+                })
+
+            # 3. Статистика по дням (последние 7 дней)
+            query_daily = text("""
+                SELECT
+                    DATE(created_at) as date,
+                    COUNT(CASE WHEN source = 'channel' THEN 1 END) as channel_clicks,
+                    COUNT(CASE WHEN source = 'channel_article' THEN 1 END) as article_views,
+                    COUNT(DISTINCT user_id) as unique_users
+                FROM user_interactions
+                WHERE created_at >= :week_ago
+                AND source IN ('channel', 'channel_article')
+                GROUP BY DATE(created_at)
+                ORDER BY date DESC
+                LIMIT 7
+            """)
+
+            week_ago = datetime.utcnow() - timedelta(days=7)
+            result_daily = await self.db.execute(query_daily, {"week_ago": week_ago})
+
+            daily_stats = []
+            for row in result_daily.fetchall():
+                daily_stats.append({
+                    "date": row.date.isoformat() if row.date else None,
+                    "channel_clicks": row.channel_clicks,
+                    "article_views": row.article_views,
+                    "unique_users": row.unique_users
+                })
+
+            return {
+                "period_days": days,
+                "total_interactions": row_totals.total_interactions or 0,
+                "unique_users": row_totals.unique_users or 0,
+                "channel_clicks": row_totals.channel_clicks or 0,
+                "article_views_from_channel": row_totals.article_views_from_channel or 0,
+                "total_from_channel": row_totals.total_from_channel or 0,
+                "conversion_rate": round(
+                    (row_totals.article_views_from_channel / row_totals.channel_clicks * 100)
+                    if row_totals.channel_clicks and row_totals.channel_clicks > 0
+                    else 0,
+                    2
+                ),
+                "top_articles": top_articles,
+                "daily_stats": daily_stats
+            }
+
+        except Exception as e:
+            logger.error("get_channel_conversion_stats_error", error=str(e))
+            return {
+                "period_days": days,
+                "total_interactions": 0,
+                "unique_users": 0,
+                "channel_clicks": 0,
+                "article_views_from_channel": 0,
+                "total_from_channel": 0,
+                "conversion_rate": 0,
+                "top_articles": [],
+                "daily_stats": []
+            }

@@ -408,12 +408,16 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 
     Usage:
         async def some_function(db: AsyncSession = Depends(get_db)):
+            # Perform database operations
+            await db.commit()  # Explicit commit when needed
             ...
+
+    Note: Caller must explicitly commit transactions.
+    Auto-commit removed to prevent partial data loss on errors.
     """
     async with AsyncSessionLocal() as session:
         try:
             yield session
-            await session.commit()
         except Exception:
             await session.rollback()
             raise

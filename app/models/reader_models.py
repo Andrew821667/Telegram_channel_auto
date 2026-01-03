@@ -95,6 +95,7 @@ class UserInteraction(Base):
     # Interaction
     action = Column(String(50), nullable=False)  # 'view', 'save', 'share', 'search', 'digest_open'
     search_query = Column(Text, nullable=True)  # For 'search' actions
+    source = Column(String(50), nullable=True)  # 'channel', 'channel_article', 'web', 'app', 'direct', 'search'
 
     created_at = Column(TIMESTAMP, default=datetime.utcnow, nullable=False)
 
@@ -108,6 +109,7 @@ class UserInteraction(Base):
         Index('idx_user_interactions_publication', 'publication_id'),
         Index('idx_user_interactions_action', 'action'),
         Index('idx_user_interactions_created', 'created_at'),
+        Index('idx_user_interactions_source', 'source'),
     )
 
     def __repr__(self):
