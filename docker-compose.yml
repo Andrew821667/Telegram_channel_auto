@@ -135,7 +135,7 @@ services:
       - ./app:/app/app
     command: celery -A app.tasks.celery_tasks beat --loglevel=info --schedule=/tmp/celerybeat-schedule
 
-  # Telegram Bot
+  # Telegram Bot (Admin)
   bot:
     build:
       context: .
@@ -157,6 +157,27 @@ services:
       - ./app:/app/app
       - ./media:/app/media
     command: python -m app.bot.handlers
+
+  # Reader Bot (for channel readers)
+  reader_bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: legal_ai_reader_bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - PYTHONDONTWRITEBYTECODE=1
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./app:/app/app
+    command: python app/reader_bot.py
+    mem_limit: 200m  # Lightweight bot
 
 volumes:
   postgres_data:
