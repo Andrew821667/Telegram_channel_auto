@@ -45,7 +45,7 @@ export default function DebugPage() {
         NEXT_PUBLIC_BOT_USERNAME: botUsername || 'NOT SET',
         NODE_ENV: nodeEnv,
         window_location: typeof window !== 'undefined' ? window.location.href : 'N/A',
-        api_base_url: API_URL
+        api_base_url: apiUrl
       })
     } catch (error: any) {
       addLog('Environment', 'error', error.message)
