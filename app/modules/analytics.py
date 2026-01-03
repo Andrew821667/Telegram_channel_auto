@@ -1,6 +1,6 @@
 """
 Analytics Module
-Модуль для сбора и анализа метрик канала.
+Модуль для сбора и анализа метрик канала и лидов.
 
 Функционал:
 1. Статистика за период (публикации, реакции, engagement)
@@ -8,6 +8,8 @@ Analytics Module
 3. Анализ эффективности источников
 4. Статистика по дням недели
 5. Статистика векторной базы Qdrant
+6. Аналитика лидов (конверсия, скоринг, источники)
+7. ROI лид-магнита
 """
 
 from typing import List, Dict, Optional, Tuple
@@ -1177,4 +1179,253 @@ class AnalyticsService:
                 "conversion_rate": 0,
                 "top_articles": [],
                 "daily_stats": []
+            }
+
+    # ==================== Lead Analytics ====================
+
+    async def get_lead_analytics(self, days: int = 30) -> Dict:
+        """
+        Получить аналитику по лидам за период.
+
+        Args:
+            days: Количество дней для анализа
+
+        Returns:
+            Словарь с метриками лидов
+        """
+        try:
+            date_from = datetime.utcnow() - timedelta(days=days)
+
+            # Общая статистика лидов
+            query_total = text("""
+                SELECT
+                    COUNT(*) as total_leads,
+                    COUNT(CASE WHEN lead_status = 'qualified' THEN 1 END) as qualified_leads,
+                    COUNT(CASE WHEN lead_status = 'converted' THEN 1 END) as converted_leads,
+                    COUNT(CASE WHEN lead_magnet_completed = true THEN 1 END) as completed_magnet,
+                    AVG(lead_score) as avg_lead_score,
+                    COUNT(CASE WHEN email IS NOT NULL THEN 1 END) as with_email,
+                    COUNT(CASE WHEN phone IS NOT NULL THEN 1 END) as with_phone,
+                    COUNT(CASE WHEN company IS NOT NULL THEN 1 END) as with_company
+                FROM lead_profiles
+                WHERE created_at >= :date_from
+            """)
+
+            result_total = await self.db.execute(query_total, {"date_from": date_from})
+            total_row = result_total.fetchone()
+
+            # Конверсия по дням
+            query_daily = text("""
+                SELECT
+                    DATE(created_at) as date,
+                    COUNT(*) as new_leads,
+                    COUNT(CASE WHEN lead_magnet_completed = true THEN 1 END) as completed_magnet,
+                    COUNT(CASE WHEN lead_status = 'qualified' THEN 1 END) as qualified,
+                    AVG(lead_score) as avg_score
+                FROM lead_profiles
+                WHERE created_at >= :date_from
+                GROUP BY DATE(created_at)
+                ORDER BY DATE(created_at) DESC
+                LIMIT 30
+            """)
+
+            result_daily = await self.db.execute(query_daily, {"date_from": date_from})
+            daily_stats = [
+                {
+                    "date": str(row.date),
+                    "new_leads": row.new_leads or 0,
+                    "completed_magnet": row.completed_magnet or 0,
+                    "qualified": row.qualified or 0,
+                    "avg_score": round(float(row.avg_score or 0), 1)
+                }
+                for row in result_daily.fetchall()
+            ]
+
+            # Топ лидов по скорингу
+            query_top_leads = text("""
+                SELECT
+                    lp.user_id,
+                    lp.email,
+                    lp.company,
+                    lp.lead_score,
+                    lp.expertise_level,
+                    lp.business_focus,
+                    lp.created_at,
+                    up.username,
+                    up.full_name
+                FROM lead_profiles lp
+                JOIN user_profiles up ON lp.user_id = up.user_id
+                WHERE lp.created_at >= :date_from AND lp.lead_score > 0
+                ORDER BY lp.lead_score DESC
+                LIMIT 10
+            """)
+
+            result_top = await self.db.execute(query_top_leads, {"date_from": date_from})
+            top_leads = [
+                {
+                    "user_id": row.user_id,
+                    "username": row.username,
+                    "full_name": row.full_name,
+                    "email": row.email,
+                    "company": row.company,
+                    "lead_score": row.lead_score,
+                    "expertise_level": row.expertise_level,
+                    "business_focus": row.business_focus,
+                    "created_at": str(row.created_at.date())
+                }
+                for row in result_top.fetchall()
+            ]
+
+            # Статистика по источникам привлечения
+            query_sources = text("""
+                SELECT
+                    business_focus as source,
+                    COUNT(*) as count,
+                    AVG(lead_score) as avg_score,
+                    COUNT(CASE WHEN lead_magnet_completed = true THEN 1 END) as completed
+                FROM lead_profiles
+                WHERE created_at >= :date_from AND business_focus IS NOT NULL
+                GROUP BY business_focus
+                ORDER BY count DESC
+            """)
+
+            result_sources = await self.db.execute(query_sources, {"date_from": date_from})
+            sources_stats = [
+                {
+                    "source": row.source,
+                    "count": row.count,
+                    "avg_score": round(float(row.avg_score or 0), 1),
+                    "completed_rate": round((row.completed / row.count * 100) if row.count > 0 else 0, 1)
+                }
+                for row in result_sources.fetchall()
+            ]
+
+            # Рассчитываем метрики конверсии
+            total_leads = total_row.total_leads or 0
+            qualified_leads = total_row.qualified_leads or 0
+            converted_leads = total_row.converted_leads or 0
+            completed_magnet = total_row.completed_magnet or 0
+
+            qualification_rate = (qualified_leads / total_leads * 100) if total_leads > 0 else 0
+            conversion_rate = (converted_leads / total_leads * 100) if total_leads > 0 else 0
+            magnet_completion_rate = (completed_magnet / total_leads * 100) if total_leads > 0 else 0
+
+            return {
+                "period_days": days,
+                "overview": {
+                    "total_leads": total_leads,
+                    "qualified_leads": qualified_leads,
+                    "converted_leads": converted_leads,
+                    "completed_magnet": completed_magnet,
+                    "qualification_rate": round(qualification_rate, 1),
+                    "conversion_rate": round(conversion_rate, 1),
+                    "magnet_completion_rate": round(magnet_completion_rate, 1),
+                    "avg_lead_score": round(float(total_row.avg_lead_score or 0), 1),
+                    "with_email": total_row.with_email or 0,
+                    "with_phone": total_row.with_phone or 0,
+                    "with_company": total_row.with_company or 0
+                },
+                "daily_stats": daily_stats,
+                "top_leads": top_leads,
+                "sources_stats": sources_stats
+            }
+
+        except Exception as e:
+            logger.error("get_lead_analytics_error", error=str(e))
+            return {
+                "period_days": days,
+                "overview": {
+                    "total_leads": 0,
+                    "qualified_leads": 0,
+                    "converted_leads": 0,
+                    "completed_magnet": 0,
+                    "qualification_rate": 0,
+                    "conversion_rate": 0,
+                    "magnet_completion_rate": 0,
+                    "avg_lead_score": 0,
+                    "with_email": 0,
+                    "with_phone": 0,
+                    "with_company": 0
+                },
+                "daily_stats": [],
+                "top_leads": [],
+                "sources_stats": []
+            }
+
+    async def get_lead_magnet_roi(self, days: int = 30) -> Dict:
+        """
+        Рассчитать ROI лид-магнита.
+
+        Args:
+            days: Период для анализа
+
+        Returns:
+            Метрики ROI лид-магнита
+        """
+        try:
+            # Получаем стоимость API за период
+            api_cost_query = text("""
+                SELECT COALESCE(SUM(cost), 0) as total_cost
+                FROM api_usage_tracking
+                WHERE created_at >= :date_from
+                AND operation_type IN ('openai_completion', 'perplexity_completion')
+            """)
+
+            date_from = datetime.utcnow() - timedelta(days=days)
+            result = await self.db.execute(api_cost_query, {"date_from": date_from})
+            total_api_cost = float(result.scalar() or 0)
+
+            # Получаем статистику лидов
+            leads_query = text("""
+                SELECT
+                    COUNT(*) as total_leads,
+                    COUNT(CASE WHEN lead_status IN ('qualified', 'converted') THEN 1 END) as quality_leads,
+                    AVG(lead_score) as avg_score
+                FROM lead_profiles
+                WHERE created_at >= :date_from
+            """)
+
+            result = await self.db.execute(leads_query, {"date_from": date_from})
+            leads_row = result.fetchone()
+
+            total_leads = leads_row.total_leads or 0
+            quality_leads = leads_row.quality_leads or 0
+            avg_score = float(leads_row.avg_score or 0)
+
+            # Предполагаемая ценность лида (можно настроить)
+            assumed_lead_value = 500  # рублей за качественного лида
+            quality_lead_value = quality_leads * assumed_lead_value
+
+            # ROI = (Прибыль - Затраты) / Затраты * 100%
+            profit = quality_lead_value - total_api_cost
+            roi = (profit / total_api_cost * 100) if total_api_cost > 0 else 0
+
+            return {
+                "period_days": days,
+                "costs": {
+                    "api_cost": round(total_api_cost, 2),
+                    "total_cost": round(total_api_cost, 2)  # можно добавить другие затраты
+                },
+                "revenue": {
+                    "total_leads": total_leads,
+                    "quality_leads": quality_leads,
+                    "assumed_lead_value": assumed_lead_value,
+                    "estimated_revenue": quality_lead_value
+                },
+                "metrics": {
+                    "profit": round(profit, 2),
+                    "roi_percent": round(roi, 1),
+                    "cost_per_lead": round(total_api_cost / total_leads, 2) if total_leads > 0 else 0,
+                    "cost_per_quality_lead": round(total_api_cost / quality_leads, 2) if quality_leads > 0 else 0,
+                    "avg_lead_score": round(avg_score, 1)
+                }
+            }
+
+        except Exception as e:
+            logger.error("get_lead_magnet_roi_error", error=str(e))
+            return {
+                "period_days": days,
+                "costs": {"api_cost": 0, "total_cost": 0},
+                "revenue": {"total_leads": 0, "quality_leads": 0, "estimated_revenue": 0},
+                "metrics": {"profit": 0, "roi_percent": 0, "cost_per_lead": 0, "cost_per_quality_lead": 0}
             }
