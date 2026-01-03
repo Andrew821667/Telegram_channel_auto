@@ -8,6 +8,7 @@ console.log('[API Config] Initializing API client')
 console.log('[API Config] NEXT_PUBLIC_API_URL:', process.env.NEXT_PUBLIC_API_URL)
 console.log('[API Config] Using baseURL:', API_URL)
 console.log('[API Config] NODE_ENV:', process.env.NODE_ENV)
+console.log('[API Config] Is production:', typeof window !== 'undefined' && window.location.hostname !== 'localhost')
 
 export const api = axios.create({
   baseURL: API_URL,
@@ -175,4 +176,7 @@ export const apiMethods = {
 
   // Workflow
   getWorkflowStats: () => api.get('/api/miniapp/workflow/stats'),
+
+  // Debug
+  debugHealthCheck: () => api.get('/api/miniapp/debug/health'),
 }
