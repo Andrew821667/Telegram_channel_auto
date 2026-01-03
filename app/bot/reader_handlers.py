@@ -8,6 +8,7 @@ Handles user interactions:
 - Save/unsave articles
 """
 
+from typing import Optional
 from aiogram import Router, F
 from aiogram.filters import Command, StateFilter
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
