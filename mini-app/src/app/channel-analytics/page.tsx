@@ -44,7 +44,7 @@ interface ChannelAnalytics {
 }
 
 export default function ChannelAnalyticsPage() {
-  const [period, setPeriod] = useState<7 | 30 | 90>(7)
+  const [period, setPeriod] = useState<7 | 30 | 90>(7) // Updated at: 2026-01-03
   const [stats, setStats] = useState<ChannelAnalytics | null>(null)
   const [loading, setLoading] = useState(true)
 
