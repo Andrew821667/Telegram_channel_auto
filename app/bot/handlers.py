@@ -13,7 +13,7 @@ from aiogram.filters import Command, CommandStart
 from aiogram.types import Message, CallbackQuery, FSInputFile, BotCommand, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -1272,15 +1272,32 @@ async def callback_react(callback: CallbackQuery, db: AsyncSession):
             await callback.answer("❌ Публикация не найдена", show_alert=True)
             return
 
-        # Получаем текущие реакции
-        reactions = publication.reactions or {}
+        # Атомарное обновление реакций (избегаем race condition)
+        from sqlalchemy import func, cast, Integer
+        from sqlalchemy.dialects.postgresql import JSONB
 
-        # Увеличиваем счетчик для выбранной реакции
-        reactions[reaction_type] = reactions.get(reaction_type, 0) + 1
-
-        # Сохраняем обновленные реакции
-        publication.reactions = reactions
+        await db.execute(
+            update(Publication)
+            .where(Publication.id == publication.id)
+            .values(
+                reactions=func.jsonb_set(
+                    func.coalesce(Publication.reactions, cast({}, JSONB)),
+                    f'{{{reaction_type}}}',
+                    cast(
+                        func.coalesce(
+                            cast(Publication.reactions[reaction_type].astext, Integer),
+                            0
+                        ) + 1,
+                        JSONB
+                    )
+                )
+            )
+        )
         await db.commit()
+
+        # Получаем обновленные реакции для отображения
+        await db.refresh(publication)
+        reactions = publication.reactions or {}
 
         # Обновляем quality_score в Qdrant (асинхронно, не блокирует)
         try:

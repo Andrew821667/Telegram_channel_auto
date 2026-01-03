@@ -11,6 +11,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 import structlog
 import json
+import hmac
+import hashlib
+from urllib.parse import parse_qsl
 
 from app.models.database import (
     get_db,
@@ -34,22 +37,64 @@ router = APIRouter(prefix="/api/miniapp", tags=["miniapp"])
 async def verify_telegram_user(
     x_telegram_init_data: Optional[str] = Header(None)
 ) -> Dict[str, Any]:
-    """Verify Telegram WebApp init data."""
+    """
+    Verify Telegram WebApp init data signature.
+
+    According to Telegram WebApp documentation:
+    https://core.telegram.org/bots/webapps#validating-data-received-via-the-mini-app
+    """
     if not x_telegram_init_data:
         raise HTTPException(status_code=401, detail="Missing Telegram auth data")
 
     try:
-        init_data = json.loads(x_telegram_init_data)
-        user = init_data.get("user")
+        # Parse init_data
+        parsed_data = dict(parse_qsl(x_telegram_init_data))
+        received_hash = parsed_data.pop('hash', None)
 
-        if not user:
-            raise HTTPException(status_code=401, detail="Invalid auth data")
+        if not received_hash:
+            raise HTTPException(status_code=401, detail="Missing signature hash")
 
-        # In production, verify hash with bot token
-        # For now, just return user data
+        # Create data-check-string
+        data_check_arr = sorted([f"{k}={v}" for k, v in parsed_data.items()])
+        data_check_string = '\n'.join(data_check_arr)
+
+        # Calculate secret key: HMAC_SHA256("WebAppData", bot_token)
+        secret_key = hmac.new(
+            b"WebAppData",
+            app_settings.telegram_bot_token.encode(),
+            hashlib.sha256
+        ).digest()
+
+        # Calculate hash: HMAC_SHA256(secret_key, data_check_string)
+        calculated_hash = hmac.new(
+            secret_key,
+            data_check_string.encode(),
+            hashlib.sha256
+        ).hexdigest()
+
+        # Verify signature
+        if not hmac.compare_digest(calculated_hash, received_hash):
+            logger.warning("telegram_signature_verification_failed",
+                          received_hash=received_hash[:10],
+                          calculated_hash=calculated_hash[:10])
+            raise HTTPException(status_code=401, detail="Invalid signature")
+
+        # Parse user data
+        user_data = parsed_data.get('user')
+        if not user_data:
+            raise HTTPException(status_code=401, detail="Missing user data")
+
+        user = json.loads(user_data)
+
+        logger.info("telegram_user_verified", user_id=user.get('id'), username=user.get('username'))
         return user
-    except json.JSONDecodeError:
+
+    except json.JSONDecodeError as e:
+        logger.error("telegram_auth_json_error", error=str(e))
         raise HTTPException(status_code=401, detail="Invalid auth data format")
+    except Exception as e:
+        logger.error("telegram_auth_error", error=str(e))
+        raise HTTPException(status_code=401, detail="Authentication failed")
 
 
 # ====================
@@ -90,13 +135,25 @@ async def get_dashboard_stats(
             )
         ) or 0
 
-        # Total reactions - need to count from all publications manually since reactions is JSONB
-        pubs_result = await db.execute(select(Publication))
-        all_pubs = pubs_result.scalars().all()
-        total_reactions = 0
-        for pub in all_pubs:
-            if pub.reactions and isinstance(pub.reactions, dict):
-                total_reactions += sum(pub.reactions.values())
+        # Total reactions - aggregate JSONB values directly in PostgreSQL
+        from sqlalchemy.dialects.postgresql import aggregate_order_by
+        from sqlalchemy import text
+
+        total_reactions_result = await db.execute(
+            text("""
+                SELECT SUM((
+                    COALESCE((reactions->>'useful')::int, 0) +
+                    COALESCE((reactions->>'important')::int, 0) +
+                    COALESCE((reactions->>'controversial')::int, 0) +
+                    COALESCE((reactions->>'banal')::int, 0) +
+                    COALESCE((reactions->>'obvious')::int, 0) +
+                    COALESCE((reactions->>'poor_quality')::int, 0)
+                )) as total_reactions
+                FROM publications
+                WHERE reactions IS NOT NULL
+            """)
+        )
+        total_reactions = total_reactions_result.scalar() or 0
 
         # Engagement rate
         engagement_rate = (total_reactions / total_views * 100) if total_views > 0 else 0.0
