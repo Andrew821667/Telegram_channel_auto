@@ -80,11 +80,11 @@ async def verify_telegram_user(
             raise HTTPException(status_code=401, detail="Invalid signature")
 
         # Parse user data
-        user_data = parsed_data.get('user')
-        if not user_data:
+        user_data_raw = parsed_data.get('user')
+        if not user_data_raw:
             raise HTTPException(status_code=401, detail="Missing user data")
 
-        user = json.loads(user_data)
+        user = json.loads(user_data_raw)
 
         logger.info("telegram_user_verified", user_id=user.get('id'), username=user.get('username'))
         return user
@@ -678,3 +678,56 @@ async def get_workflow_stats(
     except Exception as e:
         logger.error("get_workflow_stats_error", error=str(e))
         raise HTTPException(status_code=500, detail="Failed to load workflow statistics")
+
+
+@router.get("/dashboard/channel-analytics")
+async def get_channel_analytics(
+    days: int = 7,
+    db: AsyncSession = Depends(get_db),
+    user: Dict = Depends(verify_telegram_user)
+):
+    """Get channel conversion analytics."""
+    try:
+        # Log the authenticated user
+        logger.info("get_channel_analytics_request", user_id=user.get('id'), days=days)
+
+        from app.modules.analytics import AnalyticsService
+
+        analytics = AnalyticsService(db)
+        stats = await analytics.get_channel_conversion_stats(days=days)
+
+        return {
+            "success": True,
+            "data": stats,
+            "period_days": days
+        }
+
+    except Exception as e:
+        logger.error("get_channel_analytics_error", error=str(e))
+        raise HTTPException(status_code=500, detail="Failed to load channel analytics")
+
+
+@router.get("/test/initdata")
+async def test_initdata(
+    x_telegram_init_data: Optional[str] = Header(None)
+):
+    """Test endpoint to check initData parsing."""
+    try:
+        if not x_telegram_init_data:
+            return {"status": "no_initdata", "message": "No X-Telegram-Init-Data header"}
+
+        # Parse initData like in verify_telegram_user
+        parsed_data = dict(parse_qsl(x_telegram_init_data))
+        user_data = parsed_data.get('user')
+
+        return {
+            "status": "success",
+            "has_initdata": True,
+            "user": user_data,
+            "hash_present": 'hash' in parsed_data,
+            "initdata_length": len(x_telegram_init_data),
+            "parsed_keys": list(parsed_data.keys())
+        }
+
+    except Exception as e:
+        return {"status": "error", "message": str(e)}

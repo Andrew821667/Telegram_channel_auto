@@ -43,3 +43,26 @@ export interface SourceStats {
   avg_quality: number
   total_views: number
 }
+
+export interface ChannelAnalytics {
+  period_days: number
+  total_interactions: number
+  unique_users: number
+  channel_clicks: number
+  article_views_from_channel: number
+  total_from_channel: number
+  conversion_rate: number
+  top_articles: Array<{
+    publication_id: number
+    title: string
+    views_from_channel: number
+    unique_users: number
+    published_at: string
+  }>
+  daily_stats: Array<{
+    date: string
+    channel_clicks: number
+    article_views: number
+    unique_users: number
+  }>
+}
