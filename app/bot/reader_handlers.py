@@ -69,20 +69,31 @@ def format_article_message(article: Publication, index: Optional[int] = None) ->
     )
 
 
-def get_article_keyboard(publication_id: int, user_saved: bool = False) -> InlineKeyboardMarkup:
+def get_article_keyboard(publication_id: int, user_saved: bool = False, show_read_button: bool = True) -> InlineKeyboardMarkup:
     """Get keyboard for article with like/dislike/save buttons."""
     save_text = "❌ Удалить из сохранённых" if user_saved else "🔖 Сохранить"
     save_action = f"unsave:{publication_id}" if user_saved else f"save:{publication_id}"
 
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="👍 Полезно", callback_data=f"feedback:like:{publication_id}"),
-            InlineKeyboardButton(text="👎 Не интересно", callback_data=f"feedback:dislike:{publication_id}"),
-        ],
-        [
-            InlineKeyboardButton(text=save_text, callback_data=save_action),
-        ]
+    keyboard = []
+
+    # Add "Read more" button if needed
+    if show_read_button:
+        keyboard.append([
+            InlineKeyboardButton(text="📖 Читать полностью", callback_data=f"view:{publication_id}")
+        ])
+
+    # Feedback buttons
+    keyboard.append([
+        InlineKeyboardButton(text="👍 Полезно", callback_data=f"feedback:like:{publication_id}"),
+        InlineKeyboardButton(text="👎 Не интересно", callback_data=f"feedback:dislike:{publication_id}"),
     ])
+
+    # Save button
+    keyboard.append([
+        InlineKeyboardButton(text=save_text, callback_data=save_action),
+    ])
+
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
 # ==================== /start - Onboarding ====================
@@ -497,6 +508,54 @@ async def unsave_article_callback(callback: CallbackQuery, db: AsyncSession):
     await callback.message.edit_reply_markup(reply_markup=keyboard)
 
     await callback.answer("❌ Удалено из сохранённых")
+
+
+@router.callback_query(F.data.startswith("view:"))
+async def view_article_callback(callback: CallbackQuery, db: AsyncSession):
+    """Show full article text."""
+    article_id = int(callback.data.split(":")[1])
+    user_id = callback.from_user.id
+
+    # Get publication with draft
+    from sqlalchemy import select
+    from sqlalchemy.orm import joinedload
+    from app.models.database import Publication
+
+    result = await db.execute(
+        select(Publication)
+        .options(joinedload(Publication.draft))
+        .where(Publication.id == article_id)
+    )
+    article = result.scalar_one_or_none()
+
+    if not article or not article.draft:
+        await callback.answer("❌ Статья не найдена", show_alert=True)
+        return
+
+    # Check if saved
+    from app.services.reader_service import get_saved_articles
+    saved_articles = await get_saved_articles(user_id, db=db)
+    user_saved = any(s.id == article_id for s in saved_articles)
+
+    # Format full article
+    published_date = article.published_at.strftime("%d.%m.%Y")
+
+    full_text = (
+        f"📰 <b>{article.draft.title}</b>\n\n"
+        f"{article.draft.content}\n\n"
+        f"👁 {article.views or 0} | 📅 {published_date}"
+    )
+
+    # Show full text with keyboard (without "Read more" button)
+    keyboard = get_article_keyboard(article_id, user_saved=user_saved, show_read_button=False)
+
+    await callback.message.edit_text(
+        full_text,
+        parse_mode="HTML",
+        reply_markup=keyboard
+    )
+
+    await callback.answer()
 
 
 # ==================== /settings ====================
