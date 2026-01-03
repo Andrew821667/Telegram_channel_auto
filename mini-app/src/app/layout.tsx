@@ -7,7 +7,7 @@ const inter = Inter({ subsets: ['latin', 'cyrillic'] })
 
 export const metadata: Metadata = {
   title: 'Legal AI News',
-  description: 'AI-powered legal news aggregator and analytics',
+  description: 'AI-powered legal news aggregator and analytics with channel analytics',
   viewport: 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no',
 }
 
