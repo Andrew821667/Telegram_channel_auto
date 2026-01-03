@@ -338,3 +338,84 @@ async def get_user_stats(user_id: int, db: AsyncSession) -> Dict:
         'member_since': profile.created_at,
         'last_active': profile.last_active
     }
+
+
+async def log_interaction(
+    user_id: int,
+    action: str,
+    db: AsyncSession,
+    publication_id: Optional[int] = None,
+    search_query: Optional[str] = None,
+    source: Optional[str] = None
+):
+    """
+    Log user interaction for analytics.
+
+    Args:
+        user_id: User ID
+        action: Action type ('view', 'search', 'channel_view', etc.)
+        db: Database session
+        publication_id: Optional publication ID
+        search_query: Optional search query
+        source: Optional source ('channel', 'direct', 'channel_article', etc.)
+    """
+    interaction = UserInteraction(
+        user_id=user_id,
+        action=action,
+        publication_id=publication_id,
+        search_query=search_query,
+        source=source
+    )
+    db.add(interaction)
+    await db.commit()
+
+
+async def get_channel_conversion_stats(db: AsyncSession) -> Dict:
+    """
+    Get statistics on how many users come from channel.
+
+    Returns:
+        Dict with channel conversion metrics
+    """
+    # Total channel views
+    channel_views = await db.execute(
+        select(func.count(UserInteraction.id)).where(
+            UserInteraction.source.in_(['channel', 'channel_article'])
+        )
+    )
+
+    # Unique users from channel
+    unique_channel_users = await db.execute(
+        select(func.count(func.distinct(UserInteraction.user_id))).where(
+            UserInteraction.source.in_(['channel', 'channel_article'])
+        )
+    )
+
+    # Article views from channel
+    article_views_from_channel = await db.execute(
+        select(func.count(UserInteraction.id)).where(
+            and_(
+                UserInteraction.source == 'channel_article',
+                UserInteraction.action == 'view'
+            )
+        )
+    )
+
+    # Most popular articles from channel
+    popular_articles = await db.execute(
+        select(
+            UserInteraction.publication_id,
+            func.count(UserInteraction.id).label('views')
+        )
+        .where(UserInteraction.source == 'channel_article')
+        .group_by(UserInteraction.publication_id)
+        .order_by(desc('views'))
+        .limit(10)
+    )
+
+    return {
+        'total_channel_views': channel_views.scalar() or 0,
+        'unique_channel_users': unique_channel_users.scalar() or 0,
+        'article_views_from_channel': article_views_from_channel.scalar() or 0,
+        'top_articles': [(row.publication_id, row.views) for row in popular_articles.all()]
+    }

@@ -28,7 +28,8 @@ from app.services.reader_service import (
     unsave_article,
     get_saved_articles,
     get_user_stats,
-    update_last_active
+    update_last_active,
+    log_interaction
 )
 from app.models.database import Publication
 
@@ -116,6 +117,14 @@ async def cmd_start(message: Message, state: FSMContext, db: AsyncSession):
 
     # Handle deep linking from channel (general)
     if deep_link_param == "channel":
+        # Log channel visit
+        await log_interaction(
+            user_id=user_id,
+            action='channel_visit',
+            db=db,
+            source='channel'
+        )
+
         if profile:
             await message.answer(
                 f"👋 Добро пожаловать из канала Legal AI News!\n\n"
@@ -200,6 +209,15 @@ async def show_article_from_channel(message: Message, article_id: int, db: Async
         full_text,
         parse_mode="HTML",
         reply_markup=keyboard
+    )
+
+    # Log interaction - track that user viewed article from channel
+    await log_interaction(
+        user_id=user_id,
+        action='view',
+        db=db,
+        publication_id=article_id,
+        source='channel_article'
     )
 
     # Suggest onboarding if new user
