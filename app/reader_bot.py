@@ -12,14 +12,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.bot.reader_handlers import router
-from app.models.database import async_session_maker, init_db
+from app.models.database import AsyncSessionLocal, init_db
 from app.utils.logger import logger
 
 
 # Database middleware
 async def db_middleware(handler, event, data):
     """Provide database session for handlers."""
-    async with async_session_maker() as session:
+    async with AsyncSessionLocal() as session:
         data['db'] = session
         try:
             return await handler(event, data)
