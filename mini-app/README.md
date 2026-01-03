@@ -31,15 +31,19 @@ npm install
 Create `.env.local`:
 
 ```bash
-# Backend API URL
-NEXT_PUBLIC_API_URL=http://localhost:8000
+# Backend API URL - замените на ваш реальный API сервер
+NEXT_PUBLIC_API_URL=https://your-api-server.com
 
-# Telegram Bot Username
+# Telegram Bot Username (без @)
 NEXT_PUBLIC_BOT_USERNAME=your_bot_username
 
-# Production URL (for Vercel deployment)
+# Production URL (для Vercel будет автоматически установлен)
 NEXT_PUBLIC_BASE_URL=https://your-app.vercel.app
 ```
+
+**Важно для production:**
+- `NEXT_PUBLIC_API_URL` должен указывать на ваш развернутый FastAPI сервер
+- В Vercel настройках добавьте эту переменную окружения
 
 ### 3. Run development server
 
