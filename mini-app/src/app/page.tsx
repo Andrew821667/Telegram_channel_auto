@@ -215,7 +215,7 @@ export default function DashboardPage() {
           </Card>
 
           <Card className="hover:shadow-lg transition-shadow cursor-pointer">
-            <Link href="/channel-analytics">
+            <Link href="/channelanalytics">
               <CardHeader>
                 <CardTitle className="flex items-center justify-between">
                   <span>Аналитика каналов</span>
