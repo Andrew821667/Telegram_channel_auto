@@ -67,6 +67,7 @@ declare global {
           showProgress: (leaveActive: boolean) => void
           hideProgress: () => void
         }
+        initData: string
         initDataUnsafe: {
           user?: {
             id: number

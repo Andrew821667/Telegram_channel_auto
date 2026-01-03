@@ -38,11 +38,14 @@ export default function DebugPage() {
     try {
       const apiUrl = process.env.NEXT_PUBLIC_API_URL
       const nodeEnv = process.env.NODE_ENV
+      const botUsername = process.env.NEXT_PUBLIC_BOT_USERNAME
 
       addLog('Environment', 'success', 'Environment variables loaded', {
         NEXT_PUBLIC_API_URL: apiUrl || 'NOT SET',
+        NEXT_PUBLIC_BOT_USERNAME: botUsername || 'NOT SET',
         NODE_ENV: nodeEnv,
-        window_location: typeof window !== 'undefined' ? window.location.href : 'N/A'
+        window_location: typeof window !== 'undefined' ? window.location.href : 'N/A',
+        api_base_url: apiUrl
       })
     } catch (error: any) {
       addLog('Environment', 'error', error.message)
@@ -133,6 +136,25 @@ export default function DebugPage() {
       })
     } catch (error: any) {
       addLog('API /settings', 'error', error.message, {
+        status: error.response?.status,
+        statusText: error.response?.statusText,
+        data: error.response?.data
+      })
+    }
+
+    // Test 7: Debug Health Check
+    addLog('API /debug/health', 'pending', 'Testing debug health endpoint...')
+    try {
+      const response = await apiMethods.debugHealthCheck()
+      addLog('API /debug/health', 'success', 'API call successful', {
+        status: response.data.status,
+        auth_status: response.data.auth_status,
+        db_status: response.data.database,
+        db_stats: response.data.db_stats,
+        environment: response.data.environment
+      })
+    } catch (error: any) {
+      addLog('API /debug/health', 'error', error.message, {
         status: error.response?.status,
         statusText: error.response?.statusText,
         data: error.response?.data

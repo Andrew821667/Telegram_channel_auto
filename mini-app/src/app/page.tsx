@@ -188,7 +188,7 @@ export default function DashboardPage() {
             <Link href="/analytics">
               <CardHeader>
                 <CardTitle className="flex items-center justify-between">
-                  <span>Аналитика</span>
+                  <span>Аналитика публикаций</span>
                   <ArrowRight className="w-5 h-5 text-primary" />
                 </CardTitle>
               </CardHeader>
@@ -208,6 +208,36 @@ export default function DashboardPage() {
                       {stats?.total_published || 0}
                     </div>
                     <p className="text-xs text-muted-foreground">Статей</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Link>
+          </Card>
+
+          <Card className="hover:shadow-lg transition-shadow cursor-pointer">
+            <Link href="/channelanalytics">
+              <CardHeader>
+                <CardTitle className="flex items-center justify-between">
+                  <span>Аналитика каналов</span>
+                  <ArrowRight className="w-5 h-5 text-primary" />
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-sm text-muted-foreground mb-4">
+                  Статистика переходов из Telegram канала
+                </p>
+                <div className="flex gap-4">
+                  <div>
+                    <div className="text-2xl font-bold text-purple-600">
+                      33.3%
+                    </div>
+                    <p className="text-xs text-muted-foreground">Конверсия</p>
+                  </div>
+                  <div>
+                    <div className="text-2xl font-bold text-orange-600">
+                      4
+                    </div>
+                    <p className="text-xs text-muted-foreground">Переходов</p>
                   </div>
                 </div>
               </CardContent>

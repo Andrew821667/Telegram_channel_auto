@@ -1,4 +1,5 @@
 import axios from 'axios'
+import { ChannelAnalytics } from '@/types'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
@@ -7,6 +8,7 @@ console.log('[API Config] Initializing API client')
 console.log('[API Config] NEXT_PUBLIC_API_URL:', process.env.NEXT_PUBLIC_API_URL)
 console.log('[API Config] Using baseURL:', API_URL)
 console.log('[API Config] NODE_ENV:', process.env.NODE_ENV)
+console.log('[API Config] Is production:', typeof window !== 'undefined' && window.location.hostname !== 'localhost')
 
 export const api = axios.create({
   baseURL: API_URL,
@@ -21,14 +23,17 @@ api.interceptors.request.use((config) => {
   console.log('[API Request]', config.method?.toUpperCase(), config.url)
 
   if (typeof window !== 'undefined' && window.Telegram?.WebApp) {
+    // Use the full initData string with signature for authentication
+    const initData = window.Telegram.WebApp.initData
     const initDataUnsafe = window.Telegram.WebApp.initDataUnsafe
-    // Send user data as JSON
-    if (initDataUnsafe?.user?.id) {
-      config.headers['X-Telegram-Init-Data'] = JSON.stringify(initDataUnsafe)
-      console.log('[API Request] Using Telegram user:', initDataUnsafe.user.id)
+
+    if (initData && initData.trim() !== '') {
+      config.headers['X-Telegram-Init-Data'] = initData
+      console.log('[API Request] Using full Telegram initData with signature')
+      console.log('[API Request] User ID:', initDataUnsafe?.user?.id)
     } else {
       // Fallback: send minimal data for development
-      console.warn('[Mini App] No Telegram user data, using fallback')
+      console.warn('[Mini App] No Telegram initData available, using fallback')
       config.headers['X-Telegram-Init-Data'] = JSON.stringify({
         user: {
           id: 0,
@@ -104,6 +109,12 @@ export interface DashboardStats {
   top_sources: Array<{ source: string; count: number }>
 }
 
+export interface ChannelAnalyticsResponse {
+  success: boolean
+  data: ChannelAnalytics
+  period_days: number
+}
+
 export interface SystemSettings {
   sources: Record<string, boolean>
   llm_models: {
@@ -143,6 +154,7 @@ export interface SystemSettings {
 export const apiMethods = {
   // Dashboard
   getDashboardStats: () => api.get<DashboardStats>('/api/miniapp/dashboard/stats'),
+  getChannelAnalytics: (days = 7) => api.get<ChannelAnalyticsResponse>(`/api/miniapp/dashboard/channel-analytics?days=${days}`),
 
   // Drafts
   getDrafts: (limit = 50) => api.get<DraftArticle[]>(`/api/miniapp/drafts?limit=${limit}`),
@@ -164,4 +176,7 @@ export const apiMethods = {
 
   // Workflow
   getWorkflowStats: () => api.get('/api/miniapp/workflow/stats'),
+
+  // Debug
+  debugHealthCheck: () => api.get('/api/miniapp/debug/health'),
 }
