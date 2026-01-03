@@ -9,6 +9,7 @@ import sys
 import logging
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.types import BotCommand
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -46,6 +47,17 @@ async def main():
     bot = Bot(token=settings.reader_bot_token)
     storage = MemoryStorage()
     dp = Dispatcher(storage=storage)
+
+    # Set bot commands menu
+    commands = [
+        BotCommand(command="start", description="🚀 Начать работу с ботом"),
+        BotCommand(command="today", description="📰 Персональные новости за сегодня"),
+        BotCommand(command="search", description="🔍 Поиск по архиву"),
+        BotCommand(command="saved", description="🔖 Сохранённые статьи"),
+        BotCommand(command="settings", description="⚙️ Настройки профиля"),
+    ]
+    await bot.set_my_commands(commands)
+    logger.info("Bot commands menu set")
 
     # Register handlers
     dp.include_router(router)

@@ -11,7 +11,7 @@ Handles user interactions:
 from typing import Optional
 from aiogram import Router, F
 from aiogram.filters import Command, StateFilter
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, ForceReply
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -357,9 +357,10 @@ async def cmd_search(message: Message, db: AsyncSession):
     if not query:
         await message.answer(
             "🔍 <b>Поиск по архиву</b>\n\n"
-            "Введите запрос:\n"
-            "Например: <code>/search GDPR</code>",
-            parse_mode="HTML"
+            "Введите поисковый запрос:\n"
+            "Например: <i>GDPR</i>, <i>искусственный интеллект</i>, <i>налоги</i>",
+            parse_mode="HTML",
+            reply_markup=ForceReply(input_field_placeholder="Введите тему для поиска...")
         )
         return
 
@@ -390,6 +391,45 @@ async def cmd_search(message: Message, db: AsyncSession):
             parse_mode="HTML",
             reply_markup=keyboard
         )
+
+
+@router.message(F.reply_to_message, F.text)
+async def handle_search_reply(message: Message, db: AsyncSession):
+    """Handle reply to search prompt (ForceReply)."""
+    # Check if replying to bot's search message
+    if (message.reply_to_message and
+        message.reply_to_message.from_user.is_bot and
+        "Поиск по архиву" in message.reply_to_message.text):
+
+        query = message.text.strip()
+        user_id = message.from_user.id
+
+        # Perform search
+        results = await search_publications(query, user_id=user_id, limit=10, db=db)
+
+        if not results:
+            await message.answer(
+                f"По запросу '<b>{query}</b>' ничего не найдено 😔\n\n"
+                "Попробуйте другой запрос или используйте /today",
+                parse_mode="HTML"
+            )
+            return
+
+        # Show results
+        await message.answer(
+            f"🔍 Найдено <b>{len(results)}</b> статей по запросу '<b>{query}</b>':",
+            parse_mode="HTML"
+        )
+
+        for i, article in enumerate(results, 1):
+            text = format_article_message(article, index=i)
+            keyboard = get_article_keyboard(article.id)
+
+            await message.answer(
+                text,
+                parse_mode="HTML",
+                reply_markup=keyboard
+            )
 
 
 # ==================== /saved - Saved Articles ====================
