@@ -7,6 +7,7 @@ Functions for managing reader profiles, feedback, and interactions.
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict
 from sqlalchemy import select, func, and_, or_, desc
+from sqlalchemy.orm import joinedload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.reader_models import UserProfile, UserFeedback, UserInteraction, SavedArticle
@@ -103,6 +104,7 @@ async def get_personalized_feed(
     query = (
         select(Publication)
         .join(PostDraft, Publication.draft_id == PostDraft.id)
+        .options(joinedload(Publication.draft))
         .where(Publication.published_at >= since)
         .order_by(desc(Publication.published_at))
         .limit(limit * 2)  # Get more, then filter
@@ -145,6 +147,7 @@ async def get_recent_publications(limit: int, db: AsyncSession) -> List[Publicat
     """Get most recent publications (fallback for users without preferences)."""
     query = (
         select(Publication)
+        .options(joinedload(Publication.draft))
         .order_by(desc(Publication.published_at))
         .limit(limit)
     )
@@ -168,6 +171,7 @@ async def search_publications(
     search_query = (
         select(Publication)
         .join(PostDraft, Publication.draft_id == PostDraft.id)
+        .options(joinedload(Publication.draft))
         .where(
             or_(
                 PostDraft.title.ilike(f'%{query}%'),
@@ -276,6 +280,7 @@ async def get_saved_articles(user_id: int, limit: int = 20, db: AsyncSession = N
     query = (
         select(Publication)
         .join(SavedArticle, SavedArticle.publication_id == Publication.id)
+        .options(joinedload(Publication.draft))
         .where(SavedArticle.user_id == user_id)
         .order_by(desc(SavedArticle.created_at))
         .limit(limit)
