@@ -1093,7 +1093,16 @@ async def publish_draft(draft_id: int, db: AsyncSession, admin_id: int) -> bool:
             source_name = article.source_name if article.source_name else "Источник"
             final_text += f"\n📰 {source_name}"
 
-        # Публикуем в канал
+        # Создаем Publication СНАЧАЛА, чтобы получить ID для deep link
+        publication = Publication(
+            draft_id=draft.id,
+            message_id=0,  # Временное значение, обновим после публикации
+            channel_id=settings.telegram_channel_id_numeric,
+        )
+        db.add(publication)
+        await db.flush()  # Получаем publication.id без коммита
+
+        # Публикуем в канал с клавиатурой, содержащей deep link на Reader Bot
         if draft.image_path:
             # Публикуем двумя последовательными сообщениями для обхода лимита caption (1024 символа)
             # 1. Фото БЕЗ подписи (заголовок уже на изображении)
@@ -1111,7 +1120,8 @@ async def publish_draft(draft_id: int, db: AsyncSession, admin_id: int) -> bool:
                 parse_mode="HTML",
                 reply_markup=get_reader_keyboard(
                     article.url,
-                    post_id=draft.id
+                    post_id=draft.id,
+                    publication_id=publication.id  # Deep link для Reader Bot
                 ) if article else None
             )
         else:
@@ -1123,17 +1133,13 @@ async def publish_draft(draft_id: int, db: AsyncSession, admin_id: int) -> bool:
                 parse_mode="HTML",
                 reply_markup=get_reader_keyboard(
                     article.url,
-                    post_id=draft.id
+                    post_id=draft.id,
+                    publication_id=publication.id  # Deep link для Reader Bot
                 ) if article else None
             )
 
-        # Сохраняем публикацию в БД
-        publication = Publication(
-            draft_id=draft.id,
-            message_id=message.message_id,
-            channel_id=settings.telegram_channel_id_numeric,
-        )
-        db.add(publication)
+        # Обновляем message_id в publication
+        publication.message_id = message.message_id
 
         # Обновляем статус драфта
         draft.status = 'approved'

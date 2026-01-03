@@ -120,7 +120,9 @@ def get_confirm_keyboard(action: str, draft_id: int) -> InlineKeyboardMarkup:
 def get_reader_keyboard(
     source_url: str,
     channel_username: str = "legal_ai_pro",
-    post_id: int = None
+    post_id: int = None,
+    publication_id: int = None,
+    reader_bot_username: str = "legal_ai_news_reader_bot"
 ) -> InlineKeyboardMarkup:
     """
     Клавиатура для читателей в опубликованном посте.
@@ -129,6 +131,8 @@ def get_reader_keyboard(
         source_url: URL источника новости
         channel_username: Username канала для кнопки "Поделиться"
         post_id: ID поста для кнопки мнения (опционально)
+        publication_id: ID публикации для deep link в Reader Bot (опционально)
+        reader_bot_username: Username Reader Bot для интеграции канала с ботом
 
     Returns:
         InlineKeyboardMarkup с интерактивными кнопками
@@ -150,6 +154,15 @@ def get_reader_keyboard(
             url=tracked_url
         )
     )
+
+    # Кнопка "Читать в Reader Bot" с deep link (если указан publication_id)
+    if publication_id:
+        builder.row(
+            InlineKeyboardButton(
+                text="🤖 Открыть в боте",
+                url=f"https://t.me/{reader_bot_username}?start=article_{publication_id}"
+            )
+        )
 
     # Кнопка "Поделиться" (открывает диалог выбора чата)
     builder.row(

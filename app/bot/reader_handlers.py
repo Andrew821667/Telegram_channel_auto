@@ -104,6 +104,37 @@ async def cmd_start(message: Message, state: FSMContext, db: AsyncSession):
     user_id = message.from_user.id
     profile = await get_user_profile(user_id, db)
 
+    # Check for deep linking parameter
+    command_args = message.text.split(maxsplit=1)
+    deep_link_param = command_args[1] if len(command_args) > 1 else None
+
+    # Handle deep linking for articles from channel
+    if deep_link_param and deep_link_param.startswith("article_"):
+        article_id = int(deep_link_param.replace("article_", ""))
+        await show_article_from_channel(message, article_id, db, profile)
+        return
+
+    # Handle deep linking from channel (general)
+    if deep_link_param == "channel":
+        if profile:
+            await message.answer(
+                f"👋 Добро пожаловать из канала Legal AI News!\n\n"
+                f"Используйте бот для:\n"
+                f"📰 /today - Персональные новости за сегодня\n"
+                f"🔍 /search - Поиск по архиву\n"
+                f"🔖 /saved - Сохранённые статьи ({len(await get_saved_articles(user_id, db=db))})\n"
+                f"⚙️ /settings - Настройки профиля"
+            )
+        else:
+            await message.answer(
+                "👋 <b>Добро пожаловать из канала Legal AI News!</b>\n\n"
+                "Давайте настроим вашу персональную ленту новостей.",
+                parse_mode="HTML"
+            )
+            await start_onboarding(message, state, db)
+        return
+
+    # Normal /start flow
     if profile:
         # Existing user - show main menu
         await message.answer(
@@ -117,6 +148,69 @@ async def cmd_start(message: Message, state: FSMContext, db: AsyncSession):
     else:
         # New user - start onboarding
         await start_onboarding(message, state, db)
+
+
+async def show_article_from_channel(message: Message, article_id: int, db: AsyncSession, profile):
+    """Show article directly when user comes from channel link."""
+    from sqlalchemy import select
+    from sqlalchemy.orm import joinedload
+    from app.models.database import Publication
+
+    # Get publication with draft
+    result = await db.execute(
+        select(Publication)
+        .options(joinedload(Publication.draft))
+        .where(Publication.id == article_id)
+    )
+    article = result.scalar_one_or_none()
+
+    if not article or not article.draft:
+        await message.answer(
+            "❌ Статья не найдена\n\n"
+            "Используйте /search для поиска других статей"
+        )
+        return
+
+    # If no profile, suggest onboarding
+    if not profile:
+        await message.answer(
+            "👋 <b>Добро пожаловать в Legal AI News Reader Bot!</b>\n\n"
+            "Вот статья, которую вы выбрали:",
+            parse_mode="HTML"
+        )
+
+    # Check if saved
+    user_id = message.from_user.id
+    from app.services.reader_service import get_saved_articles
+    saved_articles = await get_saved_articles(user_id, db=db)
+    user_saved = any(s.id == article_id for s in saved_articles)
+
+    # Format full article
+    published_date = article.published_at.strftime("%d.%m.%Y")
+    full_text = (
+        f"📰 <b>{article.draft.title}</b>\n\n"
+        f"{article.draft.content}\n\n"
+        f"👁 {article.views or 0} | 📅 {published_date}"
+    )
+
+    # Show full text with keyboard (without "Read more" button since it's already full)
+    keyboard = get_article_keyboard(article_id, user_saved=user_saved, show_read_button=False)
+
+    await message.answer(
+        full_text,
+        parse_mode="HTML",
+        reply_markup=keyboard
+    )
+
+    # Suggest onboarding if new user
+    if not profile:
+        await message.answer(
+            "💡 <b>Хотите получать персонализированные новости?</b>\n\n"
+            "Пройдите быструю настройку - выберите интересующие темы и частоту дайджестов.\n\n"
+            "Нажмите /start чтобы начать!",
+            parse_mode="HTML"
+        )
+
 
 
 async def start_onboarding(message: Message, state: FSMContext, db: AsyncSession):
