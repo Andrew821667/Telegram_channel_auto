@@ -176,7 +176,7 @@ services:
         condition: service_healthy
     volumes:
       - ./app:/app/app
-    command: python app/reader_bot.py
+    command: python -m app.reader_bot
     mem_limit: 200m  # Lightweight bot
 
 volumes:
