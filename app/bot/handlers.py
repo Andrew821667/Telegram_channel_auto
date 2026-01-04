@@ -2231,9 +2231,15 @@ async def callback_settings_sources(callback: CallbackQuery, db: AsyncSession):
         "google_news_ru": "Google News RSS (RU)",
         "google_news_en": "Google News RSS (EN)",
         "habr": "Habr - Новости",
+    "google_news_rss_ru": "Google News RU",
+    "google_news_rss_en": "Google News EN",
+    "interfax": "Interfax - Наука и технологии",
+    "lenta": "Lenta.ru - Технологии",
+    "rbc": "RBC - Технологии",
+    "tass": "TASS - Наука и технологии",
         "perplexity_ru": "Perplexity Search (RU)",
         "perplexity_en": "Perplexity Search (EN)",
-        "telegram_channels": "Telegram каналы",
+        "telegram_channels": "Telegram Channels",
     }
 
     buttons = []
