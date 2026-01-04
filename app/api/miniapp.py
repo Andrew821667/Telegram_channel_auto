@@ -22,6 +22,7 @@ from app.models.database import (
     RawArticle,
     SystemSettings,
     LeadProfile,
+    Source,
 )
 from app.modules.settings_manager import get_setting, set_setting
 from app.config import settings as app_settings
@@ -29,7 +30,6 @@ from app.config import settings as app_settings
 logger = structlog.get_logger()
 
 router = APIRouter(prefix="/api/miniapp", tags=["miniapp"])
-
 
 # ====================
 # Auth Middleware
@@ -110,407 +110,7 @@ async def verify_telegram_user(
 
 
 # ====================
-# Dashboard
-# ====================
-
-@router.get("/dashboard/stats")
-async def get_dashboard_stats(
-    db: AsyncSession = Depends(get_db),
-    user: Dict = Depends(verify_telegram_user)
-):
-    """Get dashboard statistics."""
-    try:
-        # Total drafts pending review
-        total_drafts = await db.scalar(
-            select(func.count(PostDraft.id)).where(
-                PostDraft.status == 'pending_review'
-            )
-        )
-
-        # Total published
-        total_published = await db.scalar(
-            select(func.count(Publication.id))
-        )
-
-        # Average quality score of published articles (from drafts)
-        avg_quality_result = await db.execute(
-            select(func.avg(PostDraft.confidence_score))
-            .join(Publication, Publication.draft_id == PostDraft.id)
-            .where(PostDraft.confidence_score.isnot(None))
-        )
-        avg_quality = avg_quality_result.scalar() or 0.0
-
-        # Total views
-        total_views = await db.scalar(
-            select(func.sum(Publication.views)).where(
-                Publication.views.isnot(None)
-            )
-        ) or 0
-
-        # Total reactions - aggregate JSONB values directly in PostgreSQL
-        from sqlalchemy.dialects.postgresql import aggregate_order_by
-        from sqlalchemy import text
-
-        total_reactions_result = await db.execute(
-            text("""
-                SELECT SUM((
-                    COALESCE((reactions->>'useful')::int, 0) +
-                    COALESCE((reactions->>'important')::int, 0) +
-                    COALESCE((reactions->>'controversial')::int, 0) +
-                    COALESCE((reactions->>'banal')::int, 0) +
-                    COALESCE((reactions->>'obvious')::int, 0) +
-                    COALESCE((reactions->>'poor_quality')::int, 0)
-                )) as total_reactions
-                FROM publications
-                WHERE reactions IS NOT NULL
-            """)
-        )
-        total_reactions = total_reactions_result.scalar() or 0
-
-        # Engagement rate
-        engagement_rate = (total_reactions / total_views * 100) if total_views > 0 else 0.0
-
-        # Articles published today
-        today = datetime.utcnow().date()
-        articles_today = await db.scalar(
-            select(func.count(Publication.id)).where(
-                func.date(Publication.published_at) == today
-            )
-        )
-
-        # Top sources - join with draft and article
-        top_sources_query = (
-            select(
-                RawArticle.source_name,
-                func.count(Publication.id).label('count')
-            )
-            .join(PostDraft, Publication.draft_id == PostDraft.id)
-            .join(RawArticle, PostDraft.article_id == RawArticle.id)
-            .group_by(RawArticle.source_name)
-            .order_by(desc('count'))
-            .limit(5)
-        )
-
-        result = await db.execute(top_sources_query)
-        top_sources = [
-            {"source": row[0], "count": row[1]}
-            for row in result.all()
-        ]
-
-        return {
-            "total_drafts": total_drafts or 0,
-            "total_published": total_published or 0,
-            "avg_quality_score": round(float(avg_quality), 2),
-            "total_views": total_views,
-            "total_reactions": total_reactions,
-            "engagement_rate": round(engagement_rate, 2),
-            "articles_today": articles_today or 0,
-            "top_sources": top_sources,
-        }
-
-    except Exception as e:
-        logger.error("dashboard_stats_error", error=str(e))
-        raise HTTPException(status_code=500, detail="Failed to load dashboard stats")
-
-
-# ====================
-# Drafts Management
-# ====================
-
-@router.get("/drafts")
-async def get_drafts(
-    limit: int = 50,
-    offset: int = 0,
-    db: AsyncSession = Depends(get_db),
-    user: Dict = Depends(verify_telegram_user)
-):
-    """Get list of draft articles for moderation."""
-    try:
-        query = (
-            select(PostDraft)
-            .options(joinedload(PostDraft.article))
-            .where(PostDraft.status == 'pending_review')
-            .order_by(desc(PostDraft.created_at))
-            .limit(limit)
-            .offset(offset)
-        )
-
-        result = await db.execute(query)
-        drafts = result.scalars().all()
-
-        return [
-            {
-                "id": draft.id,
-                "title": draft.title,
-                "content": draft.content,
-                "source": draft.article.source_name if draft.article else "unknown",
-                "ai_summary": draft.content[:200] + "..." if len(draft.content) > 200 else draft.content,  # First 200 chars as summary
-                "quality_score": draft.confidence_score or 0.0,
-                "created_at": draft.created_at.isoformat(),
-                "status": draft.status,
-                "tags": [],  # Not implemented yet
-                "sentiment": "neutral",  # Not implemented yet
-            }
-            for draft in drafts
-        ]
-
-    except Exception as e:
-        logger.error("get_drafts_error", error=str(e))
-        raise HTTPException(status_code=500, detail="Failed to load drafts")
-
-
-@router.get("/drafts/{draft_id}")
-async def get_draft(
-    draft_id: int,
-    db: AsyncSession = Depends(get_db),
-    user: Dict = Depends(verify_telegram_user)
-):
-    """Get single draft by ID."""
-    try:
-        result = await db.execute(
-            select(PostDraft).options(joinedload(PostDraft.article)).where(PostDraft.id == draft_id)
-        )
-        draft = result.scalar_one_or_none()
-
-        if not draft:
-            raise HTTPException(status_code=404, detail="Draft not found")
-
-        return {
-            "id": draft.id,
-            "title": draft.title,
-            "content": draft.content,
-            "source": draft.article.source_name if draft.article else "unknown",
-            "original_url": draft.article.url if draft.article else None,
-            "ai_summary": draft.content[:200] + "..." if len(draft.content) > 200 else draft.content,
-            "quality_score": draft.confidence_score or 0.0,
-            "created_at": draft.created_at.isoformat(),
-            "status": draft.status,
-            "tags": [],  # Not implemented yet
-            "sentiment": "neutral",  # Not implemented yet
-            "categories": [],  # Not implemented yet
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error("get_draft_error", draft_id=draft_id, error=str(e))
-        raise HTTPException(status_code=500, detail="Failed to load draft")
-
-
-@router.post("/drafts/{draft_id}/approve")
-async def approve_draft(
-    draft_id: int,
-    db: AsyncSession = Depends(get_db),
-    user: Dict = Depends(verify_telegram_user)
-):
-    """Approve draft for publication."""
-    try:
-        draft = await db.get(PostDraft, draft_id)
-
-        if not draft:
-            raise HTTPException(status_code=404, detail="Draft not found")
-
-        draft.status = 'approved'
-        await db.commit()
-
-        logger.info("draft_approved", draft_id=draft_id, user_id=user.get('id'))
-
-        return {"success": True, "message": "Draft approved"}
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error("approve_draft_error", draft_id=draft_id, error=str(e))
-        await db.rollback()
-        raise HTTPException(status_code=500, detail="Failed to approve draft")
-
-
-@router.post("/drafts/{draft_id}/reject")
-async def reject_draft(
-    draft_id: int,
-    db: AsyncSession = Depends(get_db),
-    user: Dict = Depends(verify_telegram_user)
-):
-    """Reject draft."""
-    try:
-        draft = await db.get(PostDraft, draft_id)
-
-        if not draft:
-            raise HTTPException(status_code=404, detail="Draft not found")
-
-        draft.status = 'rejected'
-        await db.commit()
-
-        logger.info("draft_rejected", draft_id=draft_id, user_id=user.get('id'))
-
-        return {"success": True, "message": "Draft rejected"}
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error("reject_draft_error", draft_id=draft_id, error=str(e))
-        await db.rollback()
-        raise HTTPException(status_code=500, detail="Failed to reject draft")
-
-
-# ====================
-# Published Articles
-# ====================
-
-@router.get("/published")
-async def get_published(
-    limit: int = 50,
-    offset: int = 0,
-    db: AsyncSession = Depends(get_db),
-    user: Dict = Depends(verify_telegram_user)
-):
-    """Get list of published articles."""
-    try:
-        query = (
-            select(Publication)
-            .options(
-                joinedload(Publication.draft).joinedload(PostDraft.article)
-            )
-            .order_by(desc(Publication.published_at))
-            .limit(limit)
-            .offset(offset)
-        )
-
-        result = await db.execute(query)
-        publications = result.scalars().all()
-
-        # Calculate total reactions from JSONB
-        def get_total_reactions(reactions_dict):
-            if not reactions_dict:
-                return 0
-            return sum(reactions_dict.values()) if isinstance(reactions_dict, dict) else 0
-
-        return [
-            {
-                "id": pub.id,
-                "title": pub.draft.title if pub.draft else "No title",
-                "content": pub.draft.content if pub.draft else "",
-                "published_at": pub.published_at.isoformat(),
-                "views": pub.views or 0,
-                "reactions": get_total_reactions(pub.reactions),
-                "engagement_rate": (get_total_reactions(pub.reactions) / pub.views * 100) if pub.views and pub.views > 0 else 0,
-                "source": pub.draft.article.source_name if pub.draft and pub.draft.article else "unknown",
-                "quality_score": pub.draft.confidence_score if pub.draft else 0.0,
-            }
-            for pub in publications
-        ]
-
-    except Exception as e:
-        logger.error("get_published_error", error=str(e))
-        raise HTTPException(status_code=500, detail="Failed to load published articles")
-
-
-@router.get("/published/stats")
-async def get_published_stats(
-    period: str = "7d",
-    db: AsyncSession = Depends(get_db),
-    user: Dict = Depends(verify_telegram_user)
-):
-    """Get published articles statistics for a period."""
-    try:
-        # Parse period
-        days = {"7d": 7, "30d": 30, "90d": 90}.get(period, 7)
-        since = datetime.utcnow() - timedelta(days=days)
-
-        # Get all publications in period with drafts
-        query = (
-            select(Publication)
-            .options(joinedload(Publication.draft))
-            .where(Publication.published_at >= since)
-        )
-        result = await db.execute(query)
-        publications = result.scalars().all()
-
-        # Calculate statistics manually
-        total_articles = len(publications)
-        total_views = sum(pub.views or 0 for pub in publications)
-
-        # Aggregate reactions from JSONB
-        total_reactions = 0
-        for pub in publications:
-            if pub.reactions and isinstance(pub.reactions, dict):
-                total_reactions += sum(pub.reactions.values())
-
-        # Average quality score from drafts
-        quality_scores = [
-            pub.draft.confidence_score
-            for pub in publications
-            if pub.draft and pub.draft.confidence_score is not None
-        ]
-        avg_quality_score = sum(quality_scores) / len(quality_scores) if quality_scores else 0.0
-
-        # Engagement rate
-        engagement_rate = (total_reactions / total_views * 100) if total_views > 0 else 0.0
-
-        # Top performing articles by views
-        sorted_pubs = sorted(publications, key=lambda p: p.views or 0, reverse=True)[:10]
-
-        top_articles = []
-        for pub in sorted_pubs:
-            # Calculate reactions for this pub
-            pub_reactions = 0
-            if pub.reactions and isinstance(pub.reactions, dict):
-                pub_reactions = sum(pub.reactions.values())
-
-            top_articles.append({
-                "id": pub.id,
-                "title": pub.draft.title if pub.draft else "No title",
-                "content": pub.draft.content if pub.draft else "",
-                "views": pub.views or 0,
-                "reactions": pub_reactions,
-                "published_at": pub.published_at.isoformat(),
-                "message_id": pub.message_id,
-                "channel_id": pub.channel_id,
-            })
-
-        # Daily stats for charts
-        from collections import defaultdict
-        daily_data = defaultdict(lambda: {"views": 0, "reactions": 0, "articles": 0})
-
-        for pub in publications:
-            # Group by date
-            date_key = pub.published_at.strftime("%d.%m")
-            daily_data[date_key]["views"] += pub.views or 0
-            daily_data[date_key]["articles"] += 1
-
-            # Add reactions
-            if pub.reactions and isinstance(pub.reactions, dict):
-                daily_data[date_key]["reactions"] += sum(pub.reactions.values())
-
-        # Convert to sorted list
-        daily_stats = [
-            {
-                "date": date,
-                "views": data["views"],
-                "reactions": data["reactions"],
-                "articles": data["articles"]
-            }
-            for date, data in sorted(daily_data.items())
-        ]
-
-        return {
-            "period": period,
-            "total_articles": total_articles,
-            "total_views": total_views,
-            "total_reactions": total_reactions,
-            "avg_quality_score": round(float(avg_quality_score), 2),
-            "engagement_rate": round(engagement_rate, 2),
-            "top_articles": top_articles,
-            "daily_stats": daily_stats,
-        }
-
-    except Exception as e:
-        logger.error("published_stats_error", error=str(e))
-        raise HTTPException(status_code=500, detail="Failed to load published stats")
-
-
-# ====================
-# System Settings
+# Settings
 # ====================
 
 @router.get("/settings")
@@ -520,17 +120,38 @@ async def get_settings(
 ):
     """Get all system settings."""
     try:
+        # Get all sources - both from settings and database
+        sources = {}
 
+        # Add hardcoded sources from settings
+        hardcoded_sources = [
+            ("google_news_ru", "Google News RSS (RU)", True),
+            ("google_news_en", "Google News RSS (EN)", True),
+            ("google_news_rss_ru", "Google News RU", True),
+            ("google_news_rss_en", "Google News EN", True),
+            ("habr", "Habr - Новости", True),
+            ("perplexity_ru", "Perplexity Search (RU)", True),
+            ("perplexity_en", "Perplexity Search (EN)", True),
+            ("telegram_channels", "Telegram Channels", False),
+            ("interfax", "Interfax - Наука и технологии", True),
+            ("lenta", "Lenta.ru - Технологии", True),
+            ("rbc", "RBC - Технологии", True),
+            ("tass", "TASS - Наука и технологии", True),
+        ]
 
-        # Get all settings grouped by category
-        sources = {
-            "google_news_ru": await get_setting("sources.google_news_ru.enabled", db, True),
-            "google_news_en": await get_setting("sources.google_news_en.enabled", db, True),
-            "habr": await get_setting("sources.habr.enabled", db, True),
-            "perplexity_ru": await get_setting("sources.perplexity_ru.enabled", db, True),
-            "perplexity_en": await get_setting("sources.perplexity_en.enabled", db, True),
-            "telegram_channels": await get_setting("sources.telegram_channels.enabled", db, False),
-        }
+        for source_key, description, default_enabled in hardcoded_sources:
+            sources[source_key] = await get_setting(f"sources.{source_key}.enabled", db, default_enabled)
+
+        # Add dynamic sources from database
+        result = await db.execute(
+            select(Source).where(Source.enabled == True)
+        )
+        db_sources = result.scalars().all()
+
+        for db_source in db_sources:
+            # Use source name as key, but make it safe for settings
+            source_key = db_source.name.lower().replace(' ', '_').replace('-', '_').replace('.', '_')
+            sources[source_key] = True  # All DB sources are enabled by default
 
         llm_models = {
             "analysis": await get_setting("llm.analysis.model", db, "gpt-4o"),
@@ -556,14 +177,14 @@ async def get_settings(
         }
 
         filtering = {
-            "min_score": await get_setting("quality.min_score", db, 0.6),
-            "min_content_length": await get_setting("quality.min_content_length", db, 300),
-            "similarity_threshold": await get_setting("quality.similarity_threshold", db, 0.85),
+            "min_score": await get_setting("filtering.min_score", db, 0.6),
+            "min_content_length": await get_setting("filtering.min_content_length", db, 300),
+            "similarity_threshold": await get_setting("filtering.similarity_threshold", db, 0.85),
         }
 
         budget = {
-            "max_per_month": await get_setting("budget.max_per_month", db, 10.0),
-            "warning_threshold": await get_setting("budget.warning_threshold", db, 8.0),
+            "max_per_month": await get_setting("budget.max_per_month", db, 50),
+            "warning_threshold": await get_setting("budget.warning_threshold", db, 40),
             "stop_on_exceed": await get_setting("budget.stop_on_exceed", db, False),
             "switch_to_cheap": await get_setting("budget.switch_to_cheap", db, True),
         }
@@ -579,7 +200,7 @@ async def get_settings(
 
     except Exception as e:
         logger.error("get_settings_error", error=str(e))
-        raise HTTPException(status_code=500, detail="Failed to load settings")
+        raise HTTPException(status_code=500, detail="Failed to get settings")
 
 
 @router.put("/settings")
@@ -590,810 +211,56 @@ async def update_settings(
 ):
     """Update system settings."""
     try:
-
+        updated = []
 
         # Update sources
         if "sources" in settings_data:
-            for source, enabled in settings_data["sources"].items():
-                await set_setting(f"sources.{source}.enabled", enabled, db)
+            for source_key, enabled in settings_data["sources"].items():
+                setting_key = f"sources.{source_key}.enabled"
+                await set_setting(setting_key, enabled, db)
+                updated.append(setting_key)
 
-        # Update LLM models
-        if "llm_models" in settings_data:
-            for key, value in settings_data["llm_models"].items():
-                await set_setting(f"llm.{key}.model", value, db)
+        # Update other settings
+        settings_mapping = {
+            "llm_models.analysis": "llm.analysis.model",
+            "llm_models.draft_generation": "llm.draft_generation.model",
+            "llm_models.ranking": "llm.ranking.model",
+            "dalle.enabled": "dalle.enabled",
+            "dalle.model": "dalle.model",
+            "dalle.quality": "dalle.quality",
+            "dalle.size": "dalle.size",
+            "dalle.auto_generate": "dalle.auto_generate",
+            "dalle.ask_on_review": "dalle.ask_on_review",
+            "auto_publish.enabled": "auto_publish.enabled",
+            "auto_publish.mode": "auto_publish.mode",
+            "auto_publish.max_per_day": "auto_publish.max_per_day",
+            "auto_publish.weekdays_only": "auto_publish.weekdays_only",
+            "auto_publish.skip_holidays": "auto_publish.skip_holidays",
+            "filtering.min_score": "filtering.min_score",
+            "filtering.min_content_length": "filtering.min_content_length",
+            "filtering.similarity_threshold": "filtering.similarity_threshold",
+            "budget.max_per_month": "budget.max_per_month",
+            "budget.warning_threshold": "budget.warning_threshold",
+            "budget.stop_on_exceed": "budget.stop_on_exceed",
+            "budget.switch_to_cheap": "budget.switch_to_cheap",
+        }
 
-        # Update DALL-E
-        if "dalle" in settings_data:
-            for key, value in settings_data["dalle"].items():
-                await set_setting(f"dalle.{key}", value, db)
+        def update_nested_settings(data, prefix=""):
+            for key, value in data.items():
+                if isinstance(value, dict):
+                    update_nested_settings(value, f"{prefix}{key}.")
+                else:
+                    setting_key = settings_mapping.get(f"{prefix}{key}")
+                    if setting_key:
+                        set_setting(setting_key, value, db)
+                        updated.append(setting_key)
 
-        # Update auto-publish
-        if "auto_publish" in settings_data:
-            for key, value in settings_data["auto_publish"].items():
-                await set_setting(f"auto_publish.{key}", value, db)
+        update_nested_settings(settings_data)
 
-        # Update filtering
-        if "filtering" in settings_data:
-            for key, value in settings_data["filtering"].items():
-                await set_setting(f"quality.{key}", value, db)
+        logger.info("settings_updated", updated_count=len(updated), user_id=user.get('id'))
 
-        # Update budget
-        if "budget" in settings_data:
-            for key, value in settings_data["budget"].items():
-                await set_setting(f"budget.{key}", value, db)
-
-        await db.commit()
-
-        logger.info("settings_updated", user_id=user.get('id'))
-
-        return {"success": True, "message": "Settings updated"}
+        return {"message": f"Updated {len(updated)} settings", "updated": updated}
 
     except Exception as e:
         logger.error("update_settings_error", error=str(e))
-        await db.rollback()
         raise HTTPException(status_code=500, detail="Failed to update settings")
-
-
-@router.get("/workflow/stats")
-async def get_workflow_stats(
-    db: AsyncSession = Depends(get_db),
-    user: Dict = Depends(verify_telegram_user)
-):
-    """Get statistics from the last workflow run."""
-    try:
-        from app.models.database import RawArticle, PostDraft
-
-        # Get counts for last 24 hours
-        last_24h = datetime.utcnow() - timedelta(hours=24)
-
-        # Articles collected
-        articles_result = await db.execute(
-            select(func.count(RawArticle.id))
-            .where(RawArticle.fetched_at >= last_24h)
-        )
-        articles_collected = articles_result.scalar() or 0
-
-        # Drafts created
-        drafts_result = await db.execute(
-            select(func.count(PostDraft.id))
-            .where(PostDraft.created_at >= last_24h)
-        )
-        drafts_created = drafts_result.scalar() or 0
-
-        # Pending review
-        pending_result = await db.execute(
-            select(func.count(PostDraft.id))
-            .where(PostDraft.status == 'pending_review')
-        )
-        pending_review = pending_result.scalar() or 0
-
-        # Sources count (active sources)
-        sources_result = await db.execute(
-            select(func.count(func.distinct(RawArticle.source_name)))
-            .where(RawArticle.fetched_at >= last_24h)
-        )
-        sources_count = sources_result.scalar() or 0
-
-        # Filter rate
-        filter_rate = (drafts_created / articles_collected * 100) if articles_collected > 0 else 0
-
-        return {
-            "sources_processed": sources_count,
-            "articles_collected": articles_collected,
-            "passed_filter": drafts_created,
-            "drafts_created": drafts_created,
-            "pending_review": pending_review,
-            "filter_rate": round(filter_rate, 1),
-            "period": "24h"
-        }
-
-    except Exception as e:
-        logger.error("get_workflow_stats_error", error=str(e))
-        raise HTTPException(status_code=500, detail="Failed to load workflow statistics")
-
-
-@router.get("/dashboard/channel-analytics")
-async def get_channel_analytics(
-    days: int = 7,
-    db: AsyncSession = Depends(get_db),
-    user: Dict = Depends(verify_telegram_user)
-):
-    """Get channel conversion analytics."""
-    try:
-        # Log the authenticated user
-        logger.info("get_channel_analytics_request", user_id=user.get('id'), days=days)
-
-        from app.modules.analytics import AnalyticsService
-
-        analytics = AnalyticsService(db)
-        stats = await analytics.get_channel_conversion_stats(days=days)
-
-        return {
-            "success": True,
-            "data": stats,
-            "period_days": days
-        }
-
-    except Exception as e:
-        logger.error("get_channel_analytics_error", error=str(e))
-        raise HTTPException(status_code=500, detail="Failed to load channel analytics")
-
-
-# ====================
-# Lead Analytics
-# ====================
-
-@router.get("/dashboard/lead-analytics")
-async def get_lead_analytics(
-    days: int = 30,
-    db: AsyncSession = Depends(get_db),
-    user: Dict = Depends(verify_telegram_user)
-):
-    """Get lead analytics for the dashboard."""
-    try:
-        from app.modules.analytics import AnalyticsService
-
-        analytics = AnalyticsService(db)
-        lead_data = await analytics.get_lead_analytics(days=days)
-        roi_data = await analytics.get_lead_magnet_roi(days=days)
-
-        return {
-            "success": True,
-            "data": lead_data,
-            "roi": roi_data,
-            "period_days": days
-        }
-
-    except Exception as e:
-        logger.error("get_lead_analytics_error", error=str(e))
-        raise HTTPException(status_code=500, detail="Failed to load lead analytics")
-
-
-@router.get("/leads/top")
-async def get_top_leads(
-    limit: int = 10,
-    db: AsyncSession = Depends(get_db),
-    user: Dict = Depends(verify_telegram_user)
-):
-    """Get top leads by score."""
-    try:
-        from app.modules.analytics import AnalyticsService
-
-        analytics = AnalyticsService(db)
-        lead_data = await analytics.get_lead_analytics(days=30)
-        top_leads = lead_data["top_leads"][:limit]
-
-        return top_leads
-
-    except Exception as e:
-        logger.error("get_top_leads_error", error=str(e))
-        raise HTTPException(status_code=500, detail="Failed to load top leads")
-
-
-@router.get("/leads/stats")
-async def get_lead_stats(
-    db: AsyncSession = Depends(get_db),
-    user: Dict = Depends(verify_telegram_user)
-):
-    """Get quick lead statistics for dashboard."""
-    try:
-        from app.services.reader_service import get_lead_profile
-        from app.modules.analytics import AnalyticsService
-
-        # Get user's lead profile if exists
-        user_id = user.get('id')
-        lead_profile = None
-        if user_id:
-            try:
-                lead_profile = await get_lead_profile(user_id, db)
-            except:
-                lead_profile = None
-
-        # Get overall lead stats
-        analytics = AnalyticsService(db)
-        lead_data = await analytics.get_lead_analytics(days=30)
-        overview = lead_data["overview"]
-
-        return {
-            "user_lead_score": lead_profile.lead_score if lead_profile else 0,
-            "user_lead_status": lead_profile.lead_status if lead_profile else None,
-            "total_leads": overview["total_leads"],
-            "qualified_leads": overview["qualified_leads"],
-            "conversion_rate": overview["conversion_rate"],
-            "avg_lead_score": overview["avg_lead_score"]
-        }
-
-    except Exception as e:
-        logger.error("get_lead_stats_error", error=str(e))
-        raise HTTPException(status_code=500, detail="Failed to load lead stats")
-
-
-@router.get("/test/initdata")
-async def test_initdata(
-    x_telegram_init_data: Optional[str] = Header(None)
-):
-    """Test endpoint to check initData parsing."""
-    try:
-        if not x_telegram_init_data:
-            return {"status": "no_initdata", "message": "No X-Telegram-Init-Data header"}
-
-        # Check for development fallback
-        try:
-            dev_data = json.loads(x_telegram_init_data)
-            if (isinstance(dev_data, dict) and
-                dev_data.get('user', {}).get('id') == 0 and
-                dev_data.get('user', {}).get('username') == 'dev_user'):
-                return {
-                    "status": "development_fallback",
-                    "message": "Using development authentication",
-                    "user": dev_data.get('user'),
-                    "auth_type": "fallback"
-                }
-        except (json.JSONDecodeError, KeyError):
-            pass
-
-        # Parse initData like in verify_telegram_user
-        parsed_data = dict(parse_qsl(x_telegram_init_data))
-        user_data = parsed_data.get('user')
-
-        return {
-            "status": "success",
-            "has_initdata": True,
-            "user": user_data,
-            "hash_present": 'hash' in parsed_data,
-            "initdata_length": len(x_telegram_init_data),
-            "parsed_keys": list(parsed_data.keys()),
-            "auth_type": "telegram"
-        }
-
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
-
-
-@router.get("/debug/health")
-async def debug_health_check(
-    db: AsyncSession = Depends(get_db),
-    x_telegram_init_data: Optional[str] = Header(None)
-):
-    """Debug endpoint to check API health without strict auth."""
-    try:
-        # Try to authenticate, but don't fail if it doesn't work
-        user_info = None
-        auth_status = "unknown"
-
-        if x_telegram_init_data:
-            try:
-                user_info = await verify_telegram_user(x_telegram_init_data)
-                auth_status = "authenticated"
-            except Exception as e:
-                auth_status = f"auth_failed: {str(e)}"
-
-        # Test database connection
-        db_status = "unknown"
-        db_stats = {}
-
-        try:
-            # Basic stats
-            total_drafts = await db.scalar(
-                select(func.count(PostDraft.id)).where(
-                    PostDraft.status == 'pending_review'
-                )
-            )
-            total_published = await db.scalar(
-                select(func.count(Publication.id))
-            )
-
-            db_stats = {
-                "total_drafts": total_drafts or 0,
-                "total_published": total_published or 0,
-            }
-            db_status = "healthy"
-        except Exception as e:
-            db_status = f"error: {str(e)}"
-
-        return {
-            "status": "healthy",
-            "timestamp": datetime.utcnow().isoformat(),
-            "auth_status": auth_status,
-            "user": user_info,
-            "database": db_status,
-            "db_stats": db_stats,
-            "environment": {
-                "telegram_bot_token_set": bool(app_settings.telegram_bot_token),
-                "debug_mode": app_settings.debug,
-                "app_env": app_settings.app_env
-            }
-        }
-
-    except Exception as e:
-        logger.error("debug_health_check_error", error=str(e))
-        return {
-            "status": "error",
-            "error": str(e),
-            "timestamp": datetime.utcnow().isoformat()
-        }
-
-
-# ====================
-# Legal AI Endpoints
-# ====================
-
-@router.get("/legal/stats")
-async def get_legal_stats(
-    user: Dict[str, Any] = Depends(verify_telegram_user)
-):
-    """Get Legal AI statistics overview."""
-    try:
-        logger.info("get_legal_stats", user_id=user.get('id'))
-
-        # Mock data for demonstration
-        return {
-            "total_processed": 2815,
-            "success_rate": 87,
-            "active_tasks": 23,
-            "online_lawyers": 8,
-            "claims_processed": 1250,
-            "court_cases_analyzed": 890,
-            "due_diligence_checks": 675
-        }
-
-    except Exception as e:
-        logger.error("get_legal_stats_error", error=str(e))
-        raise HTTPException(status_code=500, detail="Failed to load legal stats")
-
-
-@router.get("/legal/claims")
-async def get_claims_list(
-    user: Dict[str, Any] = Depends(verify_telegram_user),
-    status: Optional[str] = None,
-    limit: int = 20,
-    offset: int = 0
-):
-    """Get list of claims with filtering."""
-    try:
-        logger.info("get_claims_list", user_id=user.get('id'), status=status)
-
-        # Mock data for demonstration
-        mock_claims = [
-            {
-                "id": "1",
-                "title": "Претензия по договору поставки №123",
-                "status": "sent",
-                "created_at": "2025-01-04",
-                "amount": 150000,
-                "counterparty": "ООО \"ТехноСервис\"",
-                "deadline": "2025-01-15"
-            },
-            {
-                "id": "2",
-                "title": "Претензия о возврате аванса",
-                "status": "review",
-                "created_at": "2025-01-03",
-                "amount": 75000,
-                "counterparty": "ИП Иванов А.А.",
-                "deadline": "2025-01-12"
-            },
-            {
-                "id": "3",
-                "title": "Претензия по качеству услуг",
-                "status": "draft",
-                "created_at": "2025-01-02",
-                "amount": 25000,
-                "counterparty": "ЗАО \"Консалтинг Плюс\"",
-                "deadline": "2025-01-10"
-            }
-        ]
-
-        # Filter by status if provided
-        if status:
-            mock_claims = [c for c in mock_claims if c['status'] == status]
-
-        return {
-            "claims": mock_claims[offset:offset+limit],
-            "total": len(mock_claims),
-            "offset": offset,
-            "limit": limit
-        }
-
-    except Exception as e:
-        logger.error("get_claims_list_error", error=str(e))
-        raise HTTPException(status_code=500, detail="Failed to load claims")
-
-
-@router.get("/legal/court/cases")
-async def get_court_cases(
-    user: Dict[str, Any] = Depends(verify_telegram_user),
-    category: Optional[str] = None,
-    status: Optional[str] = None,
-    search: Optional[str] = None,
-    limit: int = 20,
-    offset: int = 0
-):
-    """Get list of court cases with filtering."""
-    try:
-        logger.info("get_court_cases", user_id=user.get('id'), category=category, status=status)
-
-        # Mock data for demonstration
-        mock_cases = [
-            {
-                "id": "1",
-                "title": "Иск о взыскании задолженности по договору поставки",
-                "court": "Арбитражный суд г. Москвы",
-                "case_number": "А40-123456/2024",
-                "status": "active",
-                "category": "Договорные споры",
-                "plaintiff": "ООО \"ТехноСервис\"",
-                "defendant": "ИП Иванов А.А.",
-                "amount": 250000,
-                "probability": 78,
-                "created_at": "2025-01-04"
-            },
-            {
-                "id": "2",
-                "title": "Иск о признании недействительным договора купли-продажи",
-                "court": "Арбитражный суд Московской области",
-                "case_number": "А41-789012/2024",
-                "status": "completed",
-                "category": "Корпоративные споры",
-                "plaintiff": "ЗАО \"ИнвестХолдинг\"",
-                "defendant": "ООО \"СтройМонтаж\"",
-                "amount": 1500000,
-                "probability": 65,
-                "created_at": "2025-01-03"
-            }
-        ]
-
-        # Apply filters
-        filtered_cases = mock_cases
-        if category and category != 'all':
-            filtered_cases = [c for c in filtered_cases if c['category'] == category]
-        if status:
-            filtered_cases = [c for c in filtered_cases if c['status'] == status]
-        if search:
-            search_lower = search.lower()
-            filtered_cases = [
-                c for c in filtered_cases
-                if search_lower in c['title'].lower() or search_lower in c['case_number']
-            ]
-
-        return {
-            "cases": filtered_cases[offset:offset+limit],
-            "total": len(filtered_cases),
-            "offset": offset,
-            "limit": limit
-        }
-
-    except Exception as e:
-        logger.error("get_court_cases_error", error=str(e))
-        raise HTTPException(status_code=500, detail="Failed to load court cases")
-
-
-@router.get("/legal/due-diligence/checks")
-async def get_due_diligence_checks(
-    user: Dict[str, Any] = Depends(verify_telegram_user),
-    status: Optional[str] = None,
-    limit: int = 20,
-    offset: int = 0
-):
-    """Get list of due diligence checks."""
-    try:
-        logger.info("get_due_diligence_checks", user_id=user.get('id'), status=status)
-
-        # Mock data for demonstration
-        mock_checks = [
-            {
-                "id": "1",
-                "entity_name": "ООО \"ТехноСервис Плюс\"",
-                "entity_type": "company",
-                "status": "completed",
-                "risk_level": "low",
-                "checks_completed": 12,
-                "checks_total": 12,
-                "created_at": "2025-01-04",
-                "completed_at": "2025-01-04"
-            },
-            {
-                "id": "2",
-                "entity_name": "ИП Иванов Алексей Сергеевич",
-                "entity_type": "individual",
-                "status": "in_progress",
-                "risk_level": "medium",
-                "checks_completed": 8,
-                "checks_total": 12,
-                "created_at": "2025-01-03"
-            }
-        ]
-
-        # Filter by status if provided
-        if status:
-            mock_checks = [c for c in mock_checks if c['status'] == status]
-
-        return {
-            "checks": mock_checks[offset:offset+limit],
-            "total": len(mock_checks),
-            "offset": offset,
-            "limit": limit
-        }
-
-    except Exception as e:
-        logger.error("get_due_diligence_checks_error", error=str(e))
-        raise HTTPException(status_code=500, detail="Failed to load due diligence checks")
-
-
-# ====================
-# Lead Management Endpoints
-# ====================
-
-@router.get("/leads/stats")
-async def get_lead_stats(
-    user: Dict[str, Any] = Depends(verify_telegram_user)
-):
-    """Get basic lead statistics for dashboard."""
-    try:
-        logger.info("get_lead_stats", user_id=user.get('id'))
-
-        # Get user lead profile
-        user_lead = await db.scalar(
-            select(LeadProfile).where(LeadProfile.user_id == user['id'])
-        )
-
-        # Get overall stats
-        total_leads = await db.scalar(
-            select(func.count(LeadProfile.id)).where(
-                LeadProfile.lead_magnet_completed == True
-            )
-        )
-
-        qualified_leads = await db.scalar(
-            select(func.count(LeadProfile.id)).where(
-                and_(
-                    LeadProfile.lead_status == 'qualified',
-                    LeadProfile.lead_magnet_completed == True
-                )
-            )
-        )
-
-        # Calculate conversion rate
-        conversion_rate = (qualified_leads / total_leads * 100) if total_leads > 0 else 0
-
-        # Calculate average lead score
-        avg_score_result = await db.scalar(
-            select(func.avg(LeadProfile.lead_score)).where(
-                LeadProfile.lead_magnet_completed == True
-            )
-        )
-        avg_lead_score = float(avg_score_result) if avg_score_result else 0
-
-        return {
-            "user_lead_score": user_lead.lead_score if user_lead else None,
-            "user_lead_status": user_lead.lead_status if user_lead else None,
-            "total_leads": total_leads or 0,
-            "qualified_leads": qualified_leads or 0,
-            "conversion_rate": round(conversion_rate, 1),
-            "avg_lead_score": round(avg_lead_score, 1)
-        }
-
-    except Exception as e:
-        logger.error("get_lead_stats_error", error=str(e))
-        raise HTTPException(status_code=500, detail="Failed to load lead stats")
-
-
-@router.get("/leads/top")
-async def get_top_leads(
-    limit: int = 10,
-    user: Dict[str, Any] = Depends(verify_telegram_user)
-):
-    """Get top leads by score."""
-    try:
-        logger.info("get_top_leads", user_id=user.get('id'), limit=limit)
-
-        leads_query = select(
-            LeadProfile.user_id,
-            LeadProfile.email,
-            LeadProfile.company,
-            LeadProfile.lead_score,
-            LeadProfile.expertise_level,
-            LeadProfile.business_focus,
-            LeadProfile.created_at
-        ).where(
-            LeadProfile.lead_magnet_completed == True
-        ).order_by(
-            LeadProfile.lead_score.desc()
-        ).limit(limit)
-
-        result = await db.execute(leads_query)
-        leads = result.mappings().all()
-
-        return {
-            "leads": [
-                {
-                    "user_id": lead.user_id,
-                    "email": lead.email,
-                    "company": lead.company or "Не указано",
-                    "lead_score": lead.lead_score,
-                    "expertise_level": lead.expertise_level,
-                    "business_focus": lead.business_focus,
-                    "created_at": lead.created_at.isoformat() if lead.created_at else None
-                }
-                for lead in leads
-            ]
-        }
-
-    except Exception as e:
-        logger.error("get_top_leads_error", error=str(e))
-        raise HTTPException(status_code=500, detail="Failed to load top leads")
-
-
-@router.get("/dashboard/lead-analytics")
-async def get_lead_analytics(
-    days: int = 30,
-    user: Dict[str, Any] = Depends(verify_telegram_user)
-):
-    """Get comprehensive lead analytics for the specified period."""
-    try:
-        logger.info("get_lead_analytics", user_id=user.get('id'), days=days)
-
-        # Calculate date range
-        start_date = datetime.utcnow() - timedelta(days=days)
-
-        # Overview metrics
-        total_leads = await db.scalar(
-            select(func.count(LeadProfile.id)).where(
-                LeadProfile.created_at >= start_date
-            )
-        )
-
-        qualified_leads = await db.scalar(
-            select(func.count(LeadProfile.id)).where(
-                and_(
-                    LeadProfile.lead_status == 'qualified',
-                    LeadProfile.created_at >= start_date
-                )
-            )
-        )
-
-        converted_leads = await db.scalar(
-            select(func.count(LeadProfile.id)).where(
-                and_(
-                    LeadProfile.lead_status == 'converted',
-                    LeadProfile.created_at >= start_date
-                )
-            )
-        )
-
-        completed_magnet = await db.scalar(
-            select(func.count(LeadProfile.id)).where(
-                and_(
-                    LeadProfile.lead_magnet_completed == True,
-                    LeadProfile.created_at >= start_date
-                )
-            )
-        )
-
-        # Calculate rates
-        qualification_rate = (qualified_leads / total_leads * 100) if total_leads > 0 else 0
-        conversion_rate = (converted_leads / qualified_leads * 100) if qualified_leads > 0 else 0
-        magnet_completion_rate = (completed_magnet / total_leads * 100) if total_leads > 0 else 0
-
-        # Average lead score
-        avg_score_result = await db.scalar(
-            select(func.avg(LeadProfile.lead_score)).where(
-                LeadProfile.created_at >= start_date
-            )
-        )
-        avg_lead_score = float(avg_score_result) if avg_score_result else 0
-
-        # Contact info completeness
-        with_email = await db.scalar(
-            select(func.count(LeadProfile.id)).where(
-                and_(
-                    LeadProfile.email.isnot(None),
-                    LeadProfile.created_at >= start_date
-                )
-            )
-        )
-
-        with_phone = await db.scalar(
-            select(func.count(LeadProfile.id)).where(
-                and_(
-                    LeadProfile.phone.isnot(None),
-                    LeadProfile.created_at >= start_date
-                )
-            )
-        )
-
-        with_company = await db.scalar(
-            select(func.count(LeadProfile.id)).where(
-                and_(
-                    LeadProfile.company.isnot(None),
-                    LeadProfile.created_at >= start_date
-                )
-            )
-        )
-
-        # Daily stats for the period
-        daily_stats_query = """
-            SELECT
-                DATE(created_at) as date,
-                COUNT(*) as new_leads,
-                COUNT(*) FILTER (WHERE lead_magnet_completed = true) as completed_magnet,
-                COUNT(*) FILTER (WHERE lead_status = 'qualified') as qualified,
-                ROUND(AVG(lead_score), 1) as avg_score
-            FROM lead_profiles
-            WHERE created_at >= $1
-            GROUP BY DATE(created_at)
-            ORDER BY DATE(created_at)
-        """
-
-        daily_result = await db.execute(text(daily_stats_query), (start_date,))
-        daily_stats = [
-            {
-                "date": row.date.isoformat(),
-                "new_leads": row.new_leads,
-                "completed_magnet": row.completed_magnet,
-                "qualified": row.qualified,
-                "avg_score": float(row.avg_score) if row.avg_score else 0
-            }
-            for row in daily_result
-        ]
-
-        # Top leads for this period
-        top_leads_query = select(
-            LeadProfile.user_id,
-            LeadProfile.email,
-            LeadProfile.company,
-            LeadProfile.position,
-            LeadProfile.lead_score,
-            LeadProfile.expertise_level,
-            LeadProfile.business_focus,
-            LeadProfile.created_at
-        ).where(
-            LeadProfile.created_at >= start_date
-        ).order_by(
-            LeadProfile.lead_score.desc()
-        ).limit(5)
-
-        top_leads_result = await db.execute(top_leads_query)
-        top_leads = [
-            {
-                "user_id": lead.user_id,
-                "username": f"User_{lead.user_id}",  # Mock username since we don't have real usernames
-                "full_name": "N/A",  # Mock full name
-                "email": lead.email,
-                "company": lead.company,
-                "lead_score": lead.lead_score,
-                "expertise_level": lead.expertise_level,
-                "business_focus": lead.business_focus,
-                "created_at": lead.created_at.isoformat() if lead.created_at else None
-            }
-            for lead in top_leads_result
-        ]
-
-        # Sources stats (mock data for now)
-        sources_stats = [
-            {"source": "Telegram Channel", "count": total_leads or 0, "avg_score": avg_lead_score, "completed_rate": magnet_completion_rate}
-        ]
-
-        return {
-            "period_days": days,
-            "overview": {
-                "total_leads": total_leads or 0,
-                "qualified_leads": qualified_leads or 0,
-                "converted_leads": converted_leads or 0,
-                "completed_magnet": completed_magnet or 0,
-                "qualification_rate": round(qualification_rate, 1),
-                "conversion_rate": round(conversion_rate, 1),
-                "magnet_completion_rate": round(magnet_completion_rate, 1),
-                "avg_lead_score": round(avg_lead_score, 1),
-                "with_email": with_email or 0,
-                "with_phone": with_phone or 0,
-                "with_company": with_company or 0
-            },
-            "daily_stats": daily_stats,
-            "top_leads": top_leads,
-            "sources_stats": sources_stats
-        }
-
-    except Exception as e:
-        logger.error("get_lead_analytics_error", error=str(e))
-        raise HTTPException(status_code=500, detail="Failed to load lead analytics")
