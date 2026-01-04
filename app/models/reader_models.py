@@ -105,7 +105,7 @@ class LeadProfile(Base):
         Index('idx_lead_profiles_expertise', 'expertise_level'),
         Index('idx_lead_profiles_score', 'lead_score'),
         Index('idx_lead_profiles_completed', 'lead_magnet_completed'),
-        {'extend_existing': True}
+        {'extend_existing': True}  # Allow table redefinition if already exists
     )
 
     def __repr__(self):
