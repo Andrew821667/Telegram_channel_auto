@@ -334,8 +334,4 @@ export const apiMethods = {
   // Debug
   debugHealthCheck: () => api.get('/api/miniapp/debug/health'),
 
-  // Leads
-  getLeadStats: () => api.get('/api/miniapp/leads/stats'),
-  getTopLeads: (limit = 10) => api.get(`/api/miniapp/leads/top?limit=${limit}`),
-  getLeadAnalytics: (days = 30) => api.get(`/api/miniapp/dashboard/lead-analytics?days=${days}`),
 }
