@@ -1273,25 +1273,23 @@ async def callback_react(callback: CallbackQuery, db: AsyncSession):
             return
 
         # Атомарное обновление реакций (избегаем race condition)
-        from sqlalchemy import func, cast, Integer
-        from sqlalchemy.dialects.postgresql import JSONB
+        from sqlalchemy import text
 
         await db.execute(
-            update(Publication)
-            .where(Publication.id == publication.id)
-            .values(
-                reactions=func.jsonb_set(
-                    func.coalesce(Publication.reactions, cast({}, JSONB)),
-                    f'{{{reaction_type}}}',
-                    cast(
-                        func.coalesce(
-                            cast(Publication.reactions[reaction_type].astext, Integer),
-                            0
-                        ) + 1,
-                        JSONB
-                    )
+            text("""
+                UPDATE publications
+                SET reactions = jsonb_set(
+                    COALESCE(reactions, '{}'::jsonb),
+                    :path,
+                    to_jsonb(COALESCE((reactions->>:key)::int, 0) + 1)
                 )
-            )
+                WHERE id = :pub_id
+            """),
+            {
+                "path": f'{{{reaction_type}}}',
+                "key": reaction_type,
+                "pub_id": publication.id
+            }
         )
         await db.commit()
 
