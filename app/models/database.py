@@ -374,6 +374,75 @@ class PostComment(Base):
     )
 
 
+class LeadProfile(Base):
+    """Расширенные профили лидов с контактной информацией и квалификацией."""
+
+    __tablename__ = "lead_profiles"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(BigInteger, nullable=False, unique=True, index=True)
+
+    # Contact Information (Lead Magnet)
+    email = Column(String(255))
+    phone = Column(String(50))
+    company = Column(String(255))
+    position = Column(String(255))
+
+    # Lead Qualification
+    lead_status = Column(String(50), default='interested')  # 'interested', 'qualified', 'converted', 'nurturing'
+    expertise_level = Column(String(50))                    # 'beginner', 'intermediate', 'expert', 'business_owner'
+    business_focus = Column(String(100))                    # 'law_firm', 'corporate', 'startup', 'consulting', 'other'
+
+    # Lead Magnet Specific
+    lead_magnet_completed = Column(Boolean, default=False)   # True if completed lead magnet flow
+    questions_asked = Column(Integer, default=0)             # How many questions asked in lead magnet
+    digest_requested = Column(Boolean, default=False)        # True if requested personalized digest
+
+    # Lead Scoring
+    lead_score = Column(Integer, default=0)                  # 0-100 score based on engagement and qualification
+    last_lead_activity = Column(TIMESTAMP, default=datetime.utcnow)
+
+    # Additional Business Info
+    pain_points = Column(ARRAY(String(255)))                # What problems they want to solve
+    budget_range = Column(String(50))                        # 'under_100k', '100k_500k', '500k_1m', 'over_1m'
+    timeline = Column(String(50))                           # 'immediate', '3_months', '6_months', '1_year', 'researching'
+
+    # CRM Integration
+    crm_id = Column(String(100))                             # External CRM system ID
+    sales_notes = Column(Text)                               # Notes for sales team
+
+    # Metadata
+    created_at = Column(TIMESTAMP, default=datetime.utcnow, index=True)
+    updated_at = Column(TIMESTAMP, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        CheckConstraint(
+            "lead_status IN ('interested', 'qualified', 'converted', 'nurturing')",
+            name='chk_lead_status'
+        ),
+        CheckConstraint(
+            "expertise_level IN ('beginner', 'intermediate', 'expert', 'business_owner')",
+            name='chk_expertise_level'
+        ),
+        CheckConstraint(
+            "business_focus IN ('law_firm', 'corporate', 'startup', 'consulting', 'other')",
+            name='chk_business_focus'
+        ),
+        CheckConstraint(
+            "budget_range IN ('under_100k', '100k_500k', '500k_1m', 'over_1m')",
+            name='chk_budget_range'
+        ),
+        CheckConstraint(
+            "timeline IN ('immediate', '3_months', '6_months', '1_year', 'researching')",
+            name='chk_timeline'
+        ),
+        CheckConstraint(
+            "lead_score >= 0 AND lead_score <= 100",
+            name='chk_lead_score_range'
+        ),
+    )
+
+
 # ====================
 # Database Connection
 # ====================

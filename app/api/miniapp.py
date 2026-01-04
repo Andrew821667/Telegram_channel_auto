@@ -21,6 +21,7 @@ from app.models.database import (
     Publication,
     RawArticle,
     SystemSettings,
+    LeadProfile,
 )
 from app.modules.settings_manager import get_setting, set_setting
 from app.config import settings as app_settings
@@ -911,3 +912,488 @@ async def debug_health_check(
             "error": str(e),
             "timestamp": datetime.utcnow().isoformat()
         }
+
+
+# ====================
+# Legal AI Endpoints
+# ====================
+
+@router.get("/legal/stats")
+async def get_legal_stats(
+    user: Dict[str, Any] = Depends(verify_telegram_user)
+):
+    """Get Legal AI statistics overview."""
+    try:
+        logger.info("get_legal_stats", user_id=user.get('id'))
+
+        # Mock data for demonstration
+        return {
+            "total_processed": 2815,
+            "success_rate": 87,
+            "active_tasks": 23,
+            "online_lawyers": 8,
+            "claims_processed": 1250,
+            "court_cases_analyzed": 890,
+            "due_diligence_checks": 675
+        }
+
+    except Exception as e:
+        logger.error("get_legal_stats_error", error=str(e))
+        raise HTTPException(status_code=500, detail="Failed to load legal stats")
+
+
+@router.get("/legal/claims")
+async def get_claims_list(
+    user: Dict[str, Any] = Depends(verify_telegram_user),
+    status: Optional[str] = None,
+    limit: int = 20,
+    offset: int = 0
+):
+    """Get list of claims with filtering."""
+    try:
+        logger.info("get_claims_list", user_id=user.get('id'), status=status)
+
+        # Mock data for demonstration
+        mock_claims = [
+            {
+                "id": "1",
+                "title": "Претензия по договору поставки №123",
+                "status": "sent",
+                "created_at": "2025-01-04",
+                "amount": 150000,
+                "counterparty": "ООО \"ТехноСервис\"",
+                "deadline": "2025-01-15"
+            },
+            {
+                "id": "2",
+                "title": "Претензия о возврате аванса",
+                "status": "review",
+                "created_at": "2025-01-03",
+                "amount": 75000,
+                "counterparty": "ИП Иванов А.А.",
+                "deadline": "2025-01-12"
+            },
+            {
+                "id": "3",
+                "title": "Претензия по качеству услуг",
+                "status": "draft",
+                "created_at": "2025-01-02",
+                "amount": 25000,
+                "counterparty": "ЗАО \"Консалтинг Плюс\"",
+                "deadline": "2025-01-10"
+            }
+        ]
+
+        # Filter by status if provided
+        if status:
+            mock_claims = [c for c in mock_claims if c['status'] == status]
+
+        return {
+            "claims": mock_claims[offset:offset+limit],
+            "total": len(mock_claims),
+            "offset": offset,
+            "limit": limit
+        }
+
+    except Exception as e:
+        logger.error("get_claims_list_error", error=str(e))
+        raise HTTPException(status_code=500, detail="Failed to load claims")
+
+
+@router.get("/legal/court/cases")
+async def get_court_cases(
+    user: Dict[str, Any] = Depends(verify_telegram_user),
+    category: Optional[str] = None,
+    status: Optional[str] = None,
+    search: Optional[str] = None,
+    limit: int = 20,
+    offset: int = 0
+):
+    """Get list of court cases with filtering."""
+    try:
+        logger.info("get_court_cases", user_id=user.get('id'), category=category, status=status)
+
+        # Mock data for demonstration
+        mock_cases = [
+            {
+                "id": "1",
+                "title": "Иск о взыскании задолженности по договору поставки",
+                "court": "Арбитражный суд г. Москвы",
+                "case_number": "А40-123456/2024",
+                "status": "active",
+                "category": "Договорные споры",
+                "plaintiff": "ООО \"ТехноСервис\"",
+                "defendant": "ИП Иванов А.А.",
+                "amount": 250000,
+                "probability": 78,
+                "created_at": "2025-01-04"
+            },
+            {
+                "id": "2",
+                "title": "Иск о признании недействительным договора купли-продажи",
+                "court": "Арбитражный суд Московской области",
+                "case_number": "А41-789012/2024",
+                "status": "completed",
+                "category": "Корпоративные споры",
+                "plaintiff": "ЗАО \"ИнвестХолдинг\"",
+                "defendant": "ООО \"СтройМонтаж\"",
+                "amount": 1500000,
+                "probability": 65,
+                "created_at": "2025-01-03"
+            }
+        ]
+
+        # Apply filters
+        filtered_cases = mock_cases
+        if category and category != 'all':
+            filtered_cases = [c for c in filtered_cases if c['category'] == category]
+        if status:
+            filtered_cases = [c for c in filtered_cases if c['status'] == status]
+        if search:
+            search_lower = search.lower()
+            filtered_cases = [
+                c for c in filtered_cases
+                if search_lower in c['title'].lower() or search_lower in c['case_number']
+            ]
+
+        return {
+            "cases": filtered_cases[offset:offset+limit],
+            "total": len(filtered_cases),
+            "offset": offset,
+            "limit": limit
+        }
+
+    except Exception as e:
+        logger.error("get_court_cases_error", error=str(e))
+        raise HTTPException(status_code=500, detail="Failed to load court cases")
+
+
+@router.get("/legal/due-diligence/checks")
+async def get_due_diligence_checks(
+    user: Dict[str, Any] = Depends(verify_telegram_user),
+    status: Optional[str] = None,
+    limit: int = 20,
+    offset: int = 0
+):
+    """Get list of due diligence checks."""
+    try:
+        logger.info("get_due_diligence_checks", user_id=user.get('id'), status=status)
+
+        # Mock data for demonstration
+        mock_checks = [
+            {
+                "id": "1",
+                "entity_name": "ООО \"ТехноСервис Плюс\"",
+                "entity_type": "company",
+                "status": "completed",
+                "risk_level": "low",
+                "checks_completed": 12,
+                "checks_total": 12,
+                "created_at": "2025-01-04",
+                "completed_at": "2025-01-04"
+            },
+            {
+                "id": "2",
+                "entity_name": "ИП Иванов Алексей Сергеевич",
+                "entity_type": "individual",
+                "status": "in_progress",
+                "risk_level": "medium",
+                "checks_completed": 8,
+                "checks_total": 12,
+                "created_at": "2025-01-03"
+            }
+        ]
+
+        # Filter by status if provided
+        if status:
+            mock_checks = [c for c in mock_checks if c['status'] == status]
+
+        return {
+            "checks": mock_checks[offset:offset+limit],
+            "total": len(mock_checks),
+            "offset": offset,
+            "limit": limit
+        }
+
+    except Exception as e:
+        logger.error("get_due_diligence_checks_error", error=str(e))
+        raise HTTPException(status_code=500, detail="Failed to load due diligence checks")
+
+
+# ====================
+# Lead Management Endpoints
+# ====================
+
+@router.get("/leads/stats")
+async def get_lead_stats(
+    user: Dict[str, Any] = Depends(verify_telegram_user)
+):
+    """Get basic lead statistics for dashboard."""
+    try:
+        logger.info("get_lead_stats", user_id=user.get('id'))
+
+        # Get user lead profile
+        user_lead = await db.scalar(
+            select(LeadProfile).where(LeadProfile.user_id == user['id'])
+        )
+
+        # Get overall stats
+        total_leads = await db.scalar(
+            select(func.count(LeadProfile.id)).where(
+                LeadProfile.lead_magnet_completed == True
+            )
+        )
+
+        qualified_leads = await db.scalar(
+            select(func.count(LeadProfile.id)).where(
+                and_(
+                    LeadProfile.lead_status == 'qualified',
+                    LeadProfile.lead_magnet_completed == True
+                )
+            )
+        )
+
+        # Calculate conversion rate
+        conversion_rate = (qualified_leads / total_leads * 100) if total_leads > 0 else 0
+
+        # Calculate average lead score
+        avg_score_result = await db.scalar(
+            select(func.avg(LeadProfile.lead_score)).where(
+                LeadProfile.lead_magnet_completed == True
+            )
+        )
+        avg_lead_score = float(avg_score_result) if avg_score_result else 0
+
+        return {
+            "user_lead_score": user_lead.lead_score if user_lead else None,
+            "user_lead_status": user_lead.lead_status if user_lead else None,
+            "total_leads": total_leads or 0,
+            "qualified_leads": qualified_leads or 0,
+            "conversion_rate": round(conversion_rate, 1),
+            "avg_lead_score": round(avg_lead_score, 1)
+        }
+
+    except Exception as e:
+        logger.error("get_lead_stats_error", error=str(e))
+        raise HTTPException(status_code=500, detail="Failed to load lead stats")
+
+
+@router.get("/leads/top")
+async def get_top_leads(
+    limit: int = 10,
+    user: Dict[str, Any] = Depends(verify_telegram_user)
+):
+    """Get top leads by score."""
+    try:
+        logger.info("get_top_leads", user_id=user.get('id'), limit=limit)
+
+        leads_query = select(
+            LeadProfile.user_id,
+            LeadProfile.email,
+            LeadProfile.company,
+            LeadProfile.lead_score,
+            LeadProfile.expertise_level,
+            LeadProfile.business_focus,
+            LeadProfile.created_at
+        ).where(
+            LeadProfile.lead_magnet_completed == True
+        ).order_by(
+            LeadProfile.lead_score.desc()
+        ).limit(limit)
+
+        result = await db.execute(leads_query)
+        leads = result.mappings().all()
+
+        return {
+            "leads": [
+                {
+                    "user_id": lead.user_id,
+                    "email": lead.email,
+                    "company": lead.company or "Не указано",
+                    "lead_score": lead.lead_score,
+                    "expertise_level": lead.expertise_level,
+                    "business_focus": lead.business_focus,
+                    "created_at": lead.created_at.isoformat() if lead.created_at else None
+                }
+                for lead in leads
+            ]
+        }
+
+    except Exception as e:
+        logger.error("get_top_leads_error", error=str(e))
+        raise HTTPException(status_code=500, detail="Failed to load top leads")
+
+
+@router.get("/dashboard/lead-analytics")
+async def get_lead_analytics(
+    days: int = 30,
+    user: Dict[str, Any] = Depends(verify_telegram_user)
+):
+    """Get comprehensive lead analytics for the specified period."""
+    try:
+        logger.info("get_lead_analytics", user_id=user.get('id'), days=days)
+
+        # Calculate date range
+        start_date = datetime.utcnow() - timedelta(days=days)
+
+        # Overview metrics
+        total_leads = await db.scalar(
+            select(func.count(LeadProfile.id)).where(
+                LeadProfile.created_at >= start_date
+            )
+        )
+
+        qualified_leads = await db.scalar(
+            select(func.count(LeadProfile.id)).where(
+                and_(
+                    LeadProfile.lead_status == 'qualified',
+                    LeadProfile.created_at >= start_date
+                )
+            )
+        )
+
+        converted_leads = await db.scalar(
+            select(func.count(LeadProfile.id)).where(
+                and_(
+                    LeadProfile.lead_status == 'converted',
+                    LeadProfile.created_at >= start_date
+                )
+            )
+        )
+
+        completed_magnet = await db.scalar(
+            select(func.count(LeadProfile.id)).where(
+                and_(
+                    LeadProfile.lead_magnet_completed == True,
+                    LeadProfile.created_at >= start_date
+                )
+            )
+        )
+
+        # Calculate rates
+        qualification_rate = (qualified_leads / total_leads * 100) if total_leads > 0 else 0
+        conversion_rate = (converted_leads / qualified_leads * 100) if qualified_leads > 0 else 0
+        magnet_completion_rate = (completed_magnet / total_leads * 100) if total_leads > 0 else 0
+
+        # Average lead score
+        avg_score_result = await db.scalar(
+            select(func.avg(LeadProfile.lead_score)).where(
+                LeadProfile.created_at >= start_date
+            )
+        )
+        avg_lead_score = float(avg_score_result) if avg_score_result else 0
+
+        # Contact info completeness
+        with_email = await db.scalar(
+            select(func.count(LeadProfile.id)).where(
+                and_(
+                    LeadProfile.email.isnot(None),
+                    LeadProfile.created_at >= start_date
+                )
+            )
+        )
+
+        with_phone = await db.scalar(
+            select(func.count(LeadProfile.id)).where(
+                and_(
+                    LeadProfile.phone.isnot(None),
+                    LeadProfile.created_at >= start_date
+                )
+            )
+        )
+
+        with_company = await db.scalar(
+            select(func.count(LeadProfile.id)).where(
+                and_(
+                    LeadProfile.company.isnot(None),
+                    LeadProfile.created_at >= start_date
+                )
+            )
+        )
+
+        # Daily stats for the period
+        daily_stats_query = """
+            SELECT
+                DATE(created_at) as date,
+                COUNT(*) as new_leads,
+                COUNT(*) FILTER (WHERE lead_magnet_completed = true) as completed_magnet,
+                COUNT(*) FILTER (WHERE lead_status = 'qualified') as qualified,
+                ROUND(AVG(lead_score), 1) as avg_score
+            FROM lead_profiles
+            WHERE created_at >= $1
+            GROUP BY DATE(created_at)
+            ORDER BY DATE(created_at)
+        """
+
+        daily_result = await db.execute(text(daily_stats_query), (start_date,))
+        daily_stats = [
+            {
+                "date": row.date.isoformat(),
+                "new_leads": row.new_leads,
+                "completed_magnet": row.completed_magnet,
+                "qualified": row.qualified,
+                "avg_score": float(row.avg_score) if row.avg_score else 0
+            }
+            for row in daily_result
+        ]
+
+        # Top leads for this period
+        top_leads_query = select(
+            LeadProfile.user_id,
+            LeadProfile.email,
+            LeadProfile.company,
+            LeadProfile.position,
+            LeadProfile.lead_score,
+            LeadProfile.expertise_level,
+            LeadProfile.business_focus,
+            LeadProfile.created_at
+        ).where(
+            LeadProfile.created_at >= start_date
+        ).order_by(
+            LeadProfile.lead_score.desc()
+        ).limit(5)
+
+        top_leads_result = await db.execute(top_leads_query)
+        top_leads = [
+            {
+                "user_id": lead.user_id,
+                "username": f"User_{lead.user_id}",  # Mock username since we don't have real usernames
+                "full_name": "N/A",  # Mock full name
+                "email": lead.email,
+                "company": lead.company,
+                "lead_score": lead.lead_score,
+                "expertise_level": lead.expertise_level,
+                "business_focus": lead.business_focus,
+                "created_at": lead.created_at.isoformat() if lead.created_at else None
+            }
+            for lead in top_leads_result
+        ]
+
+        # Sources stats (mock data for now)
+        sources_stats = [
+            {"source": "Telegram Channel", "count": total_leads or 0, "avg_score": avg_lead_score, "completed_rate": magnet_completion_rate}
+        ]
+
+        return {
+            "period_days": days,
+            "overview": {
+                "total_leads": total_leads or 0,
+                "qualified_leads": qualified_leads or 0,
+                "converted_leads": converted_leads or 0,
+                "completed_magnet": completed_magnet or 0,
+                "qualification_rate": round(qualification_rate, 1),
+                "conversion_rate": round(conversion_rate, 1),
+                "magnet_completion_rate": round(magnet_completion_rate, 1),
+                "avg_lead_score": round(avg_lead_score, 1),
+                "with_email": with_email or 0,
+                "with_phone": with_phone or 0,
+                "with_company": with_company or 0
+            },
+            "daily_stats": daily_stats,
+            "top_leads": top_leads,
+            "sources_stats": sources_stats
+        }
+
+    except Exception as e:
+        logger.error("get_lead_analytics_error", error=str(e))
+        raise HTTPException(status_code=500, detail="Failed to load lead analytics")

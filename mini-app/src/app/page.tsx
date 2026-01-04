@@ -201,8 +201,11 @@ export default function DashboardPage() {
               <p className="text-xs text-green-600 mt-1">
                 {leadStats?.qualified_leads || 0} квалифицированных
               </p>
+              <p className="text-xs text-blue-600 mt-1">
+                Конверсия: {leadStats?.conversion_rate?.toFixed(1) || '0.0'}%
+              </p>
               {leadStats?.user_lead_score && leadStats.user_lead_score > 0 && (
-                <p className="text-xs text-blue-600 mt-1">
+                <p className="text-xs text-purple-600 mt-1">
                   Ваш скор: {leadStats.user_lead_score}/100
                 </p>
               )}
@@ -345,6 +348,11 @@ export default function DashboardPage() {
               <Link href="/published">
                 <Button variant="outline" className="w-full">
                   Опубликованное
+                </Button>
+              </Link>
+              <Link href="/leads">
+                <Button variant="outline" className="w-full border-purple-300 text-purple-700 hover:bg-purple-50">
+                  📊 Лиды
                 </Button>
               </Link>
               <Link href="/debug">
