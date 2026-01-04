@@ -10,13 +10,20 @@ console.log('[API Config] Using baseURL:', API_URL)
 console.log('[API Config] NODE_ENV:', process.env.NODE_ENV)
 console.log('[API Config] Is production:', typeof window !== 'undefined' && window.location.hostname !== 'localhost')
 
+// Create axios instance without baseURL - we'll use full URLs
 export const api = axios.create({
-  baseURL: API_URL,
   headers: {
     'Content-Type': 'application/json',
     'ngrok-skip-browser-warning': 'true',
   },
 })
+
+// Helper function to build full API URLs
+const buildApiUrl = (endpoint: string): string => {
+  const baseUrl = API_URL.endsWith('/') ? API_URL.slice(0, -1) : API_URL
+  const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`
+  return `${baseUrl}${cleanEndpoint}`
+}
 
 // Add Telegram auth to requests
 api.interceptors.request.use((config) => {
@@ -53,7 +60,7 @@ api.interceptors.request.use((config) => {
     })
   }
 
-  console.log('[API Request] Full URL:', (config.baseURL || '') + (config.url || ''))
+  console.log('[API Request] Full URL:', config.url)
   console.log('[API Request] Headers:', config.headers)
 
   return config
@@ -73,7 +80,7 @@ api.interceptors.response.use(
   }
 )
 
-// API types
+// Types
 export interface DraftArticle {
   id: number
   title: string
@@ -150,7 +157,6 @@ export interface SystemSettings {
   }
 }
 
-// Lead Analytics Types
 export interface LeadAnalytics {
   period_days: number
   overview: {
@@ -229,109 +235,39 @@ export interface LeadStats {
   avg_lead_score: number
 }
 
-// Lead Analytics Types
-export interface LeadAnalytics {
-  period_days: number
-  overview: {
-    total_leads: number
-    qualified_leads: number
-    converted_leads: number
-    completed_magnet: number
-    qualification_rate: number
-    conversion_rate: number
-    magnet_completion_rate: number
-    avg_lead_score: number
-    with_email: number
-    with_phone: number
-    with_company: number
-  }
-  daily_stats: Array<{
-    date: string
-    new_leads: number
-    completed_magnet: number
-    qualified: number
-    avg_score: number
-  }>
-  top_leads: Array<{
-    user_id: number
-    username: string
-    full_name: string
-    email: string
-    company: string
-    lead_score: number
-    expertise_level: string
-    business_focus: string
-    created_at: string
-  }>
-  sources_stats: Array<{
-    source: string
-    count: number
-    avg_score: number
-    completed_rate: number
-  }>
-}
-
-export interface LeadROI {
-  period_days: number
-  costs: {
-    api_cost: number
-    total_cost: number
-  }
-  revenue: {
-    total_leads: number
-    quality_leads: number
-    assumed_lead_value: number
-    estimated_revenue: number
-  }
-  metrics: {
-    profit: number
-    roi_percent: number
-    cost_per_lead: number
-    cost_per_quality_lead: number
-    avg_lead_score: number
-  }
-}
-
-export interface LeadAnalyticsResponse {
-  success: boolean
-  data: LeadAnalytics
-  roi: LeadROI
-  period_days: number
-}
-
 // API methods
 export const apiMethods = {
   // Dashboard
-  getDashboardStats: () => api.get<DashboardStats>('/api/miniapp/dashboard/stats'),
-  getChannelAnalytics: (days = 7) => api.get<ChannelAnalyticsResponse>(`/api/miniapp/dashboard/channel-analytics?days=${days}`),
-  getLeadAnalytics: (days = 30) => api.get<LeadAnalyticsResponse>(`/api/miniapp/dashboard/lead-analytics?days=${days}`),
-  getLeadStats: () => api.get<LeadStats>('/api/miniapp/leads/stats'),
+  getDashboardStats: () => api.get<DashboardStats>(buildApiUrl('/api/miniapp/dashboard/stats')),
+  getChannelAnalytics: (days = 7) => api.get<ChannelAnalyticsResponse>(buildApiUrl(`/api/miniapp/dashboard/channel-analytics?days=${days}`)),
+  getLeadAnalytics: (days = 30) => api.get<LeadAnalyticsResponse>(buildApiUrl(`/api/miniapp/dashboard/lead-analytics?days=${days}`)),
+  getLeadStats: () => api.get<LeadStats>(buildApiUrl('/api/miniapp/leads/stats')),
 
   // Leads
-  getTopLeads: (limit = 10) => api.get(`/api/miniapp/leads/top?limit=${limit}`),
+  getTopLeads: (limit = 10) => api.get(buildApiUrl(`/api/miniapp/leads/top?limit=${limit}`)),
 
   // Drafts
-  getDrafts: (limit = 50) => api.get<DraftArticle[]>(`/api/miniapp/drafts?limit=${limit}`),
-  getDraft: (id: number) => api.get<DraftArticle>(`/api/miniapp/drafts/${id}`),
-  approveDraft: (id: number) => api.post(`/api/miniapp/drafts/${id}/approve`),
+  getDrafts: (limit = 50) => api.get<DraftArticle[]>(buildApiUrl(`/api/miniapp/drafts?limit=${limit}`)),
+  getDraft: (id: number) => api.get<DraftArticle>(buildApiUrl(`/api/miniapp/drafts/${id}`)),
+  approveDraft: (id: number) => api.post(buildApiUrl(`/api/miniapp/drafts/${id}/approve`)),
   rejectDraft: (id: number, reason?: string) =>
-    api.post(`/api/miniapp/drafts/${id}/reject`, { reason }),
+    api.post(buildApiUrl(`/api/miniapp/drafts/${id}/reject`), { reason }),
 
   // Published
   getPublished: (limit = 50, offset = 0) =>
-    api.get<PublishedArticle[]>(`/api/miniapp/published?limit=${limit}&offset=${offset}`),
+    api.get<PublishedArticle[]>(buildApiUrl(`/api/miniapp/published?limit=${limit}&offset=${offset}`)),
   getPublishedStats: (period: '7d' | '30d' | '90d') =>
-    api.get(`/api/miniapp/published/stats?period=${period}`),
+    api.get(buildApiUrl(`/api/miniapp/published/stats?period=${period}`)),
 
   // Settings
-  getSettings: () => api.get<SystemSettings>('/api/miniapp/settings'),
+  getSettings: () => api.get<SystemSettings>(buildApiUrl('/api/miniapp/settings')),
   updateSettings: (settings: Partial<SystemSettings>) =>
-    api.put('/api/miniapp/settings', settings),
+    api.put(buildApiUrl('/api/miniapp/settings'), settings),
 
   // Workflow
-  getWorkflowStats: () => api.get('/api/miniapp/workflow/stats'),
+  getWorkflowStats: () => api.get(buildApiUrl('/api/miniapp/workflow/stats')),
 
   // Debug
-  debugHealthCheck: () => api.get('/api/miniapp/debug/health'),
+  debugHealthCheck: () => api.get(buildApiUrl('/api/miniapp/debug/health')),
 
 }
