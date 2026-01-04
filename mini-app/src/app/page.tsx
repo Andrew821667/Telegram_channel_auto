@@ -1,4 +1,12 @@
 'use client'
+console.log("[MINI APP] Starting...");
+console.log("[MINI APP] API URL:", process.env.NEXT_PUBLIC_API_URL);
+console.log("[MINI APP] NODE_ENV:", process.env.NODE_ENV);
+
+console.log("[MINI APP] Starting...");
+console.log("[MINI APP] API URL:", process.env.NEXT_PUBLIC_API_URL);
+console.log("[MINI APP] NODE_ENV:", process.env.NODE_ENV);
+
 
 import { useEffect, useState } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
