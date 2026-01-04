@@ -1,4 +1,9 @@
 'use client'
+console.log("=== MINI APP DEBUG ===");
+console.log("API URL from env:", process.env.NEXT_PUBLIC_API_URL);
+console.log("Current hostname:", typeof window !== "undefined" ? window.location.hostname : "no window");
+console.log("=====================");
+
 console.log("[MINI APP] Starting...");
 console.log("[MINI APP] API URL:", process.env.NEXT_PUBLIC_API_URL);
 console.log("[MINI APP] NODE_ENV:", process.env.NODE_ENV);
