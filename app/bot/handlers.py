@@ -1279,11 +1279,12 @@ async def callback_react(callback: CallbackQuery, db: AsyncSession):
             text("""
                 UPDATE publications
                 SET reactions = COALESCE(reactions, '{}'::jsonb) ||
-                    jsonb_build_object(:key, COALESCE((reactions->>:key)::int, 0) + 1)
+                    jsonb_build_object(:key::text, COALESCE((reactions->>:key2::text)::int, 0) + 1)
                 WHERE id = :pub_id
             """),
             {
                 "key": reaction_type,
+                "key2": reaction_type,
                 "pub_id": publication.id
             }
         )
