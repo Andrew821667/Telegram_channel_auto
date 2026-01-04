@@ -28,11 +28,17 @@ const buildApiUrl = (endpoint: string): string => {
 // Add Telegram auth to requests
 api.interceptors.request.use((config) => {
   console.log('[API Request]', config.method?.toUpperCase(), config.url)
+  console.log('[API Request] Window available:', typeof window !== 'undefined')
+  console.log('[API Request] Telegram available:', typeof window !== 'undefined' && !!window.Telegram)
+  console.log('[API Request] WebApp available:', typeof window !== 'undefined' && !!window.Telegram?.WebApp)
 
   if (typeof window !== 'undefined' && window.Telegram?.WebApp) {
     // Use the full initData string with signature for authentication
     const initData = window.Telegram.WebApp.initData
     const initDataUnsafe = window.Telegram.WebApp.initDataUnsafe
+
+    console.log('[API Request] initData:', initData ? 'present (' + initData.length + ' chars)' : 'empty')
+    console.log('[API Request] initDataUnsafe:', initDataUnsafe ? 'present' : 'empty')
 
     if (initData && initData.trim() !== '') {
       config.headers['X-Telegram-Init-Data'] = initData
@@ -51,6 +57,7 @@ api.interceptors.request.use((config) => {
     }
   } else {
     console.warn('[API Request] No Telegram WebApp available, using fallback auth')
+    console.log('[API Request] Telegram object:', typeof window !== 'undefined' ? (window.Telegram ? 'present' : 'undefined') : 'window undefined')
     config.headers['X-Telegram-Init-Data'] = JSON.stringify({
       user: {
         id: 0,
@@ -60,8 +67,8 @@ api.interceptors.request.use((config) => {
     })
   }
 
-  console.log('[API Request] Full URL:', config.url)
-  console.log('[API Request] Headers:', config.headers)
+  console.log('[API Request] Final URL:', config.url)
+  console.log('[API Request] Final Headers:', JSON.stringify(config.headers, null, 2))
 
   return config
 })
@@ -76,6 +83,7 @@ api.interceptors.response.use(
     console.error('[API Response] Error:', error.config?.url)
     console.error('[API Response] Status:', error.response?.status)
     console.error('[API Response] Data:', error.response?.data)
+    console.error('[API Response] Full error:', error)
     return Promise.reject(error)
   }
 )
