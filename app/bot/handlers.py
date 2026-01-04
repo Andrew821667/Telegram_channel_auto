@@ -10,7 +10,7 @@ from typing import Optional, Dict, List
 
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.filters import Command, CommandStart
-from aiogram.types import Message, CallbackQuery, FSInputFile, BotCommand, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import Message, CallbackQuery, FSInputFile, BotCommand, InlineKeyboardMarkup, InlineKeyboardButton, MenuButtonWebApp, WebAppInfo
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from sqlalchemy import select, update
@@ -4229,6 +4229,17 @@ async def setup_bot_commands():
     ]
     await get_bot().set_my_commands(commands)
     logger.info("bot_commands_set", count=len(commands))
+
+    # Устанавливаем Menu Button с Mini App
+    import os
+    mini_app_url = os.getenv("MINI_APP_URL")
+    if mini_app_url:
+        menu_button = MenuButtonWebApp(
+            text="📊 Mini App",
+            web_app=WebAppInfo(url=mini_app_url)
+        )
+        await get_bot().set_chat_menu_button(menu_button=menu_button)
+        logger.info("menu_button_set", url=mini_app_url)
 
 
 # ====================
