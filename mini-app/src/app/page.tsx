@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { apiMethods } from '@/lib/api'
 import { formatNumber } from '@/lib/utils'
-import { BarChart3, FileText, TrendingUp, Users, ArrowRight } from 'lucide-react'
+import { BarChart3, FileText, TrendingUp, Users, ArrowRight, Target, DollarSign } from 'lucide-react'
 import Link from 'next/link'
 
 interface DashboardStats {
@@ -18,12 +18,23 @@ interface DashboardStats {
   articles_today: number
 }
 
+interface LeadStats {
+  user_lead_score: number
+  user_lead_status: string | null
+  total_leads: number
+  qualified_leads: number
+  conversion_rate: number
+  avg_lead_score: number
+}
+
 export default function DashboardPage() {
   const [stats, setStats] = useState<DashboardStats | null>(null)
+  const [leadStats, setLeadStats] = useState<LeadStats | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     loadStats()
+    loadLeadStats()
   }, [])
 
   const loadStats = async () => {
@@ -59,8 +70,30 @@ export default function DashboardPage() {
           articles_today: 3,
         })
       }
-    } finally {
-      setLoading(false)
+    }
+  }
+
+  const loadLeadStats = async () => {
+    try {
+      console.log('[Dashboard] Loading lead stats from API')
+      const response = await apiMethods.getLeadStats()
+      console.log('[Dashboard] Lead stats response:', response.data)
+      setLeadStats(response.data)
+    } catch (error: any) {
+      console.error('[Dashboard] Failed to load lead stats:', error)
+
+      // Use mock data ONLY in development
+      if (process.env.NODE_ENV === 'development') {
+        console.warn('[Dashboard] Using mock lead data (development mode)')
+        setLeadStats({
+          user_lead_score: 75,
+          user_lead_status: 'qualified',
+          total_leads: 47,
+          qualified_leads: 23,
+          conversion_rate: 48.9,
+          avg_lead_score: 68.2
+        })
+      }
     }
   }
 
@@ -153,6 +186,28 @@ export default function DashboardPage() {
               </p>
             </CardContent>
           </Card>
+
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                <Target className="w-4 h-4" />
+                Лиды
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-3xl font-bold">
+                {leadStats?.total_leads || 0}
+              </div>
+              <p className="text-xs text-green-600 mt-1">
+                {leadStats?.qualified_leads || 0} квалифицированных
+              </p>
+              {leadStats?.user_lead_score && leadStats.user_lead_score > 0 && (
+                <p className="text-xs text-blue-600 mt-1">
+                  Ваш скор: {leadStats.user_lead_score}/100
+                </p>
+              )}
+            </CardContent>
+          </Card>
         </div>
 
         {/* Quick Actions */}
@@ -238,6 +293,36 @@ export default function DashboardPage() {
                       4
                     </div>
                     <p className="text-xs text-muted-foreground">Переходов</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Link>
+          </Card>
+
+          <Card className="hover:shadow-lg transition-shadow cursor-pointer">
+            <Link href="/leads">
+              <CardHeader>
+                <CardTitle className="flex items-center justify-between">
+                  <span>Аналитика лидов</span>
+                  <ArrowRight className="w-5 h-5 text-primary" />
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-sm text-muted-foreground mb-4">
+                  ROI лид-магнита и конверсионные метрики
+                </p>
+                <div className="flex gap-4">
+                  <div>
+                    <div className="text-2xl font-bold text-green-600">
+                      {leadStats?.conversion_rate?.toFixed(1) || '0.0'}%
+                    </div>
+                    <p className="text-xs text-muted-foreground">Конверсия</p>
+                  </div>
+                  <div>
+                    <div className="text-2xl font-bold text-blue-600">
+                      {leadStats?.avg_lead_score?.toFixed(0) || '0'}
+                    </div>
+                    <p className="text-xs text-muted-foreground">Ср. скор</p>
                   </div>
                 </div>
               </CardContent>

@@ -718,6 +718,95 @@ async def get_channel_analytics(
         raise HTTPException(status_code=500, detail="Failed to load channel analytics")
 
 
+# ====================
+# Lead Analytics
+# ====================
+
+@router.get("/dashboard/lead-analytics")
+async def get_lead_analytics(
+    days: int = 30,
+    db: AsyncSession = Depends(get_db),
+    user: Dict = Depends(verify_telegram_user)
+):
+    """Get lead analytics for the dashboard."""
+    try:
+        from app.modules.analytics import AnalyticsService
+
+        analytics = AnalyticsService(db)
+        lead_data = await analytics.get_lead_analytics(days=days)
+        roi_data = await analytics.get_lead_magnet_roi(days=days)
+
+        return {
+            "success": True,
+            "data": lead_data,
+            "roi": roi_data,
+            "period_days": days
+        }
+
+    except Exception as e:
+        logger.error("get_lead_analytics_error", error=str(e))
+        raise HTTPException(status_code=500, detail="Failed to load lead analytics")
+
+
+@router.get("/leads/top")
+async def get_top_leads(
+    limit: int = 10,
+    db: AsyncSession = Depends(get_db),
+    user: Dict = Depends(verify_telegram_user)
+):
+    """Get top leads by score."""
+    try:
+        from app.modules.analytics import AnalyticsService
+
+        analytics = AnalyticsService(db)
+        lead_data = await analytics.get_lead_analytics(days=30)
+        top_leads = lead_data["top_leads"][:limit]
+
+        return top_leads
+
+    except Exception as e:
+        logger.error("get_top_leads_error", error=str(e))
+        raise HTTPException(status_code=500, detail="Failed to load top leads")
+
+
+@router.get("/leads/stats")
+async def get_lead_stats(
+    db: AsyncSession = Depends(get_db),
+    user: Dict = Depends(verify_telegram_user)
+):
+    """Get quick lead statistics for dashboard."""
+    try:
+        from app.services.reader_service import get_lead_profile
+        from app.modules.analytics import AnalyticsService
+
+        # Get user's lead profile if exists
+        user_id = user.get('id')
+        lead_profile = None
+        if user_id:
+            try:
+                lead_profile = await get_lead_profile(user_id, db)
+            except:
+                lead_profile = None
+
+        # Get overall lead stats
+        analytics = AnalyticsService(db)
+        lead_data = await analytics.get_lead_analytics(days=30)
+        overview = lead_data["overview"]
+
+        return {
+            "user_lead_score": lead_profile.lead_score if lead_profile else 0,
+            "user_lead_status": lead_profile.lead_status if lead_profile else None,
+            "total_leads": overview["total_leads"],
+            "qualified_leads": overview["qualified_leads"],
+            "conversion_rate": overview["conversion_rate"],
+            "avg_lead_score": overview["avg_lead_score"]
+        }
+
+    except Exception as e:
+        logger.error("get_lead_stats_error", error=str(e))
+        raise HTTPException(status_code=500, detail="Failed to load lead stats")
+
+
 @router.get("/test/initdata")
 async def test_initdata(
     x_telegram_init_data: Optional[str] = Header(None)
