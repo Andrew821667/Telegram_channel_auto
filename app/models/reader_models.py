@@ -3,6 +3,7 @@ SQLAlchemy models for Reader Bot.
 
 Tables:
 - UserProfile: Reader profiles with onboarding data
+- LeadProfile: Extended profiles for qualified leads
 - UserFeedback: Like/dislike feedback on articles
 - UserInteraction: Engagement tracking
 - SavedArticle: Bookmarked articles
@@ -52,6 +53,63 @@ class UserProfile(Base):
 
     def __repr__(self):
         return f"<UserProfile(user_id={self.user_id}, username={self.username}, topics={self.topics})>"
+
+
+class LeadProfile(Base):
+    """Extended profile for qualified leads with contact information."""
+    __tablename__ = 'lead_profiles'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(BigInteger, ForeignKey('user_profiles.user_id', ondelete='CASCADE'), nullable=False, unique=True)
+
+    # Contact Information (Lead Magnet)
+    email = Column(String(255), nullable=True)
+    phone = Column(String(50), nullable=True)
+    company = Column(String(255), nullable=True)
+    position = Column(String(255), nullable=True)
+
+    # Lead Qualification
+    lead_status = Column(String(50), default='interested')  # 'interested', 'qualified', 'converted', 'nurturing'
+    expertise_level = Column(String(50), nullable=True)  # 'beginner', 'intermediate', 'expert', 'business_owner'
+    business_focus = Column(String(100), nullable=True)  # 'law_firm', 'corporate', 'startup', 'consulting', 'other'
+
+    # Lead Magnet Specific
+    lead_magnet_completed = Column(Boolean, default=False)  # True if completed lead magnet flow
+    questions_asked = Column(Integer, default=0)  # How many questions asked in lead magnet
+    digest_requested = Column(Boolean, default=False)  # True if requested personalized digest
+
+    # Lead Scoring
+    lead_score = Column(Integer, default=0)  # 0-100 score based on engagement and qualification
+    last_lead_activity = Column(TIMESTAMP, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Additional Business Info
+    pain_points = Column(ARRAY(Text), nullable=True)  # What problems they want to solve
+    budget_range = Column(String(50), nullable=True)  # 'under_100k', '100k_500k', '500k_1m', 'over_1m'
+    timeline = Column(String(50), nullable=True)  # 'immediate', '3_months', '6_months', '1_year', 'researching'
+
+    # CRM Integration
+    crm_id = Column(String(100), nullable=True)  # External CRM system ID
+    sales_notes = Column(Text, nullable=True)  # Notes for sales team
+
+    # Metadata
+    created_at = Column(TIMESTAMP, default=datetime.utcnow, nullable=False)
+    updated_at = Column(TIMESTAMP, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    user = relationship("UserProfile", backref="lead_profile")
+
+    # Indexes
+    __table_args__ = (
+        Index('idx_lead_profiles_user_id', 'user_id'),
+        Index('idx_lead_profiles_status', 'lead_status'),
+        Index('idx_lead_profiles_expertise', 'expertise_level'),
+        Index('idx_lead_profiles_score', 'lead_score'),
+        Index('idx_lead_profiles_completed', 'lead_magnet_completed'),
+        {'extend_existing': True}
+    )
+
+    def __repr__(self):
+        return f"<LeadProfile(user_id={self.user_id}, lead_status={self.lead_status}, lead_score={self.lead_score})>"
 
 
 class UserFeedback(Base):

@@ -10,7 +10,7 @@ from sqlalchemy import select, func, and_, or_, desc
 from sqlalchemy.orm import joinedload
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.reader_models import UserProfile, UserFeedback, UserInteraction, SavedArticle
+from app.models.reader_models import UserProfile, LeadProfile, UserFeedback, UserInteraction, SavedArticle
 from app.models.database import Publication, PostDraft
 
 
@@ -78,6 +78,174 @@ async def update_last_active(user_id: int, db: AsyncSession):
     if profile:
         profile.last_active = datetime.utcnow()
         await db.commit()
+
+
+# ==================== Lead Profile Management ====================
+
+async def get_lead_profile(user_id: int, db: AsyncSession) -> Optional[LeadProfile]:
+    """Get lead profile by user_id."""
+    result = await db.execute(
+        select(LeadProfile).where(LeadProfile.user_id == user_id)
+    )
+    return result.scalar_one_or_none()
+
+
+async def create_lead_profile(
+    user_id: int,
+    email: Optional[str] = None,
+    phone: Optional[str] = None,
+    company: Optional[str] = None,
+    position: Optional[str] = None,
+    db: AsyncSession = None
+) -> LeadProfile:
+    """Create new lead profile."""
+    lead_profile = LeadProfile(
+        user_id=user_id,
+        email=email,
+        phone=phone,
+        company=company,
+        position=position,
+        lead_status='interested',
+        lead_score=0,
+        lead_magnet_completed=False
+    )
+    db.add(lead_profile)
+    await db.commit()
+    await db.refresh(lead_profile)
+    return lead_profile
+
+
+async def update_lead_profile(
+    user_id: int,
+    email: Optional[str] = None,
+    phone: Optional[str] = None,
+    company: Optional[str] = None,
+    position: Optional[str] = None,
+    lead_status: Optional[str] = None,
+    expertise_level: Optional[str] = None,
+    business_focus: Optional[str] = None,
+    lead_score: Optional[int] = None,
+    pain_points: Optional[List[str]] = None,
+    budget_range: Optional[str] = None,
+    timeline: Optional[str] = None,
+    lead_magnet_completed: Optional[bool] = None,
+    digest_requested: Optional[bool] = None,
+    db: AsyncSession = None
+) -> Optional[LeadProfile]:
+    """Update lead profile."""
+    lead_profile = await get_lead_profile(user_id, db)
+    if not lead_profile:
+        return None
+
+    if email is not None:
+        lead_profile.email = email
+    if phone is not None:
+        lead_profile.phone = phone
+    if company is not None:
+        lead_profile.company = company
+    if position is not None:
+        lead_profile.position = position
+    if lead_status is not None:
+        lead_profile.lead_status = lead_status
+    if expertise_level is not None:
+        lead_profile.expertise_level = expertise_level
+    if business_focus is not None:
+        lead_profile.business_focus = business_focus
+    if lead_score is not None:
+        lead_profile.lead_score = lead_score
+    if pain_points is not None:
+        lead_profile.pain_points = pain_points
+    if budget_range is not None:
+        lead_profile.budget_range = budget_range
+    if timeline is not None:
+        lead_profile.timeline = timeline
+    if lead_magnet_completed is not None:
+        lead_profile.lead_magnet_completed = lead_magnet_completed
+    if digest_requested is not None:
+        lead_profile.digest_requested = digest_requested
+
+    lead_profile.last_lead_activity = datetime.utcnow()
+
+    await db.commit()
+    await db.refresh(lead_profile)
+    return lead_profile
+
+
+async def increment_questions_asked(user_id: int, db: AsyncSession):
+    """Increment counter of questions asked in lead magnet."""
+    lead_profile = await get_lead_profile(user_id, db)
+    if lead_profile:
+        lead_profile.questions_asked += 1
+        lead_profile.last_lead_activity = datetime.utcnow()
+        await db.commit()
+
+
+async def calculate_lead_score(user_id: int, db: AsyncSession) -> int:
+    """
+    Calculate lead score based on engagement and qualification.
+    Returns score 0-100.
+    """
+    profile = await get_user_profile(user_id, db)
+    lead_profile = await get_lead_profile(user_id, db)
+
+    if not profile or not lead_profile:
+        return 0
+
+    score = 0
+
+    # Base score for completing onboarding
+    if profile.topics:
+        score += 20
+
+    # Score for completing lead magnet
+    if lead_profile.lead_magnet_completed:
+        score += 30
+
+    # Score for contact information completeness
+    contact_fields = [lead_profile.email, lead_profile.phone, lead_profile.company]
+    contact_score = sum(1 for field in contact_fields if field) * 5
+    score += contact_score
+
+    # Score for business information
+    business_fields = [lead_profile.position, lead_profile.business_focus, lead_profile.expertise_level]
+    business_score = sum(1 for field in business_fields if field) * 5
+    score += business_score
+
+    # Engagement score based on interactions
+    interactions_count = await get_user_interactions_count(user_id, db)
+    engagement_score = min(interactions_count * 2, 20)  # Max 20 points
+    score += engagement_score
+
+    return min(score, 100)  # Cap at 100
+
+
+async def get_user_interactions_count(user_id: int, db: AsyncSession) -> int:
+    """Get total user interactions count."""
+    result = await db.execute(
+        select(func.count(UserInteraction.id)).where(UserInteraction.user_id == user_id)
+    )
+    return result.scalar() or 0
+
+
+async def get_leads_by_status(lead_status: str, db: AsyncSession) -> List[LeadProfile]:
+    """Get leads filtered by status."""
+    result = await db.execute(
+        select(LeadProfile)
+        .where(LeadProfile.lead_status == lead_status)
+        .order_by(desc(LeadProfile.created_at))
+    )
+    return result.scalars().all()
+
+
+async def get_top_leads(limit: int = 10, db: AsyncSession = None) -> List[LeadProfile]:
+    """Get top leads by score."""
+    result = await db.execute(
+        select(LeadProfile)
+        .where(LeadProfile.lead_score > 0)
+        .order_by(desc(LeadProfile.lead_score))
+        .limit(limit)
+    )
+    return result.scalars().all()
 
 
 # ==================== Personalized Feed ====================

@@ -35,6 +35,7 @@ from app.bot.middleware import DbSessionMiddleware
 from app.modules.llm_provider import get_llm_provider
 from app.modules.vector_search import get_vector_search
 from app.modules.analytics import AnalyticsService
+from app.modules.channel_moderation import ChannelModeration
 import structlog
 
 logger = structlog.get_logger()
@@ -42,6 +43,7 @@ logger = structlog.get_logger()
 # Глобальные переменные (Bot создается лениво чтобы избежать создания aiohttp клиента при импорте)
 _bot: Optional[Bot] = None
 _selected_llm_provider: str = settings.default_llm_provider  # Хранение выбранного LLM провайдера
+_channel_moderator: Optional[ChannelModeration] = None  # Модератор канала
 dp = Dispatcher()
 router = Router()
 
@@ -63,6 +65,102 @@ def get_bot() -> Bot:
 class EditDraft(StatesGroup):
     waiting_for_manual_edit = State()
     waiting_for_llm_edit = State()
+
+
+# ====================
+# Channel Moderation
+# ====================
+
+def get_channel_moderator() -> ChannelModeration:
+    """
+    Получить экземпляр модератора канала (ленивая инициализация).
+
+    Модератор создается только при первом вызове.
+    """
+    global _channel_moderator
+    if _channel_moderator is None:
+        _channel_moderator = ChannelModeration()
+        _channel_moderator.set_bot(get_bot())
+        logger.info("Channel moderator initialized")
+    return _channel_moderator
+
+
+@router.channel_post()
+async def moderate_channel_comment(message: Message):
+    """
+    Модерация комментариев к постам в канале @legal_ai_pro.
+
+    Обрабатывает все новые комментарии и применяет правила модерации:
+    - Фильтрация спама и запрещенных слов
+    - AI анализ релевантности и тональности
+    - Автоматические действия (удаление/предупреждение)
+    """
+    try:
+        # Проверяем, что это комментарий к нашему каналу
+        if str(message.chat.id) != str(settings.telegram_channel_id_numeric):
+            return  # Не наш канал
+
+        # Проверяем, что это текстовое сообщение
+        if not message.text:
+            return  # Пропускаем медиа и другие типы сообщений
+
+        logger.info(
+            f"Moderating comment from user {message.from_user.id} in channel {message.chat.id}: {message.text[:100]}..."
+        )
+
+        # Получаем модератор
+        moderator = get_channel_moderator()
+
+        # Анализируем комментарий
+        moderation_result = await moderator.moderate_comment(message, str(message.chat.id))
+
+        # Принимаем решение о модерации
+        if moderation_result['moderated']:
+            await moderator.take_moderation_action(message, moderation_result)
+
+            # Логируем модерацию
+            logger.info(
+                f"Comment moderated: action={moderation_result['action']}, "
+                f"reason={moderation_result['reason']}, "
+                f"confidence={moderation_result['confidence']:.2f}"
+            )
+
+            # Сохраняем статистику модерации в базу данных
+            try:
+                from app.models.database import PostComment, get_db
+                async with get_db() as db:
+                    # Ищем публикацию по message_id или reply_to_message
+                    publication_id = None
+                    if message.reply_to_message:
+                        # Это ответ на сообщение, найдем публикацию
+                        from sqlalchemy import select
+                        result = await db.execute(
+                            select(PostComment.publication_id).where(
+                                PostComment.telegram_message_id == message.reply_to_message.message_id
+                            )
+                        )
+                        publication_id = result.scalar()
+
+                    if publication_id:
+                        comment = PostComment(
+                            publication_id=publication_id,
+                            telegram_message_id=message.message_id,
+                            user_id=message.from_user.id,
+                            username=message.from_user.username,
+                            text=message.text,
+                            moderated=True,
+                            moderation_action=moderation_result['action'],
+                            moderation_reason=moderation_result['reason'],
+                            moderation_confidence=moderation_result['confidence']
+                        )
+                        db.add(comment)
+                        await db.commit()
+
+            except Exception as e:
+                logger.error(f"Failed to save moderation data: {e}")
+
+    except Exception as e:
+        logger.error(f"Error in channel comment moderation: {e}")
 
 
 # ====================
@@ -1763,6 +1861,328 @@ async def cmd_analytics(message: Message, db: AsyncSession):
         parse_mode="HTML",
         reply_markup=keyboard
     )
+
+
+@router.message(Command("moderation"))
+async def cmd_moderation(message: Message):
+    """Показать статистику модерации канала."""
+    if not await check_admin(message.from_user.id):
+        await message.answer("⛔ У вас нет доступа к этой команде")
+        return
+
+    try:
+        moderator = get_channel_moderator()
+        stats = moderator.get_moderation_stats()
+
+        # Рассчитываем проценты
+        total = stats['total_comments']
+        if total > 0:
+            moderated_percent = (stats['moderated_comments'] / total) * 100
+            blocked_percent = (stats['blocked_comments'] / total) * 100
+            spam_percent = (stats['spam_detected'] / total) * 100
+            off_topic_percent = (stats['off_topic'] / total) * 100
+            negative_percent = (stats['negative_sentiment'] / total) * 100
+        else:
+            moderated_percent = blocked_percent = spam_percent = off_topic_percent = negative_percent = 0
+
+        report = f"""🛡️ <b>Статистика модерации канала</b>
+
+📊 <b>Общая статистика:</b>
+• Всего комментариев: {total:,}
+• Промодерировано: {stats['moderated_comments']:,} ({moderated_percent:.1f}%)
+
+🚫 <b>Заблокировано:</b>
+• Спам: {stats['spam_detected']:,} ({spam_percent:.1f}%)
+• Запрещенные слова: {stats['blocked_comments']:,} ({blocked_percent:.1f}%)
+
+⚠️ <b>Предупреждения:</b>
+• Не по теме: {stats['off_topic']:,} ({off_topic_percent:.1f}%)
+• Негативные: {stats['negative_sentiment']:,} ({negative_percent:.1f}%)
+
+💡 <b>Модерация работает автоматически и:</b>
+• Удаляет спам и запрещенный контент
+• Предупреждает о нерелевантных комментариях
+• Сохраняет статистику для анализа
+• Улучшает качество обсуждений в канале"""
+
+        # Клавиатура для управления
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔄 Сбросить статистику", callback_data="moderation:reset_stats")],
+            [InlineKeyboardButton(text="📋 Подробный отчет", callback_data="moderation:detailed_report")]
+        ])
+
+        await message.answer(
+            report,
+            parse_mode="HTML",
+            reply_markup=keyboard
+        )
+
+    except Exception as e:
+        logger.error(f"Error getting moderation stats: {e}")
+        await message.answer("❌ Ошибка при получении статистики модерации")
+
+
+@router.callback_query(F.data.startswith("moderation:"))
+async def handle_moderation_actions(callback: CallbackQuery):
+    """Обработка действий модерации."""
+    action = callback.data.split(":")[1]
+
+    if action == "reset_stats":
+        try:
+            moderator = get_channel_moderator()
+            moderator.reset_stats()
+
+            await callback.message.edit_text(
+                "✅ <b>Статистика модерации сброшена</b>\n\n"
+                "Новая статистика начнет собираться с следующих комментариев.",
+                parse_mode="HTML"
+            )
+        except Exception as e:
+            logger.error(f"Error resetting moderation stats: {e}")
+            await callback.answer("❌ Ошибка при сбросе статистики", show_alert=True)
+
+    elif action == "detailed_report":
+        # Показать детальную статистику
+        try:
+            moderator = get_channel_moderator()
+            stats = moderator.get_moderation_stats()
+
+            detailed_report = f"""📋 <b>Детальный отчет модерации</b>
+
+🕐 <b>Текущая сессия:</b>
+• Всего комментариев: {stats['total_comments']:,}
+• Модерировано: {stats['moderated_comments']:,}
+• Заблокировано: {stats['blocked_comments']:,}
+• Спам обнаружен: {stats['spam_detected']:,}
+
+🎯 <b>По категориям:</b>
+• Нерелевантные: {stats['off_topic']:,}
+• Негативные: {stats['negative_sentiment']:,}
+
+🤖 <b>AI-модерация:</b>
+Модуль использует гибридный подход:
+• Базовая фильтрация (спам, запрещенные слова)
+• AI-анализ тональности и релевантности
+• Автоматические действия (удаление/предупреждение)
+
+⚙️ <b>Настройки:</b>
+• Канал: @{settings.telegram_channel_id.replace('@', '') if settings.telegram_channel_id else 'не настроен'}
+• Автомодерация: ✅ Включена
+• Уровень строгости: Средний"""
+
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="« Назад", callback_data="back_to_moderation")]
+            ])
+
+            await callback.message.edit_text(
+                detailed_report,
+                parse_mode="HTML",
+                reply_markup=keyboard
+            )
+
+        except Exception as e:
+            logger.error(f"Error generating detailed moderation report: {e}")
+            await callback.answer("❌ Ошибка при генерации отчета", show_alert=True)
+
+    elif action == "back_to_moderation":
+        # Имитация вызова команды moderation
+        await callback.message.edit_text(
+            "🛡️ <b>Модерация канала</b>\n\n"
+            "Используйте /moderation для просмотра статистики.",
+            parse_mode="HTML"
+        )
+
+    await callback.answer()
+
+
+@router.message(Command("lead_analytics"))
+async def cmd_lead_analytics(message: Message, db: AsyncSession):
+    """Показать аналитику лидов."""
+    if not await check_admin(message.from_user.id):
+        await message.answer("⛔ У вас нет доступа к этой команде")
+        return
+
+    try:
+        from app.modules.analytics import AnalyticsService
+        analytics = AnalyticsService(db)
+
+        # Получаем аналитику за 30 дней
+        lead_data = await analytics.get_lead_analytics(days=30)
+        roi_data = await analytics.get_lead_magnet_roi(days=30)
+
+        overview = lead_data["overview"]
+
+        report = f"""🎯 <b>Аналитика лидов (30 дней)</b>
+
+📊 <b>Обзор:</b>
+• Всего лидов: {overview['total_leads']:,}
+• Квалифицированных: {overview['qualified_leads']:,} ({overview['qualification_rate']}%)
+• Конвертированных: {overview['converted_leads']:,} ({overview['conversion_rate']}%)
+• Завершили лид-магнит: {overview['completed_magnet']:,} ({overview['magnet_completion_rate']}%)
+
+📝 <b>Контактная информация:</b>
+• С email: {overview['with_email']:,}
+• С телефоном: {overview['with_phone']:,}
+• С компанией: {overview['with_company']:,}
+
+📈 <b>Средний скор лида:</b> {overview['avg_lead_score']}/100
+
+💰 <b>ROI лид-магнита:</b>
+• Затраты на API: ${roi_data['costs']['api_cost']:.2f}
+• Оценочная выручка: ₽{roi_data['revenue']['estimated_revenue']:,}
+• Прибыль: ₽{roi_data['metrics']['profit']:,}
+• ROI: {roi_data['metrics']['roi_percent']:.1f}%
+
+💵 <b>Экономика:</b>
+• Стоимость лида: ₽{roi_data['metrics']['cost_per_lead']:.2f}
+• Стоимость качественного лида: ₽{roi_data['metrics']['cost_per_quality_lead']:.2f}"""
+
+        # Клавиатура для детального просмотра
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="📈 Динамика", callback_data="leads:daily_stats"),
+                InlineKeyboardButton(text="🏆 Топ лидов", callback_data="leads:top_leads")
+            ],
+            [
+                InlineKeyboardButton(text="📊 По источникам", callback_data="leads:sources"),
+                InlineKeyboardButton(text="💰 Детальный ROI", callback_data="leads:roi_details")
+            ]
+        ])
+
+        await message.answer(
+            report,
+            parse_mode="HTML",
+            reply_markup=keyboard
+        )
+
+    except Exception as e:
+        logger.error(f"Error getting lead analytics: {e}")
+        await message.answer("❌ Ошибка при получении аналитики лидов")
+
+
+@router.callback_query(F.data.startswith("leads:"))
+async def handle_lead_analytics_callbacks(callback: CallbackQuery, db: AsyncSession):
+    """Обработка callback-запросов аналитики лидов."""
+    if not await check_admin(callback.from_user.id):
+        await callback.answer("⛔ Нет доступа", show_alert=True)
+        return
+
+    action = callback.data.split(":")[1]
+
+    try:
+        from app.modules.analytics import AnalyticsService
+        analytics = AnalyticsService(db)
+
+        if action == "daily_stats":
+            # Динамика лидов по дням
+            lead_data = await analytics.get_lead_analytics(days=30)
+            daily_stats = lead_data["daily_stats"][:7]  # Последние 7 дней
+
+            report = "📈 <b>Динамика лидов (7 дней)</b>\n\n"
+            for stat in daily_stats:
+                report += f"📅 {stat['date']}: +{stat['new_leads']} лидов, "
+                report += f"✅ {stat['completed_magnet']} магнит, "
+                report += f"🎯 {stat['qualified']} квалиф.\n"
+
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="« Назад", callback_data="leads:back_to_main")]
+            ])
+
+        elif action == "top_leads":
+            # Топ лидов по скорингу
+            lead_data = await analytics.get_lead_analytics(days=30)
+            top_leads = lead_data["top_leads"][:5]
+
+            report = "🏆 <b>Топ-5 лидов по скорингу</b>\n\n"
+            for i, lead in enumerate(top_leads, 1):
+                report += f"{i}. <b>{lead['full_name'] or lead['username'] or 'User'}</b>\n"
+                report += f"   📧 {lead['email'] or 'нет'}\n"
+                report += f"   🏢 {lead['company'] or 'нет'}\n"
+                report += f"   📊 Скор: {lead['lead_score']}/100\n\n"
+
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="« Назад", callback_data="leads:back_to_main")]
+            ])
+
+        elif action == "sources":
+            # Статистика по источникам
+            lead_data = await analytics.get_lead_analytics(days=30)
+            sources_stats = lead_data["sources_stats"]
+
+            report = "📊 <b>Лиды по сферам бизнеса</b>\n\n"
+            for source in sources_stats:
+                report += f"🏗️ <b>{source['source']}</b>: {source['count']} лидов\n"
+                report += f"   📈 Ср. скор: {source['avg_score']}/100\n"
+                report += f"   ✅ Завершили: {source['completed_rate']}%\n\n"
+
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="« Назад", callback_data="leads:back_to_main")]
+            ])
+
+        elif action == "roi_details":
+            # Детальный ROI
+            roi_data = await analytics.get_lead_magnet_roi(days=30)
+
+            report = f"""💰 <b>Детальный ROI лид-магнита</b>
+
+💵 <b>Затраты:</b>
+• API OpenAI/Perplexity: ${roi_data['costs']['api_cost']:.2f}
+• Итого затрат: ${roi_data['costs']['total_cost']:.2f}
+
+📈 <b>Результаты:</b>
+• Всего лидов: {roi_data['revenue']['total_leads']:,}
+• Качественных лидов: {roi_data['revenue']['quality_leads']:,}
+• Оценка ценности лида: ₽{roi_data['revenue']['assumed_lead_value']:,}
+• Оценочная выручка: ₽{roi_data['revenue']['estimated_revenue']:,}
+
+📊 <b>Метрики:</b>
+• Прибыль: ₽{roi_data['metrics']['profit']:,}
+• ROI: {roi_data['metrics']['roi_percent']:.1f}%
+• Стоимость лида: ₽{roi_data['metrics']['cost_per_lead']:.2f}
+• Ср. скор лида: {roi_data['metrics']['avg_lead_score']:.1f}/100"""
+
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="« Назад", callback_data="leads:back_to_main")]
+            ])
+
+        elif action == "back_to_main":
+            # Возврат к основной аналитике лидов
+            lead_data = await analytics.get_lead_analytics(days=30)
+            roi_data = await analytics.get_lead_magnet_roi(days=30)
+            overview = lead_data["overview"]
+
+            report = f"""🎯 <b>Аналитика лидов (30 дней)</b>
+
+📊 <b>Обзор:</b>
+• Всего лидов: {overview['total_leads']:,}
+• Квалифицированных: {overview['qualified_leads']:,} ({overview['qualification_rate']}%)
+• Конвертированных: {overview['converted_leads']:,} ({overview['conversion_rate']}%)
+• Завершили лид-магнит: {overview['completed_magnet']:,} ({overview['magnet_completion_rate']}%)
+
+💰 <b>ROI:</b> {roi_data['metrics']['roi_percent']:.1f}% (₽{roi_data['metrics']['profit']:,} прибыли)"""
+
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [
+                    InlineKeyboardButton(text="📈 Динамика", callback_data="leads:daily_stats"),
+                    InlineKeyboardButton(text="🏆 Топ лидов", callback_data="leads:top_leads")
+                ],
+                [
+                    InlineKeyboardButton(text="📊 По источникам", callback_data="leads:sources"),
+                    InlineKeyboardButton(text="💰 Детальный ROI", callback_data="leads:roi_details")
+                ]
+            ])
+
+        await callback.message.edit_text(
+            report,
+            parse_mode="HTML",
+            reply_markup=keyboard
+        )
+
+    except Exception as e:
+        logger.error(f"Error in lead analytics callback: {e}")
+        await callback.answer("❌ Ошибка при обработке запроса", show_alert=True)
+
+    await callback.answer()
 
 
 @router.message(Command("settings"))
@@ -3801,6 +4221,8 @@ async def setup_bot_commands():
         BotCommand(command="drafts", description="📝 Новые драфты"),
         BotCommand(command="fetch", description="🔄 Запустить сбор новостей"),
         BotCommand(command="analytics", description="📊 Аналитика канала"),
+        BotCommand(command="moderation", description="🛡️ Статистика модерации"),
+        BotCommand(command="lead_analytics", description="🎯 Аналитика лидов"),
         BotCommand(command="alerts", description="🚨 Проверить проблемы"),
         BotCommand(command="stats", description="📈 Статистика системы"),
         BotCommand(command="help", description="❓ Помощь"),
