@@ -1,4 +1,9 @@
 'use client'
+// Debug alerts for mobile
+if (typeof window !== "undefined") {
+  window.alert("=== MINI APP DEBUG ===\nAPI URL: " + (process.env.NEXT_PUBLIC_API_URL || "NOT SET") + "\nHostname: " + window.location.hostname);
+}
+
 console.log("=== MINI APP DEBUG ===");
 console.log("API URL from env:", process.env.NEXT_PUBLIC_API_URL);
 console.log("Current hostname:", typeof window !== "undefined" ? window.location.hostname : "no window");
