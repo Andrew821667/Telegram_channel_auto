@@ -16,6 +16,7 @@ interface DashboardStats {
   total_reactions: number
   engagement_rate: number
   articles_today: number
+  top_sources: Array<{ source: string; count: number }>
 }
 
 interface LeadStats {
@@ -31,6 +32,7 @@ export default function DashboardPage() {
   const [stats, setStats] = useState<DashboardStats | null>(null)
   const [leadStats, setLeadStats] = useState<LeadStats | null>(null)
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     loadStats()
@@ -43,6 +45,7 @@ export default function DashboardPage() {
       const response = await apiMethods.getDashboardStats()
       console.log('[Dashboard] API response:', response.data)
       setStats(response.data)
+      setLoading(false)
     } catch (error: any) {
       console.error('[Dashboard] Failed to load stats:', error)
       console.error('[Dashboard] Error details:', {
@@ -52,24 +55,32 @@ export default function DashboardPage() {
         headers: error.response?.headers,
       })
 
-      // Show error to user instead of silent fallback
-      if (window.Telegram?.WebApp) {
-        window.Telegram.WebApp.showAlert(`Ошибка загрузки данных: ${error.message}\n\nAPI URL: ${process.env.NEXT_PUBLIC_API_URL || 'NOT SET'}`)
+      // Show error to user - try multiple methods
+      const errorMessage = `Ошибка загрузки данных: ${error.message}\n\nAPI URL: ${process.env.NEXT_PUBLIC_API_URL || 'NOT SET'}`
+      setError(errorMessage)
+
+      if (typeof window !== 'undefined') {
+        if (window.Telegram?.WebApp) {
+          window.Telegram.WebApp.showAlert(errorMessage)
+        } else if (window.alert) {
+          window.alert(errorMessage)
+        }
       }
 
-      // Use mock data ONLY in development
-      if (process.env.NODE_ENV === 'development') {
-        console.warn('[Dashboard] Using mock data (development mode)')
-        setStats({
-          total_drafts: 12,
-          total_published: 145,
-          avg_quality_score: 8.2,
-          total_views: 15420,
-          total_reactions: 892,
-          engagement_rate: 5.8,
-          articles_today: 3,
-        })
-      }
+      // Use fallback data in production too (don't leave user with infinite spinner)
+      console.warn('[Dashboard] Using fallback data')
+      setStats({
+        total_drafts: 0,
+        total_published: 0,
+        avg_quality_score: 0,
+        total_views: 0,
+        total_reactions: 0,
+        engagement_rate: 0,
+        articles_today: 0,
+        top_sources: []
+      })
+
+      setLoading(false)
     }
   }
 
@@ -82,18 +93,15 @@ export default function DashboardPage() {
     } catch (error: any) {
       console.error('[Dashboard] Failed to load lead stats:', error)
 
-      // Use mock data ONLY in development
-      if (process.env.NODE_ENV === 'development') {
-        console.warn('[Dashboard] Using mock lead data (development mode)')
-        setLeadStats({
-          user_lead_score: 75,
-          user_lead_status: 'qualified',
-          total_leads: 47,
-          qualified_leads: 23,
-          conversion_rate: 48.9,
-          avg_lead_score: 68.2
-        })
-      }
+      // Use fallback data for lead stats too
+      setLeadStats({
+        user_lead_score: 0,
+        user_lead_status: null,
+        total_leads: 0,
+        qualified_leads: 0,
+        conversion_rate: 0,
+        avg_lead_score: 0
+      })
     }
   }
 
@@ -103,6 +111,20 @@ export default function DashboardPage() {
         <div className="text-center">
           <div className="w-16 h-16 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
           <p className="text-muted-foreground">Загрузка...</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-center p-4">
+          <div className="text-red-500 text-xl mb-4">⚠️ Ошибка загрузки</div>
+          <p className="text-muted-foreground mb-4">{error}</p>
+          <Button onClick={() => window.location.reload()}>
+            Попробовать снова
+          </Button>
         </div>
       </div>
     )
