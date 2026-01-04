@@ -23,12 +23,6 @@ export const api = axios.create({
 
 // Helper function to build full API URLs
 const buildApiUrl = (endpoint: string): string => {
-  console.log("[buildApiUrl] Input endpoint:", endpoint);
-  console.log("[buildApiUrl] API_URL:", API_URL);
-  const result = `${baseUrl}${cleanEndpoint}`;
-  console.log("[buildApiUrl] Result URL:", result);
-  return result;
-}
   const baseUrl = API_URL.endsWith('/') ? API_URL.slice(0, -1) : API_URL
   const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`
   return `${baseUrl}${cleanEndpoint}`
