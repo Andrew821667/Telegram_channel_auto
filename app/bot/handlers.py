@@ -1276,17 +1276,16 @@ async def callback_react(callback: CallbackQuery, db: AsyncSession):
         from sqlalchemy import text
 
         await db.execute(
-            text("""
+            text(f"""
                 UPDATE publications
                 SET reactions = jsonb_set(
-                    COALESCE(reactions, '{}'::jsonb),
-                    :path,
+                    COALESCE(reactions, '{{}}'::jsonb),
+                    '{{{{{reaction_type}}}}}'::text[],
                     to_jsonb(COALESCE((reactions->>:key)::int, 0) + 1)
                 )
                 WHERE id = :pub_id
             """),
             {
-                "path": f'{{{reaction_type}}}',
                 "key": reaction_type,
                 "pub_id": publication.id
             }
