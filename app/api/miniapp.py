@@ -110,6 +110,84 @@ async def verify_telegram_user(
 
 
 # ====================
+# Dashboard
+# ====================
+
+@router.get("/dashboard/stats")
+async def get_dashboard_stats(
+    db: AsyncSession = Depends(get_db),
+    user: Dict = Depends(verify_telegram_user)
+):
+    """Get dashboard statistics."""
+    try:
+        # Total drafts pending review
+        total_drafts = await db.scalar(
+            select(func.count(PostDraft.id)).where(
+                PostDraft.status == 'pending_review'
+            )
+        )
+
+        # Total published
+        total_published = await db.scalar(
+            select(func.count(Publication.id))
+        )
+
+        # Average quality score - ПОЛЕ ОТСУТСТВУЕТ В МОДЕЛИ!
+        avg_quality = 0.0
+
+        # Total views and reactions
+        total_views = await db.scalar(
+            select(func.sum(Publication.views)).where(
+                Publication.views.isnot(None)
+            )
+        ) or 0
+
+        total_reactions = 0  # JSONB field, cannot sum
+
+        # Engagement rate
+        if total_views > 0:
+            engagement_rate = (total_reactions / total_views) * 100
+        else:
+            engagement_rate = 0
+
+        # Articles published today
+        today = datetime.utcnow().date()
+        articles_today = await db.scalar(
+            select(func.count(Publication.id)).where(
+                func.date(Publication.published_at) == today
+            )
+        )
+
+        # Top sources
+        source_stats = await db.execute(
+            select(
+                RawArticle.source_name,
+                func.count(RawArticle.id).label('count')
+            ).group_by(RawArticle.source_name).order_by(desc('count')).limit(5)
+        )
+
+        top_sources = [
+            {"source": source, "count": count}
+            for source, count in source_stats
+        ]
+
+        return {
+            "total_drafts": total_drafts or 0,
+            "total_published": total_published or 0,
+            "avg_quality_score": round(avg_quality, 2),
+            "total_views": int(total_views),
+            "total_reactions": int(total_reactions),
+            "engagement_rate": round(engagement_rate, 2),
+            "articles_today": articles_today or 0,
+            "top_sources": top_sources
+        }
+
+    except Exception as e:
+        logger.error("get_dashboard_stats_error", error=str(e))
+        raise HTTPException(status_code=500, detail="Failed to get dashboard stats")
+
+
+# ====================
 # Settings
 # ====================
 
