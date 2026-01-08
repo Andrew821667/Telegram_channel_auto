@@ -161,6 +161,10 @@ export interface SystemSettings {
     similarity_threshold: number
   }
   budget: {
+  fetcher: {
+    max_articles_per_source: number
+  }
+
     max_per_month: number
     warning_threshold: number
     stop_on_exceed: boolean

@@ -1366,35 +1366,47 @@ async def callback_react(callback: CallbackQuery, db: AsyncSession):
         reaction_type = parts[2]
         
         logger.info("callback_react_started", callback_data=callback.data)
-        
+        logger.info("callback_parsed", post_id=post_id, reaction_type=reaction_type)
+
         # Поиск публикации
-        result = await db.execute(
-            select(Publication)
-            .join(PostDraft)
-            .where(PostDraft.id == post_id)
-        )
-        publication = result.scalar_one_or_none()
-        
+        logger.info("searching_publication", post_id=post_id)
+        try:
+            result = await db.execute(
+                select(Publication)
+                .join(PostDraft)
+                .where(PostDraft.id == post_id)
+            )
+            publication = result.scalar_one_or_none()
+            logger.info("publication_query_executed", post_id=post_id, found=publication is not None)
+        except Exception as sql_error:
+            logger.error("publication_query_error", post_id=post_id, error=str(sql_error))
+            await callback.answer("❌ Ошибка базы данных", show_alert=True)
+            return
+
         if not publication:
             logger.warning("publication_not_found", post_id=post_id)
             await callback.answer("❌ Публикация не найдена", show_alert=True)
             return
-        
-        # Обновляем реакции
+
+        logger.info("publication_found", pub_id=publication.id)
+
+        # Обновляем реакции в публикации
         current_reactions = publication.reactions or {}
         current_count = current_reactions.get(reaction_type, 0)
         current_reactions[reaction_type] = current_count + 1
         publication.reactions = current_reactions
         
         await db.commit()
-        
+        logger.info("reactions_updated", pub_id=publication.id, reaction=reaction_type, new_count=current_reactions[reaction_type])
+
         # Получаем обновленные реакции для отображения
+        await db.refresh(publication)
         reactions = publication.reactions or {}
-        
-        # Формируем текст с реакциями
+
+        # Полный словарь всех реакций
         reaction_emoji = {
             "useful": "👍",
-            "important": "🔥",
+            "important": "🔥", 
             "controversial": "🤔",
             "banal": "💤",
             "obvious": "🤷",
@@ -1406,31 +1418,52 @@ async def callback_react(callback: CallbackQuery, db: AsyncSession):
         reaction_text = {
             "useful": "Полезно",
             "important": "Важно",
-            "controversial": "Спорно",
+            "controversial": "Спорно", 
             "banal": "Банально",
             "obvious": "Очевидно",
             "poor_quality": "Плохое качество",
             "low_content_quality": "Низкое качество контента",
             "bad_source": "Плохой источник"
         }
-        
+
+        # Формируем текст с реакциями
         reaction_lines = []
         for reaction, emoji in reaction_emoji.items():
             count = reactions.get(reaction, 0)
             if count > 0:
                 text = reaction_text.get(reaction, reaction)
                 reaction_lines.append(f"{emoji} {text}: {count}")
-        
-        reaction_summary = "\n".join(reaction_lines) if reaction_lines else "Пока нет реакций"
-        
-        # Отправляем уведомление
-        await callback.answer(f"✅ Спасибо! Ваша реакция учтена.\n\n📊 Текущая статистика:\n{reaction_summary}", show_alert=True)
-        
+
+        if reaction_lines:
+            reaction_summary = "\n".join(reaction_lines)
+        else:
+            reaction_summary = "Пока нет реакций"
+
+        # Отправляем пользователю уведомление
+        await callback.answer("✅ Реакция учтена!", show_alert=False)
         logger.info("reaction_processed", post_id=post_id, reaction_type=reaction_type, total_reactions=sum(reactions.values()))
 
     except Exception as e:
         logger.error("react_callback_error", error=str(e))
         await callback.answer("❌ Произошла ошибка при обработке реакции", show_alert=True)
+        await callback.answer("❌ Произошла ошибка", show_alert=True)
+        # Заменяем клавиатуру на сообщение благодарности
+        if callback.message:
+            try:
+                await callback.message.edit_text(
+                    text=f"{callback.message.text or callback.message.caption}\n\n✅ Спасибо за ваш отзыв!",
+                    reply_markup=None
+                )
+                logger.info("message_updated_with_thanks")
+            except Exception as edit_error:
+                logger.warning("message_edit_failed", error=str(edit_error))
+        else:
+
+
+    except Exception as e:
+        logger.error("react_callback_error", error=str(e))
+        await callback.answer("❌ Произошла ошибка при обработке реакции", show_alert=True)
+    # Драфты в ожидании
     pending_count = await db.scalar(
         select(func.count(PostDraft.id)).where(PostDraft.status == 'pending_review')
     )

@@ -73,6 +73,10 @@ export default function SettingsPage() {
           similarity_threshold: 0.85,
         },
         budget: {
+        fetcher: {
+          max_articles_per_source: 300,
+        },
+
           max_per_month: 10.0,
           warning_threshold: 8.0,
           stop_on_exceed: false,
@@ -152,10 +156,25 @@ export default function SettingsPage() {
   }
 
   const updateBudget = (key: string, value: any) => {
+  const updateFetcher = (key: string, value: any) => {
+    if (!settings) return
+    setSettings({
+      ...settings,
+      fetcher: {
+        ...settings.fetcher,
+        [key]: value,
+      },
+    })
+  }
+
     if (!settings) return
     setSettings({
       ...settings,
       budget: {
+        fetcher: {
+          max_articles_per_source: 300,
+        },
+
         ...settings.budget,
         [key]: value,
       },
@@ -537,6 +556,32 @@ export default function SettingsPage() {
                 type="range"
                 value={settings?.filtering.similarity_threshold}
                 onChange={(e) =>
+        {/* News Fetcher */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Сбор новостей</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div>
+              <label className="text-sm font-medium mb-2 block">
+                Максимум статей на источник
+              </label>
+              <input
+                type="number"
+                value={settings?.fetcher?.max_articles_per_source || 300}
+                onChange={(e) => updateFetcher('max_articles_per_source', parseInt(e.target.value))}
+                className="w-full p-2 border rounded"
+                min="10"
+                max="1000"
+                step="10"
+              />
+              <p className="text-xs text-gray-500 mt-1">
+                Сколько статей брать из каждого источника (10-1000)
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+
                   updateFiltering('similarity_threshold', parseFloat(e.target.value))
                 }
                 className="w-full"

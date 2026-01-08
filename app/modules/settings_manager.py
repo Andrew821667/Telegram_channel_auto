@@ -53,6 +53,10 @@ DEFAULT_SETTINGS = {
     "auto_publish.weekdays_only": {"value": False, "type": "bool", "category": "publishing", "description": "Только будни"},
     "auto_publish.skip_holidays": {"value": False, "type": "bool", "category": "publishing", "description": "Пропускать праздники"},
 
+    # Настройки сбора новостей
+    "fetcher.max_articles_per_source": {"value": 300, "type": "int", "category": "fetcher", "description": "Максимум статей на источник"},
+
+
     # Фильтрация контента
     "filtering.min_score": {"value": 0.6, "type": "float", "category": "quality", "description": "Минимальный скор качества (0-1)"},
     "filtering.min_content_length": {"value": 300, "type": "int", "category": "quality", "description": "Минимальная длина текста"},
@@ -226,3 +230,43 @@ async def get_enabled_sources(db: AsyncSession) -> List[str]:
             enabled.append(source_name)
 
     return enabled
+
+
+
+async def is_source_enabled(source_name: str, db: AsyncSession) -> bool:
+    """
+    Проверить, включен ли конкретный источник.
+
+    Args:
+        source_name: Название источника (например, "google_news_ru")
+        db: Сессия базы данных
+
+    Returns:
+        True если источник включен, False иначе
+    """
+    key = f"sources.{source_name}.enabled"
+    return await get_setting(key, db, default=True)  # По умолчанию True для обратной совместимости
+
+async def get_auto_publish_config(db: AsyncSession) -> Dict[str, Any]:
+    """
+    Получить конфигурацию автопубликации.
+    
+    Args:
+        db: Сессия базы данных
+        
+    Returns:
+        Словарь с настройками автопубликации
+    """
+    return await get_category_settings("auto_publish", db)
+async def get_dalle_config(db: AsyncSession) -> Dict[str, Any]:
+    """
+    Получить конфигурацию DALL-E генерации изображений.
+    
+    Args:
+        db: Сессия базы данных
+        
+    Returns:
+        Словарь с настройками DALL-E
+    """
+    return await get_category_settings("dalle", db)
+

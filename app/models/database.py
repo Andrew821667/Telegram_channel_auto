@@ -48,6 +48,7 @@ class RawArticle(Base):
     fetched_at = Column(TIMESTAMP, default=datetime.utcnow, index=True)
     status = Column(String(20), default='new', index=True)
     relevance_score = Column(Float)
+    scored_at = Column(TIMESTAMP, index=True)  # Время последней оценки AI
 
     # Relationships
     drafts = relationship("PostDraft", back_populates="article", cascade="all, delete-orphan")

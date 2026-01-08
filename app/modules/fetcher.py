@@ -21,10 +21,34 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
+from app.modules.settings_manager import get_setting
 from app.models.database import RawArticle, Source, log_to_db
 import structlog
 
 logger = structlog.get_logger()
+
+# Ключевые слова для предварительной фильтрации статей
+RELEVANT_KEYWORDS = {
+    # AI и машинное обучение
+    'ai', 'artificial intelligence', 'machine learning', 'ml', 'deep learning', 'neural network',
+    'нейросеть', 'искусственный интеллект', 'машинное обучение', 'глубокое обучение',
+
+    # Юридические технологии
+    'legal tech', 'legal technology', 'law tech', 'правовые технологии', 'юридические технологии',
+    'legal ai', 'юридический ai', 'правовой ai',
+
+    # Бизнес и стартапы
+    'startup', 'стартап', 'business', 'бизнес', 'entrepreneurship', 'предпринимательство',
+    'venture capital', 'венчурный капитал', 'инвестиции', 'investment',
+
+    # Технологии
+    'technology', 'технология', 'innovation', 'инновации', 'digital transformation',
+    'цифровая трансформация', 'automation', 'автоматизация',
+
+    # Финтех и регуляции
+    'fintech', 'финтех', 'regulation', 'регулирование', 'compliance', 'комплаенс',
+    'blockchain', 'блокчейн', 'cryptocurrency', 'криптовалюта'
+}
 
 
 # User-Agent ротация для легального скрапинга
@@ -35,6 +59,28 @@ USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0",
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Safari/605.1.15",
 ]
+
+
+def is_article_relevant(title: str, content: str = "") -> bool:
+    """
+    Проверяет, содержит ли статья релевантные ключевые слова.
+
+    Args:
+        title: Заголовок статьи
+        content: Содержимое статьи (опционально)
+
+    Returns:
+        True если статья содержит релевантные ключевые слова
+    """
+    text_to_check = f"{title} {content}".lower()
+
+    for keyword in RELEVANT_KEYWORDS:
+        if keyword.lower() in text_to_check:
+            logger.debug("article_relevant", keyword=keyword, title=title[:50])
+            return True
+
+    logger.debug("article_irrelevant", title=title[:50])
+    return False
 
 
 class NewsFetcher:
@@ -193,7 +239,7 @@ class NewsFetcher:
         # Парсим RSS
         feed = feedparser.parse(content)
 
-        for entry in feed.entries[:settings.fetcher_max_articles_per_source]:
+        for entry in feed.entries[:(await get_setting("fetcher.max_articles_per_source", self.db, 300))]:
             try:
                 # Извлекаем данные из RSS entry
                 article_data = {
@@ -369,7 +415,7 @@ class NewsFetcher:
 
         feed = feedparser.parse(content)
 
-        for entry in feed.entries[:settings.fetcher_max_articles_per_source]:
+        for entry in feed.entries[:(await get_setting("fetcher.max_articles_per_source", self.db, 300))]:
             try:
                 article_data = {
                     "url": entry.link,
@@ -408,7 +454,7 @@ class NewsFetcher:
         logger.info(
             "rss_fetch_complete",
             source_name=source.name,
-            total_entries=len(feed.entries[:settings.fetcher_max_articles_per_source]),
+            total_entries=len(feed.entries[:(await get_setting("fetcher.max_articles_per_source", self.db, 300))]),
             filtered_out=filtered_count,
             articles_accepted=len(articles)
         )
@@ -591,16 +637,28 @@ Search only for recent news. Return maximum 10 articles."""
 
         for article_data in articles:
             try:
-                # Проверяем, существует ли статья с таким URL
+                # ПРЕДВАРИТЕЛЬНАЯ ФИЛЬТРАЦИЯ: проверяем релевантность статьи
+                title = article_data.get("title", "")
+                content = article_data.get("content", "")
+
+                if not is_article_relevant(title, content):
+                    logger.debug("article_filtered_out", title=title[:50])
+                    continue
+
+                # Проверяем, существует ли статья с таким URL ИЛИ таким заголовком
                 result = await self.db.execute(
-                    select(RawArticle).where(RawArticle.url == article_data["url"])
+                    select(RawArticle).where(
+                        (RawArticle.url == article_data["url"]) |
+                        (RawArticle.title == article_data["title"])
+                    )
                 )
                 existing = result.scalar_one_or_none()
 
                 if existing:
                     logger.debug(
                         "article_exists",
-                        url=article_data["url"]
+                        url=article_data["url"],
+                        title=article_data["title"][:50]
                     )
                     continue
 
@@ -640,38 +698,46 @@ Search only for recent news. Return maximum 10 articles."""
 
         stats = {}
 
-        # Google News RSS (русский)
+        # Google News RSS (русский) - ЛИМИТ: 15 статей
         if settings.fetcher_enabled and await is_source_enabled("google_news_ru", self.db):
             logger.info("fetching_source", source="google_news_ru", enabled=True)
             articles_ru = await self.fetch_google_news_rss("ru")
-            saved_ru = await self.save_articles(articles_ru)
+            # ОГРАНИЧИВАЕМ количество статей до 15
+            articles_ru_limited = articles_ru[:15] if len(articles_ru) > 15 else articles_ru
+            saved_ru = await self.save_articles(articles_ru_limited)
             stats["Google News RU"] = saved_ru
         else:
             logger.info("source_disabled", source="google_news_ru")
 
-        # Google News RSS (английский)
+        # Google News RSS (английский) - ЛИМИТ: 15 статей
         if settings.fetcher_enabled and await is_source_enabled("google_news_en", self.db):
             logger.info("fetching_source", source="google_news_en", enabled=True)
             articles_en = await self.fetch_google_news_rss("en")
-            saved_en = await self.save_articles(articles_en)
+            # ОГРАНИЧИВАЕМ количество статей до 15
+            articles_en_limited = articles_en[:15] if len(articles_en) > 15 else articles_en
+            saved_en = await self.save_articles(articles_en_limited)
             stats["Google News EN"] = saved_en
         else:
             logger.info("source_disabled", source="google_news_en")
 
-        # Perplexity Real-Time Search (русский)
+        # Perplexity Real-Time Search (русский) - ЛИМИТ: 10 статей
         if settings.perplexity_search_enabled and await is_source_enabled("perplexity_ru", self.db):
             logger.info("fetching_source", source="perplexity_ru", enabled=True)
             perplexity_articles_ru = await self.fetch_perplexity_news("ru")
-            saved_perplexity_ru = await self.save_articles(perplexity_articles_ru)
+            # ОГРАНИЧИВАЕМ количество статей до 10
+            perplexity_articles_ru_limited = perplexity_articles_ru[:10] if len(perplexity_articles_ru) > 10 else perplexity_articles_ru
+            saved_perplexity_ru = await self.save_articles(perplexity_articles_ru_limited)
             stats["Perplexity Search RU"] = saved_perplexity_ru
         else:
             logger.info("source_disabled", source="perplexity_ru")
 
-        # Perplexity Real-Time Search (английский)
+        # Perplexity Real-Time Search (английский) - ЛИМИТ: 10 статей
         if settings.perplexity_search_enabled and await is_source_enabled("perplexity_en", self.db):
             logger.info("fetching_source", source="perplexity_en", enabled=True)
             perplexity_articles_en = await self.fetch_perplexity_news("en")
-            saved_perplexity_en = await self.save_articles(perplexity_articles_en)
+            # ОГРАНИЧИВАЕМ количество статей до 10
+            perplexity_articles_en_limited = perplexity_articles_en[:10] if len(perplexity_articles_en) > 10 else perplexity_articles_en
+            saved_perplexity_en = await self.save_articles(perplexity_articles_en_limited)
             stats["Perplexity Search EN"] = saved_perplexity_en
         else:
             logger.info("source_disabled", source="perplexity_en")
@@ -686,7 +752,9 @@ Search only for recent news. Return maximum 10 articles."""
             from app.modules.telegram_fetcher import fetch_telegram_news
 
             telegram_stats, telegram_articles = await fetch_telegram_news()
-            saved_telegram = await self.save_articles(telegram_articles)
+            # ОГРАНИЧИВАЕМ количество статей до 20 с Telegram каналов
+            telegram_articles_limited = telegram_articles[:20] if len(telegram_articles) > 20 else telegram_articles
+            saved_telegram = await self.save_articles(telegram_articles_limited)
 
             # Добавляем статистику по каждому каналу
             for channel_name, count in telegram_stats.items():
@@ -716,7 +784,9 @@ Search only for recent news. Return maximum 10 articles."""
         for source in sources:
             try:
                 articles = await self.fetch_rss_feed(source)
-                saved = await self.save_articles(articles)
+                # ОГРАНИЧИВАЕМ количество статей до 15 с RSS источников
+                articles_limited = articles[:15] if len(articles) > 15 else articles
+                saved = await self.save_articles(articles_limited)
                 stats[source.name] = saved
 
                 # Обновляем статистику источника

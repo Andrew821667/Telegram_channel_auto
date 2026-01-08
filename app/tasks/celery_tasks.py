@@ -600,7 +600,7 @@ def daily_workflow_task():
 # ====================
 
 app.conf.beat_schedule = {
-    # БУДНИЕ ДНИ (Понедельник-Пятница): 3 генерации в день
+    # ОПТИМИЗИРОВАННОЕ РАСПИСАНИЕ: 3 генерации в день с лимитами
     # Утренняя генерация: 09:00 MSK
     'weekday-morning-workflow': {
         'task': 'daily_workflow_task',
