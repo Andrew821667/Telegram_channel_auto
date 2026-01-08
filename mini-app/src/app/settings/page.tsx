@@ -73,10 +73,9 @@ export default function SettingsPage() {
           similarity_threshold: 0.85,
         },
         budget: {
-        fetcher: {
-          max_articles_per_source: 300,
-        },
-
+          fetcher: {
+            max_articles_per_source: 300,
+          },
           max_per_month: 10.0,
           warning_threshold: 8.0,
           stop_on_exceed: false,
