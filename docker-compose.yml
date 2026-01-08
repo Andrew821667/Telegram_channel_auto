@@ -179,6 +179,19 @@ services:
     command: python -m app.reader_bot
     mem_limit: 200m  # Lightweight bot
 
+  # Ngrok tunnel for public access to API
+  ngrok:
+    image: ngrok/ngrok:latest
+    container_name: legal_ai_ngrok
+    restart: unless-stopped
+    command: ["http", "app:8000", "--log=stdout"]
+    environment:
+      - NGROK_AUTHTOKEN=${NGROK_AUTHTOKEN}
+    depends_on:
+      - app
+    ports:
+      - "4040:4040"
+
 volumes:
   postgres_data:
     driver: local
