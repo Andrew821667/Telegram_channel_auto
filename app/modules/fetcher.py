@@ -239,7 +239,10 @@ class NewsFetcher:
         # Парсим RSS
         feed = feedparser.parse(content)
 
-        for entry in feed.entries[:(await get_setting("fetcher.max_articles_per_source", self.db, 300))]:
+        # Получаем лимит статей из настроек
+        max_articles = await get_setting("fetcher.max_articles_per_source", self.db, 300)
+
+        for entry in feed.entries[:max_articles]:
             try:
                 # Извлекаем данные из RSS entry
                 article_data = {
@@ -415,7 +418,10 @@ class NewsFetcher:
 
         feed = feedparser.parse(content)
 
-        for entry in feed.entries[:(await get_setting("fetcher.max_articles_per_source", self.db, 300))]:
+        # Получаем лимит статей из настроек
+        max_articles = await get_setting("fetcher.max_articles_per_source", self.db, 300)
+
+        for entry in feed.entries[:max_articles]:
             try:
                 article_data = {
                     "url": entry.link,
@@ -451,10 +457,13 @@ class NewsFetcher:
                 )
                 continue
 
+        # Вычисляем количество обработанных записей для логирования
+        total_processed = min(len(feed.entries), max_articles)
+
         logger.info(
             "rss_fetch_complete",
             source_name=source.name,
-            total_entries=len(feed.entries[:(await get_setting("fetcher.max_articles_per_source", self.db, 300))]),
+            total_entries=total_processed,
             filtered_out=filtered_count,
             articles_accepted=len(articles)
         )
@@ -698,51 +707,51 @@ Search only for recent news. Return maximum 10 articles."""
 
         stats = {}
 
-        # Google News RSS (русский) - ЛИМИТ: 15 статей
+        # Google News RSS (русский) - ЛИМИТ: 10 статей (оптимизировано для экономии)
         if settings.fetcher_enabled and await is_source_enabled("google_news_ru", self.db):
             logger.info("fetching_source", source="google_news_ru", enabled=True)
             articles_ru = await self.fetch_google_news_rss("ru")
-            # ОГРАНИЧИВАЕМ количество статей до 15
-            articles_ru_limited = articles_ru[:15] if len(articles_ru) > 15 else articles_ru
+            # ОГРАНИЧИВАЕМ количество статей до 10
+            articles_ru_limited = articles_ru[:10] if len(articles_ru) > 10 else articles_ru
             saved_ru = await self.save_articles(articles_ru_limited)
             stats["Google News RU"] = saved_ru
         else:
             logger.info("source_disabled", source="google_news_ru")
 
-        # Google News RSS (английский) - ЛИМИТ: 15 статей
+        # Google News RSS (английский) - ЛИМИТ: 10 статей (оптимизировано для экономии)
         if settings.fetcher_enabled and await is_source_enabled("google_news_en", self.db):
             logger.info("fetching_source", source="google_news_en", enabled=True)
             articles_en = await self.fetch_google_news_rss("en")
-            # ОГРАНИЧИВАЕМ количество статей до 15
-            articles_en_limited = articles_en[:15] if len(articles_en) > 15 else articles_en
+            # ОГРАНИЧИВАЕМ количество статей до 10
+            articles_en_limited = articles_en[:10] if len(articles_en) > 10 else articles_en
             saved_en = await self.save_articles(articles_en_limited)
             stats["Google News EN"] = saved_en
         else:
             logger.info("source_disabled", source="google_news_en")
 
-        # Perplexity Real-Time Search (русский) - ЛИМИТ: 10 статей
+        # Perplexity Real-Time Search (русский) - ЛИМИТ: 5 статей (оптимизировано для экономии)
         if settings.perplexity_search_enabled and await is_source_enabled("perplexity_ru", self.db):
             logger.info("fetching_source", source="perplexity_ru", enabled=True)
             perplexity_articles_ru = await self.fetch_perplexity_news("ru")
-            # ОГРАНИЧИВАЕМ количество статей до 10
-            perplexity_articles_ru_limited = perplexity_articles_ru[:10] if len(perplexity_articles_ru) > 10 else perplexity_articles_ru
+            # ОГРАНИЧИВАЕМ количество статей до 5
+            perplexity_articles_ru_limited = perplexity_articles_ru[:5] if len(perplexity_articles_ru) > 5 else perplexity_articles_ru
             saved_perplexity_ru = await self.save_articles(perplexity_articles_ru_limited)
             stats["Perplexity Search RU"] = saved_perplexity_ru
         else:
             logger.info("source_disabled", source="perplexity_ru")
 
-        # Perplexity Real-Time Search (английский) - ЛИМИТ: 10 статей
+        # Perplexity Real-Time Search (английский) - ЛИМИТ: 5 статей (оптимизировано для экономии)
         if settings.perplexity_search_enabled and await is_source_enabled("perplexity_en", self.db):
             logger.info("fetching_source", source="perplexity_en", enabled=True)
             perplexity_articles_en = await self.fetch_perplexity_news("en")
-            # ОГРАНИЧИВАЕМ количество статей до 10
-            perplexity_articles_en_limited = perplexity_articles_en[:10] if len(perplexity_articles_en) > 10 else perplexity_articles_en
+            # ОГРАНИЧИВАЕМ количество статей до 5
+            perplexity_articles_en_limited = perplexity_articles_en[:5] if len(perplexity_articles_en) > 5 else perplexity_articles_en
             saved_perplexity_en = await self.save_articles(perplexity_articles_en_limited)
             stats["Perplexity Search EN"] = saved_perplexity_en
         else:
             logger.info("source_disabled", source="perplexity_en")
 
-        # 🆕 Telegram Channels (если включен)
+        # 🆕 Telegram Channels (если включен) - ЛИМИТ: 10 статей (оптимизировано для экономии)
         if (settings.telegram_fetch_enabled and
             settings.telegram_api_id and
             settings.telegram_api_hash and
@@ -752,8 +761,8 @@ Search only for recent news. Return maximum 10 articles."""
             from app.modules.telegram_fetcher import fetch_telegram_news
 
             telegram_stats, telegram_articles = await fetch_telegram_news()
-            # ОГРАНИЧИВАЕМ количество статей до 20 с Telegram каналов
-            telegram_articles_limited = telegram_articles[:20] if len(telegram_articles) > 20 else telegram_articles
+            # ОГРАНИЧИВАЕМ количество статей до 10 с Telegram каналов
+            telegram_articles_limited = telegram_articles[:10] if len(telegram_articles) > 10 else telegram_articles
             saved_telegram = await self.save_articles(telegram_articles_limited)
 
             # Добавляем статистику по каждому каналу
@@ -784,8 +793,8 @@ Search only for recent news. Return maximum 10 articles."""
         for source in sources:
             try:
                 articles = await self.fetch_rss_feed(source)
-                # ОГРАНИЧИВАЕМ количество статей до 15 с RSS источников
-                articles_limited = articles[:15] if len(articles) > 15 else articles
+                # ОГРАНИЧИВАЕМ количество статей до 10 с RSS источников (оптимизировано для экономии)
+                articles_limited = articles[:10] if len(articles) > 10 else articles
                 saved = await self.save_articles(articles_limited)
                 stats[source.name] = saved
 

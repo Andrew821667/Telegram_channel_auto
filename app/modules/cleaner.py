@@ -10,7 +10,7 @@ News Cleaner Module
 
 import re
 from typing import List, Optional, Set, Tuple
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -64,6 +64,35 @@ class NewsCleaner:
             select(RawArticle).where(RawArticle.status == 'new')
         )
         return list(result.scalars().all())
+
+    async def cleanup_old_articles(self) -> int:
+        """
+        Удалить старые статьи из БД (старше 30 дней).
+
+        Returns:
+            Количество удаленных статей
+        """
+        # Удаляем статьи старше 30 дней
+        cutoff_date = datetime.utcnow() - timedelta(days=30)
+
+        result = await self.db.execute(
+            select(RawArticle).where(
+                RawArticle.created_at < cutoff_date,
+                RawArticle.status.in_(['rejected', 'filtered'])  # Удаляем только обработанные
+            )
+        )
+        old_articles = result.scalars().all()
+
+        count = len(old_articles)
+
+        for article in old_articles:
+            await self.db.delete(article)
+
+        await self.db.commit()
+
+        logger.info("old_articles_cleanup", deleted_count=count, cutoff_date=cutoff_date)
+
+        return count
 
     def _detect_language(self, text: str) -> Optional[str]:
         """
@@ -120,6 +149,31 @@ class NewsCleaner:
 
         return len(content.strip()) >= settings.cleaner_min_content_length
 
+    def _check_article_age(self, published_at: Optional[datetime]) -> bool:
+        """
+        Проверить возраст новости (не старше 3 суток).
+
+        Args:
+            published_at: Дата публикации статьи
+
+        Returns:
+            True если новость свежая (не старше 3 суток), False иначе
+        """
+        if not published_at:
+            # Если дата публикации не указана, считаем новость свежей
+            # (она может быть просто добавлена в систему)
+            return True
+
+        # Максимальный возраст новости - 3 суток (72 часа)
+        max_age = timedelta(days=3)
+        now = datetime.utcnow()
+
+        # Вычисляем возраст новости
+        age = now - published_at
+
+        # Проверяем, что новость не старше 3 суток
+        return age <= max_age
+
     def _calculate_title_similarity(self, title1: str, title2: str) -> float:
         """
         Вычислить схожесть двух заголовков.
@@ -147,7 +201,7 @@ class NewsCleaner:
         existing_articles: List[RawArticle]
     ) -> Optional[RawArticle]:
         """
-        Найти дубликаты статьи.
+        Найти дубликаты статьи (улучшенная дедупликация).
 
         Args:
             article: Статья для проверки
@@ -156,7 +210,14 @@ class NewsCleaner:
         Returns:
             Дубликат или None
         """
-        for existing in existing_articles:
+        # Фильтруем existing_articles: оставляем только свежие (не старше 7 дней)
+        recent_cutoff = datetime.utcnow() - timedelta(days=7)
+        recent_articles = [
+            a for a in existing_articles
+            if a.created_at and a.created_at >= recent_cutoff
+        ]
+
+        for existing in recent_articles:
             # Пропускаем саму себя
             if existing.id == article.id:
                 continue
@@ -170,13 +231,14 @@ class NewsCleaner:
                 )
                 return existing
 
-            # Проверка по схожести заголовков
+            # Проверка по схожести заголовков (повышенный порог для более строгой дедупликации)
             similarity = self._calculate_title_similarity(
                 article.title,
                 existing.title
             )
 
-            if similarity >= settings.cleaner_similarity_threshold:
+            # Используем более высокий порог для дедупликации (0.9 вместо 0.85)
+            if similarity >= 0.9:
                 logger.debug(
                     "duplicate_found_by_title",
                     article_id=article.id,
@@ -184,6 +246,26 @@ class NewsCleaner:
                     similarity=similarity
                 )
                 return existing
+
+            # Дополнительная проверка: если первые 100 символов контента совпадают на 90%
+            if article.content and existing.content:
+                content_snippet_new = article.content[:100].lower().strip()
+                content_snippet_existing = existing.content[:100].lower().strip()
+
+                if content_snippet_new and content_snippet_existing:
+                    content_similarity = self._calculate_title_similarity(
+                        content_snippet_new,
+                        content_snippet_existing
+                    )
+
+                    if content_similarity >= 0.9:
+                        logger.debug(
+                            "duplicate_found_by_content",
+                            article_id=article.id,
+                            duplicate_id=existing.id,
+                            content_similarity=content_similarity
+                        )
+                        return existing
 
         return None
 
@@ -199,22 +281,27 @@ class NewsCleaner:
             - passed: True если статья прошла фильтры
             - reason: Причина отклонения (если есть)
         """
-        # 1. Проверка минимальной длины
+        # 1. Проверка возраста новости (не старше 3 суток)
+        if not self._check_article_age(article.published_at):
+            age_days = (datetime.utcnow() - article.published_at).days if article.published_at else 0
+            return False, f"Article too old: {age_days} days (max 3 days)"
+
+        # 2. Проверка минимальной длины
         if not self._check_minimum_length(article.content):
             return False, f"Content too short: {len(article.content or '')} chars"
 
-        # 2. Проверка языка
+        # 3. Проверка языка
         detected_lang = self._detect_language(article.title + " " + (article.content or ""))
 
         if detected_lang not in settings.cleaner_languages_list:
             return False, f"Unsupported language: {detected_lang}"
 
-        # 3. Проверка на спам
+        # 4. Проверка на спам
         combined_text = f"{article.title} {article.content or ''}"
         if self._check_spam_patterns(combined_text):
             return False, "Spam patterns detected"
 
-        # 4. Проверка на наличие ключевых слов (базовая релевантность)
+        # 5. Проверка на наличие ключевых слов (базовая релевантность)
         relevant_keywords = [
             # Русские
             "искусственный интеллект", "ии", "ai", "нейросет",
@@ -250,6 +337,10 @@ class NewsCleaner:
             "rejected": 0,
             "errors": 0
         }
+
+        # Очищаем старые статьи перед обработкой новых
+        cleanup_count = await self.cleanup_old_articles()
+        logger.info("old_articles_cleaned", count=cleanup_count)
 
         # Получаем новые статьи
         new_articles = await self.get_new_articles()
