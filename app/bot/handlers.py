@@ -2145,6 +2145,7 @@ async def cmd_settings(message: Message, db: AsyncSession):
         [InlineKeyboardButton(text="🤖 Модели LLM", callback_data="settings:llm")],
         [InlineKeyboardButton(text="🎨 Генерация изображений (DALL-E)", callback_data="settings:dalle")],
         [InlineKeyboardButton(text="📅 Автопубликация", callback_data="settings:autopublish")],
+        [InlineKeyboardButton(text="🔄 Сбор новостей", callback_data="settings:fetcher")],
         [InlineKeyboardButton(text="🔔 Уведомления", callback_data="settings:alerts")],
         [InlineKeyboardButton(text="🎯 Фильтрация и качество", callback_data="settings:quality")],
         [InlineKeyboardButton(text="💰 Бюджет API", callback_data="settings:budget")],
@@ -2245,6 +2246,7 @@ async def callback_back_to_settings(callback: CallbackQuery, db: AsyncSession):
         [InlineKeyboardButton(text="🤖 Модели LLM", callback_data="settings:llm")],
         [InlineKeyboardButton(text="🎨 Генерация изображений (DALL-E)", callback_data="settings:dalle")],
         [InlineKeyboardButton(text="📅 Автопубликация", callback_data="settings:autopublish")],
+        [InlineKeyboardButton(text="🔄 Сбор новостей", callback_data="settings:fetcher")],
         [InlineKeyboardButton(text="🔔 Уведомления", callback_data="settings:alerts")],
         [InlineKeyboardButton(text="🎯 Фильтрация и качество", callback_data="settings:quality")],
         [InlineKeyboardButton(text="💰 Бюджет API", callback_data="settings:budget")],
@@ -2744,10 +2746,6 @@ async def callback_settings_budget(callback: CallbackQuery, db: AsyncSession):
     await callback.answer()
 
 
-
-@router.callback_query(F.data == "settings:fetcher")
-async def callback_settings_fetcher(callback: CallbackQuery, db: AsyncSession):
-    """Настройки сбора новостей."""
 
 # ====================
 # Personal Posts Handlers
