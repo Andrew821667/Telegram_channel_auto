@@ -4185,6 +4185,28 @@ async def setup_bot_commands():
     logger.info("bot_commands_set", count=len(commands))
 
 
+@router.callback_query(F.data == "settings:fetcher")
+async def callback_settings_fetcher(callback: CallbackQuery, db: AsyncSession):
+    """Настройки сбора новостей."""
+    from app.modules.settings_manager import get_category_settings
+
+    fetcher = await get_category_settings("fetcher", db)
+    max_articles = fetcher.get('fetcher.max_articles_per_source', 300)
+
+    await callback.message.edit_text(
+        f"🔄 <b>Настройки сбора новостей</b>\n\n"
+        f"📊 <b>Максимум статей на источник:</b> {max_articles}\n\n"
+        f"🎯 <b>Источники:</b> 12 активных\n\n"
+        f"💡 <b>Максимум за сборку:</b> {max_articles * 12} статей\n\n"
+        f"⚙️ Настройка изменяется через мини-приложение",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="« Назад", callback_data="back_to_settings")]
+        ])
+    )
+    await callback.answer()
+
+
 # ====================
 # Запуск бота
 # ====================
@@ -4229,25 +4251,4 @@ async def start_bot():
 
 if __name__ == "__main__":
     asyncio.run(start_bot())
-
-@router.callback_query(F.data == "settings:fetcher")
-async def callback_settings_fetcher(callback: CallbackQuery, db: AsyncSession):
-    """Настройки сбора новостей."""
-    from app.modules.settings_manager import get_category_settings
-    
-    fetcher = await get_category_settings("fetcher", db)
-    max_articles = fetcher.get('fetcher.max_articles_per_source', 300)
-    
-    await callback.message.edit_text(
-        f"🔄 <b>Настройки сбора новостей</b>\n\n"
-        f"📊 <b>Максимум статей на источник:</b> {max_articles}\n\n"
-        f"🎯 <b>Источники:</b> 12 активных\n\n"
-        f"💡 <b>Максимум за сборку:</b> {max_articles * 12} статей\n\n"
-        f"⚙️ Настройка изменяется через мини-приложение",
-        parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="« Назад", callback_data="back_to_settings")]
-        ])
-    )
-    await callback.answer()
 

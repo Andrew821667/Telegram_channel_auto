@@ -261,6 +261,9 @@ async def get_settings(
         }
 
         budget = {
+            "fetcher": {
+                "max_articles_per_source": await get_setting("fetcher.max_articles_per_source", db, 300),
+            },
             "max_per_month": await get_setting("budget.max_per_month", db, 50),
             "warning_threshold": await get_setting("budget.warning_threshold", db, 40),
             "stop_on_exceed": await get_setting("budget.stop_on_exceed", db, False),
@@ -317,6 +320,7 @@ async def update_settings(
             "filtering.min_score": "filtering.min_score",
             "filtering.min_content_length": "filtering.min_content_length",
             "filtering.similarity_threshold": "filtering.similarity_threshold",
+            "budget.fetcher.max_articles_per_source": "fetcher.max_articles_per_source",
             "budget.max_per_month": "budget.max_per_month",
             "budget.warning_threshold": "budget.warning_threshold",
             "budget.stop_on_exceed": "budget.stop_on_exceed",
