@@ -400,9 +400,10 @@ def send_drafts_to_admin_task():
         logger.info("send_drafts_to_admin_task_started")
 
         async def send_drafts():
+            from datetime import timedelta
             from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
             from sqlalchemy.pool import NullPool
-            from sqlalchemy import select
+            from sqlalchemy import select, and_
             from app.config import settings
             from aiogram import Bot
             # Импортируем send_draft_for_review ЗДЕСЬ чтобы избежать создания Bot() при импорте модуля
@@ -428,11 +429,18 @@ def send_drafts_to_admin_task():
 
             try:
                 async with SessionLocal() as session:
-                    # Получаем ВСЕ драфты в статусе pending_review (без фильтра по дате)
-                    # Это предотвращает timezone проблемы (UTC vs MSK)
+                    # Получаем только недавно созданные драфты (за последние 2 часа)
+                    # Это предотвращает повторную отправку уже отправленных драфтов
+                    two_hours_ago = datetime.utcnow() - timedelta(hours=2)
+
                     result = await session.execute(
                         select(PostDraft)
-                        .where(PostDraft.status == 'pending_review')
+                        .where(
+                            and_(
+                                PostDraft.status == 'pending_review',
+                                PostDraft.created_at >= two_hours_ago
+                            )
+                        )
                         .order_by(PostDraft.created_at.desc())
                     )
                     drafts = list(result.scalars().all())

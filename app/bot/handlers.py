@@ -4188,23 +4188,71 @@ async def setup_bot_commands():
 @router.callback_query(F.data == "settings:fetcher")
 async def callback_settings_fetcher(callback: CallbackQuery, db: AsyncSession):
     """Настройки сбора новостей."""
-    from app.modules.settings_manager import get_category_settings
+    from app.modules.settings_manager import get_setting
 
-    fetcher = await get_category_settings("fetcher", db)
-    max_articles = fetcher.get('fetcher.max_articles_per_source', 300)
+    max_articles = await get_setting("fetcher.max_articles_per_source", db, 300)
 
     await callback.message.edit_text(
         f"🔄 <b>Настройки сбора новостей</b>\n\n"
         f"📊 <b>Максимум статей на источник:</b> {max_articles}\n\n"
         f"🎯 <b>Источники:</b> 12 активных\n\n"
         f"💡 <b>Максимум за сборку:</b> {max_articles * 12} статей\n\n"
-        f"⚙️ Настройка изменяется через мини-приложение",
+        f"⚙️ Используйте кнопки ниже для настройки",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="- 50", callback_data="fetcher:dec:50"),
+                InlineKeyboardButton(text="- 10", callback_data="fetcher:dec:10"),
+                InlineKeyboardButton(text="+ 10", callback_data="fetcher:inc:10"),
+                InlineKeyboardButton(text="+ 50", callback_data="fetcher:inc:50"),
+            ],
             [InlineKeyboardButton(text="« Назад", callback_data="back_to_settings")]
         ])
     )
     await callback.answer()
+
+
+@router.callback_query(F.data.startswith("fetcher:inc:") | F.data.startswith("fetcher:dec:"))
+async def callback_fetcher_adjust(callback: CallbackQuery, db: AsyncSession):
+    """Изменить настройки сбора новостей."""
+    from app.modules.settings_manager import get_setting, set_setting
+
+    # Parse action and value
+    parts = callback.data.split(":")
+    action = parts[1]  # "inc" or "dec"
+    value = int(parts[2])
+
+    # Get current value
+    max_articles = await get_setting("fetcher.max_articles_per_source", db, 300)
+
+    # Update value
+    if action == "inc":
+        new_value = max_articles + value
+    else:
+        new_value = max(10, max_articles - value)  # Minimum 10 articles
+
+    # Save new value
+    await set_setting("fetcher.max_articles_per_source", new_value, db)
+
+    # Update message
+    await callback.message.edit_text(
+        f"🔄 <b>Настройки сбора новостей</b>\n\n"
+        f"📊 <b>Максимум статей на источник:</b> {new_value}\n\n"
+        f"🎯 <b>Источники:</b> 12 активных\n\n"
+        f"💡 <b>Максимум за сборку:</b> {new_value * 12} статей\n\n"
+        f"⚙️ Используйте кнопки ниже для настройки",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="- 50", callback_data="fetcher:dec:50"),
+                InlineKeyboardButton(text="- 10", callback_data="fetcher:dec:10"),
+                InlineKeyboardButton(text="+ 10", callback_data="fetcher:inc:10"),
+                InlineKeyboardButton(text="+ 50", callback_data="fetcher:inc:50"),
+            ],
+            [InlineKeyboardButton(text="« Назад", callback_data="back_to_settings")]
+        ])
+    )
+    await callback.answer(f"✅ Установлено: {new_value} статей на источник")
 
 
 # ====================

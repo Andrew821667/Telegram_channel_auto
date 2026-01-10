@@ -138,6 +138,17 @@ export default function SettingsPage() {
     )
   }
 
+  if (!settings) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-center">
+          <p className="text-red-500 mb-4">Ошибка загрузки настроек</p>
+          <Button onClick={loadSettings}>Попробовать снова</Button>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="min-h-screen bg-gray-50 p-4">
       <div className="max-w-7xl mx-auto space-y-4">
