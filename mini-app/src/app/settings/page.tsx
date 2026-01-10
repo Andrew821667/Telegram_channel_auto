@@ -154,26 +154,25 @@ export default function SettingsPage() {
     })
   }
 
-  const updateBudget = (key: string, value: any) => {
   const updateFetcher = (key: string, value: any) => {
     if (!settings) return
     setSettings({
       ...settings,
-      fetcher: {
-        ...settings.fetcher,
-        [key]: value,
+      budget: {
+        ...settings.budget,
+        fetcher: {
+          ...settings.budget?.fetcher,
+          [key]: value,
+        },
       },
     })
   }
 
+  const updateBudget = (key: string, value: any) => {
     if (!settings) return
     setSettings({
       ...settings,
       budget: {
-        fetcher: {
-          max_articles_per_source: 300,
-        },
-
         ...settings.budget,
         [key]: value,
       },
