@@ -164,6 +164,9 @@ async def set_setting(key: str, value: Any, db: AsyncSession) -> None:
         db.add(new_setting)
         logger.info("setting_created", key=key, value=value)
 
+    # ВАЖНО: Сохраняем изменения в БД
+    await db.commit()
+
 
 async def get_category_settings(category: str, db: AsyncSession) -> Dict[str, Any]:
     """

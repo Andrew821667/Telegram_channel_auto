@@ -327,17 +327,17 @@ async def update_settings(
             "budget.switch_to_cheap": "budget.switch_to_cheap",
         }
 
-        def update_nested_settings(data, prefix=""):
+        async def update_nested_settings(data, prefix=""):
             for key, value in data.items():
                 if isinstance(value, dict):
-                    update_nested_settings(value, f"{prefix}{key}.")
+                    await update_nested_settings(value, f"{prefix}{key}.")
                 else:
                     setting_key = settings_mapping.get(f"{prefix}{key}")
                     if setting_key:
-                        set_setting(setting_key, value, db)
+                        await set_setting(setting_key, value, db)
                         updated.append(setting_key)
 
-        update_nested_settings(settings_data)
+        await update_nested_settings(settings_data)
 
         logger.info("settings_updated", updated_count=len(updated), user_id=user.get('id'))
 
