@@ -4216,6 +4216,7 @@ async def callback_settings_fetcher(callback: CallbackQuery, db: AsyncSession):
 async def callback_fetcher_adjust(callback: CallbackQuery, db: AsyncSession):
     """Изменить настройки сбора новостей."""
     from app.modules.settings_manager import get_setting, set_setting
+    from aiogram.exceptions import TelegramBadRequest
 
     # Parse action and value
     parts = callback.data.split(":")
@@ -4234,8 +4235,8 @@ async def callback_fetcher_adjust(callback: CallbackQuery, db: AsyncSession):
     # Save new value
     await set_setting("fetcher.max_articles_per_source", new_value, db)
 
-    # Update message only if value actually changed
-    if new_value != max_articles:
+    # Update message - always try to update
+    try:
         await callback.message.edit_text(
             f"🔄 <b>Настройки сбора новостей</b>\n\n"
             f"📊 <b>Максимум статей на источник:</b> {new_value}\n\n"
@@ -4253,9 +4254,14 @@ async def callback_fetcher_adjust(callback: CallbackQuery, db: AsyncSession):
                 [InlineKeyboardButton(text="« Назад", callback_data="back_to_settings")]
             ])
         )
+    except TelegramBadRequest:
+        # Message not modified - ignore
+        pass
+
+    # Show notification
+    if new_value != max_articles:
         await callback.answer(f"✅ Установлено: {new_value} статей на источник")
     else:
-        # If value didn't change (e.g., hit minimum), just show alert without editing message
         await callback.answer(f"⚠️ Минимальное значение: 10 статей")
 
 
