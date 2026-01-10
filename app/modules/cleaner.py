@@ -77,7 +77,7 @@ class NewsCleaner:
 
         result = await self.db.execute(
             select(RawArticle).where(
-                RawArticle.created_at < cutoff_date,
+                RawArticle.fetched_at < cutoff_date,
                 RawArticle.status.in_(['rejected', 'filtered'])  # Удаляем только обработанные
             )
         )
