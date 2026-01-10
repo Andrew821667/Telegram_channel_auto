@@ -24,64 +24,12 @@ export default function SettingsPage() {
       setSettings(response.data)
     } catch (error: any) {
       console.error('[Settings] Failed to load:', error)
-      console.error('[Settings] Error details:', {
-        message: error.message,
-        status: error.response?.status,
-        data: error.response?.data
-      })
+      const errorMessage = error?.response?.data?.detail || error?.message || 'Неизвестная ошибка'
 
-      // Show error to user
       if (window.Telegram?.WebApp) {
-        window.Telegram.WebApp.showAlert(`Ошибка загрузки настроек: ${error.message}`)
-      }
-
-      // Mock data ONLY in development
-      if (process.env.NODE_ENV === 'development') {
-        console.warn('[Settings] Using mock data (development mode)')
-        setSettings({
-          sources: {
-            google_news_ru: true,
-            google_news_en: true,
-            habr: true,
-            perplexity_ru: true,
-            perplexity_en: false,
-            telegram_channels: true,
-          },
-          llm_models: {
-            analysis: 'gpt-4o',
-            draft_generation: 'gpt-4o-mini',
-            ranking: 'gpt-4o-mini',
-          },
-          dalle: {
-            enabled: false,
-            model: 'dall-e-3',
-            quality: 'standard',
-            size: '1024x1024',
-            auto_generate: false,
-            ask_on_review: true,
-          },
-          auto_publish: {
-            enabled: false,
-            mode: 'best_time',
-            max_per_day: 3,
-            weekdays_only: false,
-            skip_holidays: false,
-          },
-          filtering: {
-            min_score: 0.6,
-            min_content_length: 300,
-            similarity_threshold: 0.85,
-          },
-          fetcher: {
-            max_articles_per_source: 300,
-          },
-          budget: {
-            max_per_month: 10.0,
-            warning_threshold: 8.0,
-            stop_on_exceed: false,
-            switch_to_cheap: true,
-          }
-        })
+        window.Telegram.WebApp.showAlert(`Ошибка загрузки настроек: ${errorMessage}`)
+      } else {
+        alert(`Ошибка загрузки настроек: ${errorMessage}`)
       }
     } finally {
       setLoading(false)

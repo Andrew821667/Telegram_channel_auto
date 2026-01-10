@@ -2145,6 +2145,7 @@ async def cmd_settings(message: Message, db: AsyncSession):
         [InlineKeyboardButton(text="🤖 Модели LLM", callback_data="settings:llm")],
         [InlineKeyboardButton(text="🎨 Генерация изображений (DALL-E)", callback_data="settings:dalle")],
         [InlineKeyboardButton(text="📅 Автопубликация", callback_data="settings:autopublish")],
+        [InlineKeyboardButton(text="🔄 Сбор новостей", callback_data="settings:fetcher")],
         [InlineKeyboardButton(text="🔔 Уведомления", callback_data="settings:alerts")],
         [InlineKeyboardButton(text="🎯 Фильтрация и качество", callback_data="settings:quality")],
         [InlineKeyboardButton(text="💰 Бюджет API", callback_data="settings:budget")],
@@ -2245,6 +2246,7 @@ async def callback_back_to_settings(callback: CallbackQuery, db: AsyncSession):
         [InlineKeyboardButton(text="🤖 Модели LLM", callback_data="settings:llm")],
         [InlineKeyboardButton(text="🎨 Генерация изображений (DALL-E)", callback_data="settings:dalle")],
         [InlineKeyboardButton(text="📅 Автопубликация", callback_data="settings:autopublish")],
+        [InlineKeyboardButton(text="🔄 Сбор новостей", callback_data="settings:fetcher")],
         [InlineKeyboardButton(text="🔔 Уведомления", callback_data="settings:alerts")],
         [InlineKeyboardButton(text="🎯 Фильтрация и качество", callback_data="settings:quality")],
         [InlineKeyboardButton(text="💰 Бюджет API", callback_data="settings:budget")],
@@ -2744,10 +2746,6 @@ async def callback_settings_budget(callback: CallbackQuery, db: AsyncSession):
     await callback.answer()
 
 
-
-@router.callback_query(F.data == "settings:fetcher")
-async def callback_settings_fetcher(callback: CallbackQuery, db: AsyncSession):
-    """Настройки сбора новостей."""
 
 # ====================
 # Personal Posts Handlers
@@ -4187,6 +4185,86 @@ async def setup_bot_commands():
     logger.info("bot_commands_set", count=len(commands))
 
 
+@router.callback_query(F.data == "settings:fetcher")
+async def callback_settings_fetcher(callback: CallbackQuery, db: AsyncSession):
+    """Настройки сбора новостей."""
+    from app.modules.settings_manager import get_setting
+
+    max_articles = await get_setting("fetcher.max_articles_per_source", db, 300)
+
+    await callback.message.edit_text(
+        f"🔄 <b>Настройки сбора новостей</b>\n\n"
+        f"📊 <b>Максимум статей на источник:</b> {max_articles}\n\n"
+        f"🎯 <b>Источники:</b> 12 активных\n\n"
+        f"💡 <b>Максимум за сборку:</b> {max_articles * 12} статей\n\n"
+        f"⚙️ Используйте кнопки ниже для настройки",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="- 50", callback_data="fetcher:dec:50"),
+                InlineKeyboardButton(text="- 10", callback_data="fetcher:dec:10"),
+                InlineKeyboardButton(text="+ 10", callback_data="fetcher:inc:10"),
+                InlineKeyboardButton(text="+ 50", callback_data="fetcher:inc:50"),
+            ],
+            [InlineKeyboardButton(text="« Назад", callback_data="back_to_settings")]
+        ])
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("fetcher:inc:") | F.data.startswith("fetcher:dec:"))
+async def callback_fetcher_adjust(callback: CallbackQuery, db: AsyncSession):
+    """Изменить настройки сбора новостей."""
+    from app.modules.settings_manager import get_setting, set_setting
+    from aiogram.exceptions import TelegramBadRequest
+
+    # Parse action and value
+    parts = callback.data.split(":")
+    action = parts[1]  # "inc" or "dec"
+    value = int(parts[2])
+
+    # Get current value
+    max_articles = await get_setting("fetcher.max_articles_per_source", db, 300)
+
+    # Update value
+    if action == "inc":
+        new_value = max_articles + value
+    else:
+        new_value = max(10, max_articles - value)  # Minimum 10 articles
+
+    # Save new value
+    await set_setting("fetcher.max_articles_per_source", new_value, db)
+
+    # Update message - always try to update
+    try:
+        await callback.message.edit_text(
+            f"🔄 <b>Настройки сбора новостей</b>\n\n"
+            f"📊 <b>Максимум статей на источник:</b> {new_value}\n\n"
+            f"🎯 <b>Источники:</b> 12 активных\n\n"
+            f"💡 <b>Максимум за сборку:</b> {new_value * 12} статей\n\n"
+            f"⚙️ Используйте кнопки ниже для настройки",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [
+                    InlineKeyboardButton(text="- 50", callback_data="fetcher:dec:50"),
+                    InlineKeyboardButton(text="- 10", callback_data="fetcher:dec:10"),
+                    InlineKeyboardButton(text="+ 10", callback_data="fetcher:inc:10"),
+                    InlineKeyboardButton(text="+ 50", callback_data="fetcher:inc:50"),
+                ],
+                [InlineKeyboardButton(text="« Назад", callback_data="back_to_settings")]
+            ])
+        )
+    except TelegramBadRequest:
+        # Message not modified - ignore
+        pass
+
+    # Show notification
+    if new_value != max_articles:
+        await callback.answer(f"✅ Установлено: {new_value} статей на источник")
+    else:
+        await callback.answer(f"⚠️ Минимальное значение: 10 статей")
+
+
 # ====================
 # Запуск бота
 # ====================
@@ -4231,25 +4309,4 @@ async def start_bot():
 
 if __name__ == "__main__":
     asyncio.run(start_bot())
-
-@router.callback_query(F.data == "settings:fetcher")
-async def callback_settings_fetcher(callback: CallbackQuery, db: AsyncSession):
-    """Настройки сбора новостей."""
-    from app.modules.settings_manager import get_category_settings
-    
-    fetcher = await get_category_settings("fetcher", db)
-    max_articles = fetcher.get('fetcher.max_articles_per_source', 300)
-    
-    await callback.message.edit_text(
-        f"🔄 <b>Настройки сбора новостей</b>\n\n"
-        f"📊 <b>Максимум статей на источник:</b> {max_articles}\n\n"
-        f"🎯 <b>Источники:</b> 12 активных\n\n"
-        f"💡 <b>Максимум за сборку:</b> {max_articles * 12} статей\n\n"
-        f"⚙️ Настройка изменяется через мини-приложение",
-        parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="« Назад", callback_data="back_to_settings")]
-        ])
-    )
-    await callback.answer()
 

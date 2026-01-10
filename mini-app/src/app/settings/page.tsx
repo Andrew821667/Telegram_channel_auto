@@ -24,64 +24,12 @@ export default function SettingsPage() {
       setSettings(response.data)
     } catch (error: any) {
       console.error('[Settings] Failed to load:', error)
-      console.error('[Settings] Error details:', {
-        message: error.message,
-        status: error.response?.status,
-        data: error.response?.data
-      })
+      const errorMessage = error?.response?.data?.detail || error?.message || 'Неизвестная ошибка'
 
-      // Show error to user
       if (window.Telegram?.WebApp) {
-        window.Telegram.WebApp.showAlert(`Ошибка загрузки настроек: ${error.message}`)
-      }
-
-      // Mock data ONLY in development
-      if (process.env.NODE_ENV === 'development') {
-        console.warn('[Settings] Using mock data (development mode)')
-        setSettings({
-          sources: {
-            google_news_ru: true,
-            google_news_en: true,
-            habr: true,
-            perplexity_ru: true,
-            perplexity_en: false,
-            telegram_channels: true,
-          },
-          llm_models: {
-            analysis: 'gpt-4o',
-            draft_generation: 'gpt-4o-mini',
-            ranking: 'gpt-4o-mini',
-          },
-          dalle: {
-            enabled: false,
-            model: 'dall-e-3',
-            quality: 'standard',
-            size: '1024x1024',
-            auto_generate: false,
-            ask_on_review: true,
-          },
-          auto_publish: {
-            enabled: false,
-            mode: 'best_time',
-            max_per_day: 3,
-            weekdays_only: false,
-            skip_holidays: false,
-          },
-          filtering: {
-            min_score: 0.6,
-            min_content_length: 300,
-            similarity_threshold: 0.85,
-          },
-          budget: {
-            fetcher: {
-              max_articles_per_source: 300,
-            },
-            max_per_month: 10.0,
-            warning_threshold: 8.0,
-            stop_on_exceed: false,
-            switch_to_cheap: true,
-          }
-        })
+        window.Telegram.WebApp.showAlert(`Ошибка загрузки настроек: ${errorMessage}`)
+      } else {
+        alert(`Ошибка загрузки настроек: ${errorMessage}`)
       }
     } finally {
       setLoading(false)
@@ -154,26 +102,25 @@ export default function SettingsPage() {
     })
   }
 
-  const updateBudget = (key: string, value: any) => {
   const updateFetcher = (key: string, value: any) => {
     if (!settings) return
     setSettings({
       ...settings,
-      fetcher: {
-        ...settings.fetcher,
-        [key]: value,
+      budget: {
+        ...settings.budget,
+        fetcher: {
+          ...settings.budget?.fetcher,
+          [key]: value,
+        },
       },
     })
   }
 
+  const updateBudget = (key: string, value: any) => {
     if (!settings) return
     setSettings({
       ...settings,
       budget: {
-        fetcher: {
-          max_articles_per_source: 300,
-        },
-
         ...settings.budget,
         [key]: value,
       },
@@ -186,6 +133,17 @@ export default function SettingsPage() {
         <div className="text-center">
           <div className="w-16 h-16 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
           <p className="text-muted-foreground">Загрузка...</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (!settings) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-center">
+          <p className="text-red-500 mb-4">Ошибка загрузки настроек</p>
+          <Button onClick={loadSettings}>Попробовать снова</Button>
         </div>
       </div>
     )
@@ -555,6 +513,17 @@ export default function SettingsPage() {
                 type="range"
                 value={settings?.filtering.similarity_threshold}
                 onChange={(e) =>
+                  updateFiltering('similarity_threshold', parseFloat(e.target.value))
+                }
+                className="w-full"
+                min="0"
+                max="1"
+                step="0.05"
+              />
+            </div>
+          </CardContent>
+        </Card>
+
         {/* News Fetcher */}
         <Card>
           <CardHeader>
@@ -567,7 +536,7 @@ export default function SettingsPage() {
               </label>
               <input
                 type="number"
-                value={settings?.fetcher?.max_articles_per_source || 300}
+                value={settings?.budget?.fetcher?.max_articles_per_source || 300}
                 onChange={(e) => updateFetcher('max_articles_per_source', parseInt(e.target.value))}
                 className="w-full p-2 border rounded"
                 min="10"
@@ -577,17 +546,6 @@ export default function SettingsPage() {
               <p className="text-xs text-gray-500 mt-1">
                 Сколько статей брать из каждого источника (10-1000)
               </p>
-            </div>
-          </CardContent>
-        </Card>
-
-                  updateFiltering('similarity_threshold', parseFloat(e.target.value))
-                }
-                className="w-full"
-                min="0"
-                max="1"
-                step="0.05"
-              />
             </div>
           </CardContent>
         </Card>

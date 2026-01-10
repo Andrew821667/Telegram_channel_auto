@@ -33,8 +33,8 @@ DEFAULT_SETTINGS = {
     "sources.rbc.enabled": {"value": True, "type": "bool", "category": "sources", "description": "RBC - Технологии"},
     "sources.tass.enabled": {"value": True, "type": "bool", "category": "sources", "description": "TASS - Наука и технологии"},
 
-    # Модели LLM
-    "llm.analysis.model": {"value": "gpt-4o", "type": "string", "category": "llm", "description": "Модель для AI анализа"},
+    # Модели LLM (оптимизировано для снижения расходов)
+    "llm.analysis.model": {"value": "gpt-4o-mini", "type": "string", "category": "llm", "description": "Модель для AI анализа"},
     "llm.draft_generation.model": {"value": "gpt-4o-mini", "type": "string", "category": "llm", "description": "Модель для генерации драфтов"},
     "llm.ranking.model": {"value": "gpt-4o-mini", "type": "string", "category": "llm", "description": "Модель для ranking статей"},
 
@@ -54,7 +54,7 @@ DEFAULT_SETTINGS = {
     "auto_publish.skip_holidays": {"value": False, "type": "bool", "category": "publishing", "description": "Пропускать праздники"},
 
     # Настройки сбора новостей
-    "fetcher.max_articles_per_source": {"value": 300, "type": "int", "category": "fetcher", "description": "Максимум статей на источник"},
+    "fetcher.max_articles_per_source": {"value": 10, "type": "int", "category": "fetcher", "description": "Максимум статей на источник (снижено для экономии)"},
 
 
     # Фильтрация контента
@@ -62,10 +62,10 @@ DEFAULT_SETTINGS = {
     "filtering.min_content_length": {"value": 300, "type": "int", "category": "quality", "description": "Минимальная длина текста"},
     "filtering.similarity_threshold": {"value": 0.85, "type": "float", "category": "quality", "description": "Порог схожести (0-1)"},
 
-    # Бюджет API
-    "budget.max_per_month": {"value": 50, "type": "float", "category": "budget", "description": "Максимум $ в месяц"},
-    "budget.warning_threshold": {"value": 40, "type": "float", "category": "budget", "description": "Порог предупреждения"},
-    "budget.stop_on_exceed": {"value": False, "type": "bool", "category": "budget", "description": "Останавливать при превышении"},
+    # Бюджет API (50 рублей = ~0.55 USD при курсе 90 руб/$)
+    "budget.max_per_month": {"value": 0.6, "type": "float", "category": "budget", "description": "Максимум USD в месяц (~50 руб)"},
+    "budget.warning_threshold": {"value": 0.5, "type": "float", "category": "budget", "description": "Порог предупреждения"},
+    "budget.stop_on_exceed": {"value": True, "type": "bool", "category": "budget", "description": "Останавливать при превышении"},
     "budget.switch_to_cheap": {"value": True, "type": "bool", "category": "budget", "description": "Переходить на дешевые модели"},
 }
 
