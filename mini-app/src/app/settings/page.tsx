@@ -554,6 +554,17 @@ export default function SettingsPage() {
                 type="range"
                 value={settings?.filtering.similarity_threshold}
                 onChange={(e) =>
+                  updateFiltering('similarity_threshold', parseFloat(e.target.value))
+                }
+                className="w-full"
+                min="0"
+                max="1"
+                step="0.05"
+              />
+            </div>
+          </CardContent>
+        </Card>
+
         {/* News Fetcher */}
         <Card>
           <CardHeader>
@@ -566,7 +577,7 @@ export default function SettingsPage() {
               </label>
               <input
                 type="number"
-                value={settings?.fetcher?.max_articles_per_source || 300}
+                value={settings?.budget?.fetcher?.max_articles_per_source || 300}
                 onChange={(e) => updateFetcher('max_articles_per_source', parseInt(e.target.value))}
                 className="w-full p-2 border rounded"
                 min="10"
@@ -576,17 +587,6 @@ export default function SettingsPage() {
               <p className="text-xs text-gray-500 mt-1">
                 Сколько статей брать из каждого источника (10-1000)
               </p>
-            </div>
-          </CardContent>
-        </Card>
-
-                  updateFiltering('similarity_threshold', parseFloat(e.target.value))
-                }
-                className="w-full"
-                min="0"
-                max="1"
-                step="0.05"
-              />
             </div>
           </CardContent>
         </Card>
