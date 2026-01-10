@@ -4234,25 +4234,29 @@ async def callback_fetcher_adjust(callback: CallbackQuery, db: AsyncSession):
     # Save new value
     await set_setting("fetcher.max_articles_per_source", new_value, db)
 
-    # Update message
-    await callback.message.edit_text(
-        f"🔄 <b>Настройки сбора новостей</b>\n\n"
-        f"📊 <b>Максимум статей на источник:</b> {new_value}\n\n"
-        f"🎯 <b>Источники:</b> 12 активных\n\n"
-        f"💡 <b>Максимум за сборку:</b> {new_value * 12} статей\n\n"
-        f"⚙️ Используйте кнопки ниже для настройки",
-        parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [
-                InlineKeyboardButton(text="- 50", callback_data="fetcher:dec:50"),
-                InlineKeyboardButton(text="- 10", callback_data="fetcher:dec:10"),
-                InlineKeyboardButton(text="+ 10", callback_data="fetcher:inc:10"),
-                InlineKeyboardButton(text="+ 50", callback_data="fetcher:inc:50"),
-            ],
-            [InlineKeyboardButton(text="« Назад", callback_data="back_to_settings")]
-        ])
-    )
-    await callback.answer(f"✅ Установлено: {new_value} статей на источник")
+    # Update message only if value actually changed
+    if new_value != max_articles:
+        await callback.message.edit_text(
+            f"🔄 <b>Настройки сбора новостей</b>\n\n"
+            f"📊 <b>Максимум статей на источник:</b> {new_value}\n\n"
+            f"🎯 <b>Источники:</b> 12 активных\n\n"
+            f"💡 <b>Максимум за сборку:</b> {new_value * 12} статей\n\n"
+            f"⚙️ Используйте кнопки ниже для настройки",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [
+                    InlineKeyboardButton(text="- 50", callback_data="fetcher:dec:50"),
+                    InlineKeyboardButton(text="- 10", callback_data="fetcher:dec:10"),
+                    InlineKeyboardButton(text="+ 10", callback_data="fetcher:inc:10"),
+                    InlineKeyboardButton(text="+ 50", callback_data="fetcher:inc:50"),
+                ],
+                [InlineKeyboardButton(text="« Назад", callback_data="back_to_settings")]
+            ])
+        )
+        await callback.answer(f"✅ Установлено: {new_value} статей на источник")
+    else:
+        # If value didn't change (e.g., hit minimum), just show alert without editing message
+        await callback.answer(f"⚠️ Минимальное значение: 10 статей")
 
 
 # ====================
