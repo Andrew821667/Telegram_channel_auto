@@ -448,7 +448,8 @@ def send_drafts_to_admin_task():
                     logger.info("drafts_found", count=len(drafts))
 
                     if not drafts:
-                        await notify_admin("📭 Нет новых драфтов для модерации.", bot=bot)
+                        # Просто логируем, не беспокоим админа
+                        logger.info("no_drafts_to_send", reason="no_pending_drafts_in_last_2_hours")
                         return 0
 
                     # Отправляем уведомление о количестве драфтов
