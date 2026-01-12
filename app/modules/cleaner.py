@@ -214,7 +214,7 @@ class NewsCleaner:
         recent_cutoff = datetime.utcnow() - timedelta(days=7)
         recent_articles = [
             a for a in existing_articles
-            if a.created_at and a.created_at >= recent_cutoff
+            if a.fetched_at and a.fetched_at >= recent_cutoff
         ]
 
         for existing in recent_articles:
