@@ -1425,7 +1425,31 @@ async def callback_react(callback: CallbackQuery, db: AsyncSession):
         
         # Отправляем уведомление
         await callback.answer(f"✅ Спасибо! Ваша реакция учтена.\n\n📊 Текущая статистика:\n{reaction_summary}", show_alert=True)
-        
+
+        # Возвращаем исходную клавиатуру "Ваше мнение"
+        try:
+            # Получаем draft и article для восстановления клавиатуры
+            draft_result = await db.execute(
+                select(PostDraft).where(PostDraft.id == post_id)
+            )
+            draft = draft_result.scalar_one_or_none()
+
+            article_url = ""
+            if draft and draft.article_id:
+                article_result = await db.execute(
+                    select(RawArticle).where(RawArticle.id == draft.article_id)
+                )
+                article = article_result.scalar_one_or_none()
+                if article:
+                    article_url = article.url
+
+            # Возвращаем клавиатуру к исходному виду с кнопкой "Ваше мнение"
+            await callback.message.edit_reply_markup(
+                reply_markup=get_reader_keyboard(article_url, post_id=post_id)
+            )
+        except Exception as edit_error:
+            logger.error("keyboard_restore_error", error=str(edit_error))
+
         logger.info("reaction_processed", post_id=post_id, reaction_type=reaction_type, total_reactions=sum(reactions.values()))
 
     except Exception as e:
