@@ -1426,9 +1426,9 @@ async def callback_react(callback: CallbackQuery, db: AsyncSession):
         # Отправляем уведомление
         await callback.answer(f"✅ Спасибо! Ваша реакция учтена.\n\n📊 Текущая статистика:\n{reaction_summary}", show_alert=True)
 
-        # Возвращаем исходную клавиатуру "Ваше мнение"
+        # Убираем кнопки реакций, оставляем только ссылку на источник (БЕЗ кнопки "Ваше мнение")
         try:
-            # Получаем draft и article для восстановления клавиатуры
+            # Получаем draft и article для клавиатуры
             draft_result = await db.execute(
                 select(PostDraft).where(PostDraft.id == post_id)
             )
@@ -1443,9 +1443,9 @@ async def callback_react(callback: CallbackQuery, db: AsyncSession):
                 if article:
                     article_url = article.url
 
-            # Возвращаем клавиатуру к исходному виду с кнопкой "Ваше мнение"
+            # Возвращаем клавиатуру БЕЗ кнопки "Ваше мнение" (post_id=None скрывает кнопку)
             await callback.message.edit_reply_markup(
-                reply_markup=get_reader_keyboard(article_url, post_id=post_id)
+                reply_markup=get_reader_keyboard(article_url, post_id=None)
             )
         except Exception as edit_error:
             logger.error("keyboard_restore_error", error=str(edit_error))
