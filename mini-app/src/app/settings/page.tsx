@@ -180,7 +180,7 @@ export default function SettingsPage() {
       <div className="flex items-center justify-center min-h-screen">
         <div className="text-center">
           <p className="text-red-500 mb-4">Ошибка загрузки настроек</p>
-          <Button onClick={loadSettings}>Попробовать снова</Button>
+          <Button onClick={() => loadSettings()}>Попробовать снова</Button>
         </div>
       </div>
     )
