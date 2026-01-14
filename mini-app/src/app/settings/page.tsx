@@ -249,8 +249,7 @@ export default function SettingsPage() {
                 className="w-full p-2 border rounded"
               >
                 <optgroup label="DeepSeek">
-                  <option value="deepseek-chat">DeepSeek Chat (быстрая)</option>
-                  <option value="deepseek-reasoner">DeepSeek Reasoner (мощная)</option>
+                  <option value="deepseek-chat">DeepSeek Chat</option>
                 </optgroup>
                 <optgroup label="OpenAI">
                   <option value="gpt-4o-mini">GPT-4o Mini</option>
@@ -280,8 +279,7 @@ export default function SettingsPage() {
                 className="w-full p-2 border rounded"
               >
                 <optgroup label="DeepSeek">
-                  <option value="deepseek-chat">DeepSeek Chat (быстрая)</option>
-                  <option value="deepseek-reasoner">DeepSeek Reasoner (мощная)</option>
+                  <option value="deepseek-chat">DeepSeek Chat</option>
                 </optgroup>
                 <optgroup label="OpenAI">
                   <option value="gpt-4o-mini">GPT-4o Mini</option>
@@ -311,8 +309,7 @@ export default function SettingsPage() {
                 className="w-full p-2 border rounded"
               >
                 <optgroup label="DeepSeek">
-                  <option value="deepseek-chat">DeepSeek Chat (быстрая)</option>
-                  <option value="deepseek-reasoner">DeepSeek Reasoner (мощная)</option>
+                  <option value="deepseek-chat">DeepSeek Chat</option>
                 </optgroup>
                 <optgroup label="OpenAI">
                   <option value="gpt-4o-mini">GPT-4o Mini</option>
