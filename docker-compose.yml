@@ -146,6 +146,7 @@ services:
       - .env
     environment:
       - PYTHONDONTWRITEBYTECODE=1
+      - MINI_APP_URL=${MINI_APP_URL}
     depends_on:
       postgres:
         condition: service_healthy
