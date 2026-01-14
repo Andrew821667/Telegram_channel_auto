@@ -577,7 +577,7 @@ export default function SettingsPage() {
               </label>
               <input
                 type="number"
-                value={settings?.budget?.fetcher?.max_articles_per_source || 300}
+                value={settings?.fetcher?.max_articles_per_source || 300}
                 onChange={(e) => updateFetcher('max_articles_per_source', parseInt(e.target.value))}
                 className="w-full p-2 border rounded"
                 min="10"
