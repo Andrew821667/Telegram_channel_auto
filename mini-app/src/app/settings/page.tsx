@@ -210,26 +210,6 @@ export default function SettingsPage() {
           <CardContent className="space-y-4">
             <div>
               <label className="text-sm font-medium mb-2 block">
-                Провайдер LLM
-              </label>
-              <select
-                value={settings?.llm_provider}
-                onChange={(e) =>
-                  setSettings({
-                    ...settings!,
-                    llm_provider: e.target.value,
-                  })
-                }
-                className="w-full p-2 border rounded"
-              >
-                <option value="deepseek">DeepSeek (дешевле)</option>
-                <option value="openai">OpenAI</option>
-                <option value="perplexity">Perplexity</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="text-sm font-medium mb-2 block">
                 Модель для анализа
               </label>
               <select
