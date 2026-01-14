@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { apiMethods, SystemSettings } from '@/lib/api'
@@ -11,28 +11,68 @@ export default function SettingsPage() {
   const [settings, setSettings] = useState<SystemSettings | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const intervalRef = useRef<NodeJS.Timeout | null>(null)
 
+  // Загрузка настроек при монтировании
   useEffect(() => {
     loadSettings()
   }, [])
 
-  const loadSettings = async () => {
+  // Автообновление каждые 30 секунд
+  useEffect(() => {
+    intervalRef.current = setInterval(() => {
+      loadSettings(true) // Тихое обновление
+    }, 30000) // 30 секунд
+
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current)
+      }
+    }
+  }, [])
+
+  // Обновление при возврате на страницу
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (!document.hidden) {
+        loadSettings(true) // Тихое обновление
+      }
+    }
+
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+    }
+  }, [])
+
+  const loadSettings = async (silent = false) => {
     try {
-      console.log('[Settings] Loading from API...')
+      if (!silent) {
+        console.log('[Settings] Loading from API...')
+      }
       const response = await apiMethods.getSettings()
-      console.log('[Settings] Received:', response.data)
+      if (!silent) {
+        console.log('[Settings] Received:', response.data)
+      }
       setSettings(response.data)
     } catch (error: any) {
       console.error('[Settings] Failed to load:', error)
-      const errorMessage = error?.response?.data?.detail || error?.message || 'Неизвестная ошибка'
 
-      if (window.Telegram?.WebApp) {
-        window.Telegram.WebApp.showAlert(`Ошибка загрузки настроек: ${errorMessage}`)
-      } else {
-        alert(`Ошибка загрузки настроек: ${errorMessage}`)
+      // Показываем ошибку только при первой загрузке, не при автообновлении
+      if (!silent) {
+        const errorMessage = error?.response?.data?.detail || error?.message || 'Неизвестная ошибка'
+
+        if (window.Telegram?.WebApp) {
+          window.Telegram.WebApp.showAlert(`Ошибка загрузки настроек: ${errorMessage}`)
+        } else {
+          alert(`Ошибка загрузки настроек: ${errorMessage}`)
+        }
       }
     } finally {
-      setLoading(false)
+      if (!silent) {
+        setLoading(false)
+      }
     }
   }
 
@@ -208,26 +248,6 @@ export default function SettingsPage() {
             <CardTitle>Модели LLM</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div>
-              <label className="text-sm font-medium mb-2 block">
-                Провайдер LLM
-              </label>
-              <select
-                value={settings?.llm_provider}
-                onChange={(e) =>
-                  setSettings({
-                    ...settings!,
-                    llm_provider: e.target.value,
-                  })
-                }
-                className="w-full p-2 border rounded"
-              >
-                <option value="deepseek">DeepSeek (дешевле)</option>
-                <option value="openai">OpenAI</option>
-                <option value="perplexity">Perplexity</option>
-              </select>
-            </div>
-
             <div>
               <label className="text-sm font-medium mb-2 block">
                 Модель для анализа
