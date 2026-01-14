@@ -2292,13 +2292,11 @@ async def callback_settings_llm(callback: CallbackQuery, db: AsyncSession):
     """Настройки моделей LLM."""
     from app.modules.settings_manager import get_setting
 
-    current_provider = await get_setting("llm.provider", db, default="deepseek")
     current_analysis = await get_setting("llm.analysis.model", db, default="deepseek-chat")
     current_draft = await get_setting("llm.draft_generation.model", db, default="deepseek-chat")
     current_ranking = await get_setting("llm.ranking.model", db, default="deepseek-chat")
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=f"🔌 Провайдер: {current_provider}", callback_data="llm_provider_select")],
         [InlineKeyboardButton(text=f"🔍 Анализ: {current_analysis}", callback_data="llm_select:analysis")],
         [InlineKeyboardButton(text=f"✍️ Генерация драфтов: {current_draft}", callback_data="llm_select:draft_generation")],
         [InlineKeyboardButton(text=f"📊 Ранжирование: {current_ranking}", callback_data="llm_select:ranking")],
@@ -2307,72 +2305,16 @@ async def callback_settings_llm(callback: CallbackQuery, db: AsyncSession):
 
     await callback.message.edit_text(
         "🤖 <b>Модели LLM</b>\n\n"
-        "Настройте провайдер и модели для разных операций:\n\n"
-        "• <b>Провайдер</b> - выбор LLM провайдера (DeepSeek/OpenAI/Perplexity)\n"
+        "Настройте модели для разных операций:\n\n"
         "• <b>Анализ</b> - AI анализ статей и метрик\n"
         "• <b>Генерация драфтов</b> - создание текстов постов\n"
         "• <b>Ранжирование</b> - scoring и сортировка статей\n\n"
-        "Нажмите на операцию для настройки:",
+        "💡 Доступны модели от всех провайдеров (DeepSeek, OpenAI).\n"
+        "Нажмите на операцию для выбора модели:",
         parse_mode="HTML",
         reply_markup=keyboard
     )
     await callback.answer()
-
-
-@router.callback_query(F.data == "llm_provider_select")
-async def callback_llm_provider_select(callback: CallbackQuery, db: AsyncSession):
-    """Показать меню выбора LLM провайдера."""
-    from app.modules.settings_manager import get_setting
-
-    current_provider = await get_setting("llm.provider", db, default="deepseek")
-
-    # Кнопки провайдеров с галочками
-    providers = [
-        ("deepseek", "DeepSeek V3 (дешевле)"),
-        ("openai", "OpenAI (GPT-4)"),
-        ("perplexity", "Perplexity (Llama 3.1)"),
-    ]
-
-    buttons = []
-    for provider_id, provider_name in providers:
-        checkmark = "✅ " if current_provider == provider_id else ""
-        buttons.append([InlineKeyboardButton(
-            text=f"{checkmark}{provider_name}",
-            callback_data=f"provider_select:{provider_id}"
-        )])
-
-    buttons.append([InlineKeyboardButton(text="« Назад", callback_data="settings:llm")])
-    keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
-
-    await callback.message.edit_text(
-        "🔌 <b>Выбор LLM провайдера</b>\n\n"
-        "Доступные провайдеры:\n\n"
-        "• <b>DeepSeek V3</b> - самый дешевый (~$0.14/1M токенов)\n"
-        "• <b>OpenAI GPT-4</b> - точная, средняя стоимость\n"
-        "• <b>Perplexity</b> - доступ к актуальной информации\n\n"
-        "✅ - текущий провайдер\n"
-        "Нажмите для изменения:",
-        parse_mode="HTML",
-        reply_markup=keyboard
-    )
-    await callback.answer()
-
-
-@router.callback_query(F.data.startswith("provider_select:"))
-async def callback_provider_select(callback: CallbackQuery, db: AsyncSession):
-    """Сохранить выбранный LLM провайдер."""
-    from app.modules.settings_manager import set_setting
-
-    provider = callback.data.split(":")[1]
-
-    # Сохраняем в базу данных
-    await set_setting("llm.provider", provider, db)
-
-    await callback.answer(f"✅ Провайдер изменен на {provider}", show_alert=True)
-
-    # Возвращаемся в меню LLM настроек
-    callback.data = "settings:llm"
-    await callback_settings_llm(callback, db)
 
 
 @router.callback_query(F.data.startswith("llm_select:"))
@@ -2388,11 +2330,10 @@ async def callback_llm_select(callback: CallbackQuery, db: AsyncSession):
         "ranking": "Ранжирование"
     }
 
-    # Получаем текущую модель и провайдер
+    # Получаем текущую модель
     current_model = await get_setting(f"llm.{operation}.model", db, default="deepseek-chat")
-    current_provider = await get_setting("llm.provider", db, default="deepseek")
 
-    # Available models based on provider
+    # Все доступные модели от всех провайдеров
     all_models = [
         ("deepseek-chat", "DeepSeek Chat (дешевле всего)"),
         ("gpt-4o", "GPT-4o (самая умная)"),
@@ -2438,9 +2379,8 @@ async def callback_llm_set(callback: CallbackQuery, db: AsyncSession):
 
     await callback.answer(f"✅ {model}")
 
-    # Обновляем экран с новыми галочками
-    callback.data = f"llm_select:{operation}"
-    await callback_llm_select(callback, db)
+    # Возвращаемся в главное меню LLM настроек
+    await callback_settings_llm(callback, db)
 
 
 @router.callback_query(F.data == "settings:dalle")
