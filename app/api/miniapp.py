@@ -231,10 +231,12 @@ async def get_settings(
             source_key = db_source.name.lower().replace(' ', '_').replace('-', '_').replace('.', '_')
             sources[source_key] = True  # All DB sources are enabled by default
 
+        llm_provider = await get_setting("llm.provider", db, "deepseek")
+
         llm_models = {
-            "analysis": await get_setting("llm.analysis.model", db, "gpt-4o"),
-            "draft_generation": await get_setting("llm.draft_generation.model", db, "gpt-4o-mini"),
-            "ranking": await get_setting("llm.ranking.model", db, "gpt-4o-mini"),
+            "analysis": await get_setting("llm.analysis.model", db, "deepseek-chat"),
+            "draft_generation": await get_setting("llm.draft_generation.model", db, "deepseek-chat"),
+            "ranking": await get_setting("llm.ranking.model", db, "deepseek-chat"),
         }
 
         dalle = {
@@ -272,6 +274,7 @@ async def get_settings(
 
         return {
             "sources": sources,
+            "llm_provider": llm_provider,
             "llm_models": llm_models,
             "dalle": dalle,
             "auto_publish": auto_publish,
@@ -303,6 +306,7 @@ async def update_settings(
 
         # Update other settings
         settings_mapping = {
+            "llm_provider": "llm.provider",
             "llm_models.analysis": "llm.analysis.model",
             "llm_models.draft_generation": "llm.draft_generation.model",
             "llm_models.ranking": "llm.ranking.model",

@@ -22,11 +22,12 @@ class LLMProvider:
         Initialize LLM provider.
 
         Args:
-            provider: Provider name ('openai' or 'perplexity').
+            provider: Provider name ('openai', 'perplexity', or 'deepseek').
                      If None, uses default from settings.
         """
         self.provider = provider or settings.default_llm_provider
         self._openai_client = None
+        self._deepseek_client = None
 
     async def generate_completion(
         self,
@@ -57,6 +58,8 @@ class LLMProvider:
             return await self._generate_openai(messages, temperature, max_tokens, operation, db, article_id, draft_id)
         elif self.provider == "perplexity":
             return await self._generate_perplexity(messages, temperature, max_tokens, operation, db, article_id, draft_id)
+        elif self.provider == "deepseek":
+            return await self._generate_deepseek(messages, temperature, max_tokens, operation, db, article_id, draft_id)
         else:
             raise ValueError(f"Unknown provider: {self.provider}")
 
@@ -199,6 +202,58 @@ class LLMProvider:
         except Exception as e:
             logger.error("perplexity_generation_error", error=str(e))
             raise
+
+    async def _generate_deepseek(
+        self,
+        messages: List[Dict[str, str]],
+        temperature: float = None,
+        max_tokens: int = None,
+        operation: str = "completion",
+        db: Optional[AsyncSession] = None,
+        article_id: Optional[int] = None,
+        draft_id: Optional[int] = None
+    ) -> str:
+        """Generate completion using DeepSeek API (OpenAI-compatible)."""
+        if self._deepseek_client is None:
+            self._deepseek_client = AsyncOpenAI(
+                api_key=settings.deepseek_api_key,
+                base_url=settings.deepseek_base_url
+            )
+
+        try:
+            response = await self._deepseek_client.chat.completions.create(
+                model=settings.deepseek_model,
+                messages=messages,
+                temperature=temperature or settings.deepseek_temperature,
+                max_tokens=max_tokens or settings.deepseek_max_tokens
+            )
+
+            result = response.choices[0].message.content.strip()
+
+            # Track API usage
+            if db is not None:
+                from app.modules.api_usage_tracker import track_api_usage
+                await track_api_usage(
+                    db=db,
+                    provider="deepseek",
+                    model=settings.deepseek_model,
+                    operation=operation,
+                    prompt_tokens=response.usage.prompt_tokens,
+                    completion_tokens=response.usage.completion_tokens,
+                    article_id=article_id,
+                    draft_id=draft_id
+                )
+
+            logger.info("deepseek_completion_generated",
+                       model=settings.deepseek_model,
+                       tokens=response.usage.total_tokens)
+            return result
+
+        except Exception as e:
+            logger.error("deepseek_generation_error", error=str(e))
+            # Fallback на OpenAI при ошибках
+            logger.warning("deepseek_fallback_to_openai", reason="DeepSeek API error")
+            return await self._generate_openai(messages, temperature, max_tokens, operation, db, article_id, draft_id)
 
 
 # Global LLM provider instance

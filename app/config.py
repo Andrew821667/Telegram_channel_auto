@@ -114,8 +114,15 @@ class Settings(BaseSettings):
     perplexity_temperature: float = Field(default=0.7)
     perplexity_search_enabled: bool = Field(default=True)  # Включить real-time поиск новостей через Perplexity
 
+    # DeepSeek AI
+    deepseek_api_key: str = Field(default="")
+    deepseek_model: str = Field(default="deepseek-chat")  # deepseek-chat or deepseek-reasoner
+    deepseek_max_tokens: int = Field(default=3500)
+    deepseek_temperature: float = Field(default=0.7)
+    deepseek_base_url: str = Field(default="https://api.deepseek.com")
+
     # LLM Provider Selection
-    default_llm_provider: str = Field(default="perplexity")  # openai or perplexity
+    default_llm_provider: str = Field(default="deepseek")  # openai, perplexity, or deepseek
 
     # Qdrant Vector Database
     qdrant_host: str = Field(default="qdrant")

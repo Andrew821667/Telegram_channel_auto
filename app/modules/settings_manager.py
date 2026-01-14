@@ -33,10 +33,13 @@ DEFAULT_SETTINGS = {
     "sources.rbc.enabled": {"value": True, "type": "bool", "category": "sources", "description": "RBC - Технологии"},
     "sources.tass.enabled": {"value": True, "type": "bool", "category": "sources", "description": "TASS - Наука и технологии"},
 
+    # Провайдер LLM
+    "llm.provider": {"value": "deepseek", "type": "string", "category": "llm", "description": "LLM провайдер (openai/perplexity/deepseek)"},
+
     # Модели LLM (оптимизировано для снижения расходов)
-    "llm.analysis.model": {"value": "gpt-4o-mini", "type": "string", "category": "llm", "description": "Модель для AI анализа"},
-    "llm.draft_generation.model": {"value": "gpt-4o-mini", "type": "string", "category": "llm", "description": "Модель для генерации драфтов"},
-    "llm.ranking.model": {"value": "gpt-4o-mini", "type": "string", "category": "llm", "description": "Модель для ranking статей"},
+    "llm.analysis.model": {"value": "deepseek-chat", "type": "string", "category": "llm", "description": "Модель для AI анализа"},
+    "llm.draft_generation.model": {"value": "deepseek-chat", "type": "string", "category": "llm", "description": "Модель для генерации драфтов"},
+    "llm.ranking.model": {"value": "deepseek-chat", "type": "string", "category": "llm", "description": "Модель для ranking статей"},
 
     # DALL-E генерация
     "dalle.enabled": {"value": False, "type": "bool", "category": "media", "description": "Включить DALL-E генерацию"},

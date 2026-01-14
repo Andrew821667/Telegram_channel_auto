@@ -135,6 +135,7 @@ export interface ChannelAnalyticsResponse {
 
 export interface SystemSettings {
   sources: Record<string, boolean>
+  llm_provider: string
   llm_models: {
     analysis: string
     draft_generation: string
@@ -161,14 +162,13 @@ export interface SystemSettings {
     similarity_threshold: number
   }
   budget: {
-  fetcher: {
-    max_articles_per_source: number
-  }
-
     max_per_month: number
     warning_threshold: number
     stop_on_exceed: boolean
     switch_to_cheap: boolean
+  }
+  fetcher: {
+    max_articles_per_source: number
   }
 }
 

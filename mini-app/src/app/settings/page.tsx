@@ -213,6 +213,26 @@ export default function SettingsPage() {
           <CardContent className="space-y-4">
             <div>
               <label className="text-sm font-medium mb-2 block">
+                Провайдер LLM
+              </label>
+              <select
+                value={settings?.llm_provider}
+                onChange={(e) =>
+                  setSettings({
+                    ...settings!,
+                    llm_provider: e.target.value,
+                  })
+                }
+                className="w-full p-2 border rounded"
+              >
+                <option value="deepseek">DeepSeek (дешевле)</option>
+                <option value="openai">OpenAI</option>
+                <option value="perplexity">Perplexity</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="text-sm font-medium mb-2 block">
                 Модель для анализа
               </label>
               <select
@@ -228,8 +248,17 @@ export default function SettingsPage() {
                 }
                 className="w-full p-2 border rounded"
               >
-                <option value="gpt-4o-mini">GPT-4o Mini</option>
-                <option value="gpt-4o">GPT-4o</option>
+                <optgroup label="DeepSeek">
+                  <option value="deepseek-chat">DeepSeek Chat (быстрая)</option>
+                  <option value="deepseek-reasoner">DeepSeek Reasoner (мощная)</option>
+                </optgroup>
+                <optgroup label="OpenAI">
+                  <option value="gpt-4o-mini">GPT-4o Mini</option>
+                  <option value="gpt-4o">GPT-4o</option>
+                </optgroup>
+                <optgroup label="Perplexity">
+                  <option value="sonar">Sonar</option>
+                </optgroup>
               </select>
             </div>
 
@@ -250,8 +279,17 @@ export default function SettingsPage() {
                 }
                 className="w-full p-2 border rounded"
               >
-                <option value="gpt-4o-mini">GPT-4o Mini</option>
-                <option value="gpt-4o">GPT-4o</option>
+                <optgroup label="DeepSeek">
+                  <option value="deepseek-chat">DeepSeek Chat (быстрая)</option>
+                  <option value="deepseek-reasoner">DeepSeek Reasoner (мощная)</option>
+                </optgroup>
+                <optgroup label="OpenAI">
+                  <option value="gpt-4o-mini">GPT-4o Mini</option>
+                  <option value="gpt-4o">GPT-4o</option>
+                </optgroup>
+                <optgroup label="Perplexity">
+                  <option value="sonar">Sonar</option>
+                </optgroup>
               </select>
             </div>
 
@@ -272,8 +310,17 @@ export default function SettingsPage() {
                 }
                 className="w-full p-2 border rounded"
               >
-                <option value="gpt-4o-mini">GPT-4o Mini</option>
-                <option value="gpt-4o">GPT-4o</option>
+                <optgroup label="DeepSeek">
+                  <option value="deepseek-chat">DeepSeek Chat (быстрая)</option>
+                  <option value="deepseek-reasoner">DeepSeek Reasoner (мощная)</option>
+                </optgroup>
+                <optgroup label="OpenAI">
+                  <option value="gpt-4o-mini">GPT-4o Mini</option>
+                  <option value="gpt-4o">GPT-4o</option>
+                </optgroup>
+                <optgroup label="Perplexity">
+                  <option value="sonar">Sonar</option>
+                </optgroup>
               </select>
             </div>
           </CardContent>
