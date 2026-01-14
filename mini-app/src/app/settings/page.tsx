@@ -106,12 +106,9 @@ export default function SettingsPage() {
     if (!settings) return
     setSettings({
       ...settings,
-      budget: {
-        ...settings.budget,
-        fetcher: {
-          ...settings.budget?.fetcher,
-          [key]: value,
-        },
+      fetcher: {
+        ...settings.fetcher,
+        [key]: value,
       },
     })
   }
