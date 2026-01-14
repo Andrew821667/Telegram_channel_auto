@@ -394,6 +394,15 @@ def get_llm_selection_keyboard(current_provider: str = "openai") -> InlineKeyboa
         )
     )
 
+    # DeepSeek
+    deepseek_text = "✅ DeepSeek (V3 - дешевле)" if current_provider == "deepseek" else "DeepSeek (V3 - дешевле)"
+    builder.row(
+        InlineKeyboardButton(
+            text=deepseek_text,
+            callback_data="llm_select:deepseek"
+        )
+    )
+
     builder.row(
         InlineKeyboardButton(
             text="« Назад",
