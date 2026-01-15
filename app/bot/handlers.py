@@ -706,43 +706,23 @@ async def process_manual_edit(message: Message, state: FSMContext, db: AsyncSess
 @router.message(EditDraft.waiting_for_llm_edit, F.voice)
 async def process_voice_edit(message: Message, state: FSMContext, db: AsyncSession):
     """Обработка голосовых инструкций по редактированию."""
-    await message.answer("🎤 Обрабатываю голосовое сообщение...")
 
-    try:
-        # Скачиваем голосовое сообщение
-        voice_file = await get_bot().get_file(message.voice.file_id)
-        voice_path = f"/tmp/voice_{message.voice.file_id}.ogg"
-        await get_bot().download_file(voice_file.file_path, voice_path)
-
-        # Транскрибируем через Whisper API
-        from openai import AsyncOpenAI
-        from app.config import settings
-
-        client = AsyncOpenAI(api_key=settings.openai_api_key)
-
-        with open(voice_path, "rb") as audio_file:
-            transcript = await client.audio.transcriptions.create(
-                model="whisper-1",
-                file=audio_file,
-                language="ru"
-            )
-
-        edit_instructions = transcript.text
+    # Используем встроенное распознавание Telegram (БЕСПЛАТНО!)
+    if message.voice.transcription:
+        # Транскрипция доступна (Telegram Premium или бот запросил)
+        edit_instructions = message.voice.transcription
 
         await message.answer(
             f"✅ <b>Распознал:</b>\n<i>{edit_instructions}</i>\n\n⏳ Генерирую новый вариант...",
             parse_mode="HTML"
         )
-
-        # Удаляем временный файл
-        import os
-        if os.path.exists(voice_path):
-            os.remove(voice_path)
-
-    except Exception as e:
-        logger.error("voice_transcription_error", error=str(e))
+    else:
+        # Транскрипция недоступна - предлагаем отправить текстом
         await message.answer(
-            f"❌ Ошибка при распознавании голоса: {str(e)}\n\nПопробуйте отправить текстом"
+            "❌ <b>Голосовое распознавание недоступно</b>\n\n"
+            "Пожалуйста, отправьте инструкции по редактированию <b>текстом</b>.\n\n"
+            "<i>💡 Совет: Telegram Premium пользователи получают автоматическое распознавание голоса!</i>",
+            parse_mode="HTML"
         )
         return
 
@@ -3269,29 +3249,11 @@ async def callback_post_voice(callback: CallbackQuery, state: FSMContext):
 @router.message(PersonalPostStates.waiting_voice, F.voice)
 async def process_voice_post(message: Message, state: FSMContext, db: AsyncSession):
     """Обработать голосовое сообщение."""
-    from app.modules.personal_posts_manager import transcribe_voice
-    import os
-    import tempfile
 
-    # Скачиваем голосовое сообщение
-    voice = message.voice
-    file = await message.bot.get_file(voice.file_id)
-
-    # Сохраняем во временный файл
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".ogg") as temp_file:
-        await message.bot.download_file(file.file_path, temp_file.name)
-        audio_path = temp_file.name
-
-    processing_msg = await message.answer("🎧 Расшифровываю голосовое сообщение...")
-
-    try:
-        # Транскрибируем
-        transcribed_text = await transcribe_voice(audio_path)
-
-        # Удаляем временный файл
-        os.unlink(audio_path)
-
-        await processing_msg.delete()
+    # Используем встроенное распознавание Telegram (БЕСПЛАТНО!)
+    if message.voice.transcription:
+        # Транскрипция доступна (Telegram Premium или бот запросил)
+        transcribed_text = message.voice.transcription
 
         # Сохраняем транскрипт и предлагаем опции
         await state.update_data(transcribed_text=transcribed_text)
@@ -3310,13 +3272,13 @@ async def process_voice_post(message: Message, state: FSMContext, db: AsyncSessi
             parse_mode="HTML",
             reply_markup=keyboard
         )
-
-    except Exception as e:
-        logger.error("voice_transcription_failed", error=str(e))
-        os.unlink(audio_path)
-        await processing_msg.delete()
+    else:
+        # Транскрипция недоступна - предлагаем отправить текстом
         await message.answer(
-            "❌ Не удалось расшифровать голосовое сообщение. Попробуйте ещё раз или напишите текстом.",
+            "❌ <b>Голосовое распознавание недоступно</b>\n\n"
+            "Пожалуйста, отправьте ваш пост <b>текстом</b>.\n\n"
+            "<i>💡 Совет: Telegram Premium пользователи получают автоматическое распознавание голоса!</i>",
+            parse_mode="HTML",
             reply_markup=get_main_menu_keyboard()
         )
         await state.clear()
