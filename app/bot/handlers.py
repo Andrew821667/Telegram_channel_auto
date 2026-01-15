@@ -222,6 +222,54 @@ async def cmd_drafts(message: Message, db: AsyncSession):
         await send_draft_for_review(message.chat.id, draft, db, draft_number=index)
 
 
+async def get_statistics(db: AsyncSession) -> str:
+    """Собрать и отформатировать статистику системы."""
+    from datetime import timedelta
+
+    # Статистика по контенту
+    articles_count = (await db.execute(select(func.count(RawArticle.id)))).scalar()
+    drafts_count = (await db.execute(select(func.count(PostDraft.id)))).scalar()
+    pubs_count = (await db.execute(select(func.count(Publication.id)))).scalar()
+
+    # Драфты по статусам
+    pending_drafts = (await db.execute(
+        select(func.count(PostDraft.id)).where(PostDraft.status == 'pending')
+    )).scalar()
+
+    approved_drafts = (await db.execute(
+        select(func.count(PostDraft.id)).where(PostDraft.status == 'approved')
+    )).scalar()
+
+    rejected_drafts = (await db.execute(
+        select(func.count(PostDraft.id)).where(PostDraft.status == 'rejected')
+    )).scalar()
+
+    # Последняя публикация
+    last_pub = (await db.execute(
+        select(Publication).order_by(Publication.published_at.desc()).limit(1)
+    )).scalar_one_or_none()
+
+    last_pub_text = ""
+    if last_pub:
+        last_pub_text = f"\n📅 Последняя публикация: {last_pub.published_at.strftime('%d.%m.%Y %H:%M')}"
+
+    stats_text = f"""
+📊 <b>Статистика системы</b>
+
+📰 <b>Контент:</b>
+├─ Статей собрано: {articles_count}
+├─ Драфтов создано: {drafts_count}
+└─ Опубликовано: {pubs_count}{last_pub_text}
+
+✍️ <b>Драфты по статусам:</b>
+├─ На модерации: {pending_drafts}
+├─ Одобрено: {approved_drafts}
+└─ Отклонено: {rejected_drafts}
+"""
+
+    return stats_text.strip()
+
+
 @router.message(Command("stats"))
 async def cmd_stats(message: Message, db: AsyncSession):
     """Показать статистику."""
