@@ -256,23 +256,38 @@ async def is_source_enabled(source_name: str, db: AsyncSession) -> bool:
 async def get_auto_publish_config(db: AsyncSession) -> Dict[str, Any]:
     """
     Получить конфигурацию автопубликации.
-    
+
     Args:
         db: Сессия базы данных
-        
+
     Returns:
-        Словарь с настройками автопубликации
+        Словарь с настройками автопубликации (без префикса в ключах)
     """
-    return await get_category_settings("auto_publish", db)
+    settings = await get_category_settings("publishing", db)
+    # Преобразуем ключи: auto_publish.enabled -> enabled
+    result = {}
+    for key, value in settings.items():
+        if key.startswith("auto_publish."):
+            short_key = key.replace("auto_publish.", "")
+            result[short_key] = value
+    return result
+
 async def get_dalle_config(db: AsyncSession) -> Dict[str, Any]:
     """
     Получить конфигурацию DALL-E генерации изображений.
-    
+
     Args:
         db: Сессия базы данных
-        
+
     Returns:
-        Словарь с настройками DALL-E
+        Словарь с настройками DALL-E (без префикса в ключах)
     """
-    return await get_category_settings("dalle", db)
+    settings = await get_category_settings("media", db)
+    # Преобразуем ключи: dalle.enabled -> enabled
+    result = {}
+    for key, value in settings.items():
+        if key.startswith("dalle."):
+            short_key = key.replace("dalle.", "")
+            result[short_key] = value
+    return result
 
