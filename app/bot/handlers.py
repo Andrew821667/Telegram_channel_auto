@@ -311,13 +311,24 @@ async def get_statistics(db: AsyncSession) -> str:
     if month_total_tokens > 0:
         api_stats_text += f"\n\n💰 <b>API расходы (текущий месяц):</b>"
         api_stats_text += f"\n├─ Всего токенов: {month_total_tokens:,}"
-        api_stats_text += f"\n├─ Общая стоимость: ${month_total_cost:.4f}"
+        # Используем адаптивное форматирование для маленьких сумм
+        cost_fmt = f"${month_total_cost:.6f}" if month_total_cost < 0.01 else f"${month_total_cost:.4f}"
+        api_stats_text += f"\n├─ Общая стоимость: {cost_fmt}"
+
+        # Бюджет и процент использования
+        from app.modules.settings_manager import get_setting
+        budget_max = await get_setting("budget.max_per_month", db, default=0.6)
+        if budget_max > 0:
+            budget_pct = (month_total_cost / budget_max) * 100
+            budget_emoji = "🟢" if budget_pct < 50 else "🟡" if budget_pct < 80 else "🔴"
+            api_stats_text += f"\n├─ Бюджет: {budget_pct:.1f}% использовано {budget_emoji}"
 
         if month_by_provider:
             api_stats_text += "\n└─ <b>По провайдерам:</b>"
             for provider, data in sorted(month_by_provider.items()):
                 provider_name = {"deepseek": "DeepSeek", "openai": "OpenAI", "perplexity": "Perplexity"}.get(provider, provider)
-                api_stats_text += f"\n   ├─ {provider_name}: {data['tokens']:,} токенов (${data['cost']:.4f})"
+                cost_fmt = f"${data['cost']:.6f}" if data['cost'] < 0.01 else f"${data['cost']:.4f}"
+                api_stats_text += f"\n   ├─ {provider_name}: {data['tokens']:,} токенов ({cost_fmt})"
 
     # Текущий год
     year_total_cost = sum(p['cost'] for p in year_by_provider.values())
@@ -326,15 +337,17 @@ async def get_statistics(db: AsyncSession) -> str:
     if year_total_tokens > 0:
         api_stats_text += f"\n\n📈 <b>API расходы (текущий год):</b>"
         api_stats_text += f"\n├─ Всего токенов: {year_total_tokens:,}"
-        api_stats_text += f"\n└─ Общая стоимость: ${year_total_cost:.4f}"
+        cost_fmt = f"${year_total_cost:.6f}" if year_total_cost < 0.01 else f"${year_total_cost:.4f}"
+        api_stats_text += f"\n└─ Общая стоимость: {cost_fmt}"
 
     # По операциям
     if by_operation:
         api_stats_text += f"\n\n⚙️ <b>По операциям (месяц):</b>"
         for operation, data in sorted(by_operation.items(), key=lambda x: x[1]['cost'], reverse=True):
             op_name = {"ranking": "Ранжирование", "draft_generation": "Генерация драфтов",
-                      "analysis": "Анализ", "editing": "Редактирование"}.get(operation, operation)
-            api_stats_text += f"\n├─ {op_name}: {data['tokens']:,} токенов (${data['cost']:.4f})"
+                      "analysis": "Анализ", "editing": "Редактирование", "completion": "Общие"}.get(operation, operation)
+            cost_fmt = f"${data['cost']:.6f}" if data['cost'] < 0.01 else f"${data['cost']:.4f}"
+            api_stats_text += f"\n├─ {op_name}: {data['tokens']:,} токенов ({cost_fmt})"
 
     # Последний запрос
     if last_api_call:
