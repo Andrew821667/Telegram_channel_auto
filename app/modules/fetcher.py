@@ -554,7 +554,9 @@ Search only for recent news. Return maximum 10 articles."""
                     {"role": "user", "content": search_prompt}
                 ],
                 max_tokens=3000,
-                temperature=0.3
+                temperature=0.3,
+                operation="news_fetch",
+                db=self.db
             )
 
             # Парсим JSON ответ
