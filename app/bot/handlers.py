@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.models.database import (
     PostDraft, Publication, RawArticle,
-    FeedbackLabel, PersonalPost, PostComment, get_db
+    FeedbackLabel, PersonalPost, PostComment, get_db, APIUsage
 )
 from app.bot.keyboards import (
     get_draft_review_keyboard,
@@ -224,7 +224,12 @@ async def cmd_drafts(message: Message, db: AsyncSession):
 
 async def get_statistics(db: AsyncSession) -> str:
     """Собрать и отформатировать статистику системы."""
-    from datetime import timedelta
+    from datetime import datetime, timedelta
+    from sqlalchemy import extract
+
+    now = datetime.utcnow()
+    current_month_start = datetime(now.year, now.month, 1)
+    current_year_start = datetime(now.year, 1, 1)
 
     # Статистика по контенту
     articles_count = (await db.execute(select(func.count(RawArticle.id)))).scalar()
@@ -235,11 +240,9 @@ async def get_statistics(db: AsyncSession) -> str:
     pending_drafts = (await db.execute(
         select(func.count(PostDraft.id)).where(PostDraft.status == 'pending')
     )).scalar()
-
     approved_drafts = (await db.execute(
         select(func.count(PostDraft.id)).where(PostDraft.status == 'approved')
     )).scalar()
-
     rejected_drafts = (await db.execute(
         select(func.count(PostDraft.id)).where(PostDraft.status == 'rejected')
     )).scalar()
@@ -248,10 +251,100 @@ async def get_statistics(db: AsyncSession) -> str:
     last_pub = (await db.execute(
         select(Publication).order_by(Publication.published_at.desc()).limit(1)
     )).scalar_one_or_none()
-
     last_pub_text = ""
     if last_pub:
         last_pub_text = f"\n📅 Последняя публикация: {last_pub.published_at.strftime('%d.%m.%Y %H:%M')}"
+
+    # ============ API USAGE СТАТИСТИКА ============
+
+    # За текущий месяц
+    month_stats = await db.execute(
+        select(
+            APIUsage.provider,
+            func.sum(APIUsage.total_tokens).label('tokens'),
+            func.sum(APIUsage.cost_usd).label('cost')
+        ).where(
+            APIUsage.created_at >= current_month_start
+        ).group_by(APIUsage.provider)
+    )
+    month_by_provider = {row.provider: {'tokens': row.tokens or 0, 'cost': float(row.cost or 0)}
+                         for row in month_stats}
+
+    # За текущий год
+    year_stats = await db.execute(
+        select(
+            APIUsage.provider,
+            func.sum(APIUsage.total_tokens).label('tokens'),
+            func.sum(APIUsage.cost_usd).label('cost')
+        ).where(
+            APIUsage.created_at >= current_year_start
+        ).group_by(APIUsage.provider)
+    )
+    year_by_provider = {row.provider: {'tokens': row.tokens or 0, 'cost': float(row.cost or 0)}
+                        for row in year_stats}
+
+    # По операциям (за текущий месяц)
+    operation_stats = await db.execute(
+        select(
+            APIUsage.operation,
+            func.sum(APIUsage.total_tokens).label('tokens'),
+            func.sum(APIUsage.cost_usd).label('cost')
+        ).where(
+            APIUsage.created_at >= current_month_start
+        ).group_by(APIUsage.operation)
+    )
+    by_operation = {row.operation: {'tokens': row.tokens or 0, 'cost': float(row.cost or 0)}
+                   for row in operation_stats}
+
+    # Последний запрос
+    last_api_call = (await db.execute(
+        select(APIUsage).order_by(APIUsage.created_at.desc()).limit(1)
+    )).scalar_one_or_none()
+
+    # Формируем статистику API
+    api_stats_text = ""
+
+    # Текущий месяц
+    month_total_cost = sum(p['cost'] for p in month_by_provider.values())
+    month_total_tokens = sum(p['tokens'] for p in month_by_provider.values())
+
+    if month_total_tokens > 0:
+        api_stats_text += f"\n\n💰 <b>API расходы (текущий месяц):</b>"
+        api_stats_text += f"\n├─ Всего токенов: {month_total_tokens:,}"
+        api_stats_text += f"\n├─ Общая стоимость: ${month_total_cost:.4f}"
+
+        if month_by_provider:
+            api_stats_text += "\n└─ <b>По провайдерам:</b>"
+            for provider, data in sorted(month_by_provider.items()):
+                provider_name = {"deepseek": "DeepSeek", "openai": "OpenAI", "perplexity": "Perplexity"}.get(provider, provider)
+                api_stats_text += f"\n   ├─ {provider_name}: {data['tokens']:,} токенов (${data['cost']:.4f})"
+
+    # Текущий год
+    year_total_cost = sum(p['cost'] for p in year_by_provider.values())
+    year_total_tokens = sum(p['tokens'] for p in year_by_provider.values())
+
+    if year_total_tokens > 0:
+        api_stats_text += f"\n\n📈 <b>API расходы (текущий год):</b>"
+        api_stats_text += f"\n├─ Всего токенов: {year_total_tokens:,}"
+        api_stats_text += f"\n└─ Общая стоимость: ${year_total_cost:.4f}"
+
+    # По операциям
+    if by_operation:
+        api_stats_text += f"\n\n⚙️ <b>По операциям (месяц):</b>"
+        for operation, data in sorted(by_operation.items(), key=lambda x: x[1]['cost'], reverse=True):
+            op_name = {"ranking": "Ранжирование", "draft_generation": "Генерация драфтов",
+                      "analysis": "Анализ", "editing": "Редактирование"}.get(operation, operation)
+            api_stats_text += f"\n├─ {op_name}: {data['tokens']:,} токенов (${data['cost']:.4f})"
+
+    # Последний запрос
+    if last_api_call:
+        provider_name = {"deepseek": "DeepSeek", "openai": "OpenAI", "perplexity": "Perplexity"}.get(last_api_call.provider, last_api_call.provider)
+        api_stats_text += f"\n\n🔄 <b>Последний API запрос:</b>"
+        api_stats_text += f"\n├─ Провайдер: {provider_name}"
+        api_stats_text += f"\n├─ Модель: {last_api_call.model}"
+        api_stats_text += f"\n├─ Операция: {last_api_call.operation or 'не указана'}"
+        api_stats_text += f"\n├─ Токены: {last_api_call.total_tokens:,}"
+        api_stats_text += f"\n└─ Стоимость: ${last_api_call.cost_usd:.6f}"
 
     stats_text = f"""
 📊 <b>Статистика системы</b>
@@ -264,7 +357,7 @@ async def get_statistics(db: AsyncSession) -> str:
 ✍️ <b>Драфты по статусам:</b>
 ├─ На модерации: {pending_drafts}
 ├─ Одобрено: {approved_drafts}
-└─ Отклонено: {rejected_drafts}
+└─ Отклонено: {rejected_drafts}{api_stats_text}
 """
 
     return stats_text.strip()
