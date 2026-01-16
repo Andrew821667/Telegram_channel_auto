@@ -77,7 +77,8 @@ def is_content_valid(content: str, title: str = "") -> bool:
     Returns:
         True если контент валидный, False если мусор
     """
-    if not content or len(content.strip()) < 100:
+    # Минимум 50 символов (RSS summary обычно короче полного контента)
+    if not content or len(content.strip()) < 50:
         logger.warning("content_validation_failed", reason="too_short", length=len(content or ""))
         return False
 
@@ -313,10 +314,11 @@ class NewsFetcher:
                     "published_at": self._parse_date(entry.get("published")),
                 }
 
-                # Пытаемся получить полный текст статьи
-                full_content = await self._fetch_article_content(entry.link)
-                if full_content:
-                    article_data["content"] = full_content
+                # ОТКЛЮЧЕНО: Google News перенаправляет на consent.google.com
+                # Используем только краткое содержание из RSS вместо полного контента
+                # full_content = await self._fetch_article_content(entry.link)
+                # if full_content:
+                #     article_data["content"] = full_content
 
                 articles.append(article_data)
 
@@ -492,10 +494,11 @@ class NewsFetcher:
                     "published_at": self._parse_date(entry.get("published")),
                 }
 
-                # Пытаемся получить полный контент
-                full_content = await self._fetch_article_content(entry.link)
-                if full_content:
-                    article_data["content"] = full_content
+                # ОТКЛЮЧЕНО: Многие сайты используют consent страницы
+                # Используем только краткое содержание из RSS
+                # full_content = await self._fetch_article_content(entry.link)
+                # if full_content:
+                #     article_data["content"] = full_content
 
                 # 🔍 ФИЛЬТРАЦИЯ: Проверяем релевантность по AI + legal/business
                 if not self._is_relevant_article(article_data["title"], article_data["content"]):
