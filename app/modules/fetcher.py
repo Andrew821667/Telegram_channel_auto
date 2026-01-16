@@ -91,10 +91,12 @@ def is_content_valid(content: str, title: str = "") -> bool:
         'language menu',                      # Меню языка
     ]
 
-    content_lower = content.lower()[:500]  # Проверяем только начало
+    # Нормализуем контент: переносы строк -> пробелы, множественные пробелы -> одиночные
+    import re
+    content_normalized = re.sub(r'\s+', ' ', content.lower()[:500])
 
     for pattern in garbage_patterns:
-        if pattern in content_lower:
+        if pattern in content_normalized:
             logger.warning(
                 "content_validation_failed",
                 reason="garbage_pattern",
