@@ -119,8 +119,8 @@ class TelegramChannelFetcher:
         # Проверяем наличие хотя бы одного legal/business keyword
         has_legal_or_business = any(keyword in text for keyword in legal_business_keywords)
 
-        # Релевантна если есть И ai И (legal ИЛИ business)
-        is_relevant = has_ai and has_legal_or_business
+        # Релевантна если есть ai ИЛИ (legal ИЛИ business) - как в RSS fetcher
+        is_relevant = has_ai or has_legal_or_business
 
         if not is_relevant:
             logger.debug(
