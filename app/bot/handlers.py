@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.models.database import (
     PostDraft, Publication, RawArticle,
-    FeedbackLabel, PersonalPost, PostComment, get_db
+    FeedbackLabel, PersonalPost, PostComment, get_db, APIUsage
 )
 from app.bot.keyboards import (
     get_draft_review_keyboard,
@@ -220,6 +220,160 @@ async def cmd_drafts(message: Message, db: AsyncSession):
     max_drafts = min(len(drafts), settings.publisher_max_posts_per_day)
     for index, draft in enumerate(drafts[:max_drafts], start=1):
         await send_draft_for_review(message.chat.id, draft, db, draft_number=index)
+
+
+async def get_statistics(db: AsyncSession) -> str:
+    """Собрать и отформатировать статистику системы."""
+    from datetime import datetime, timedelta
+    from sqlalchemy import extract
+
+    now = datetime.utcnow()
+    current_month_start = datetime(now.year, now.month, 1)
+    current_year_start = datetime(now.year, 1, 1)
+
+    # Статистика по контенту
+    articles_count = (await db.execute(select(func.count(RawArticle.id)))).scalar()
+    drafts_count = (await db.execute(select(func.count(PostDraft.id)))).scalar()
+    pubs_count = (await db.execute(select(func.count(Publication.id)))).scalar()
+
+    # Драфты по статусам
+    pending_drafts = (await db.execute(
+        select(func.count(PostDraft.id)).where(PostDraft.status == 'pending')
+    )).scalar()
+    approved_drafts = (await db.execute(
+        select(func.count(PostDraft.id)).where(PostDraft.status == 'approved')
+    )).scalar()
+    rejected_drafts = (await db.execute(
+        select(func.count(PostDraft.id)).where(PostDraft.status == 'rejected')
+    )).scalar()
+
+    # Последняя публикация
+    last_pub = (await db.execute(
+        select(Publication).order_by(Publication.published_at.desc()).limit(1)
+    )).scalar_one_or_none()
+    last_pub_text = ""
+    if last_pub:
+        last_pub_text = f"\n📅 Последняя публикация: {last_pub.published_at.strftime('%d.%m.%Y %H:%M')}"
+
+    # ============ API USAGE СТАТИСТИКА ============
+
+    # За текущий месяц
+    month_stats = await db.execute(
+        select(
+            APIUsage.provider,
+            func.sum(APIUsage.total_tokens).label('tokens'),
+            func.sum(APIUsage.cost_usd).label('cost')
+        ).where(
+            APIUsage.created_at >= current_month_start
+        ).group_by(APIUsage.provider)
+    )
+    month_by_provider = {row.provider: {'tokens': row.tokens or 0, 'cost': float(row.cost or 0)}
+                         for row in month_stats}
+
+    # За текущий год
+    year_stats = await db.execute(
+        select(
+            APIUsage.provider,
+            func.sum(APIUsage.total_tokens).label('tokens'),
+            func.sum(APIUsage.cost_usd).label('cost')
+        ).where(
+            APIUsage.created_at >= current_year_start
+        ).group_by(APIUsage.provider)
+    )
+    year_by_provider = {row.provider: {'tokens': row.tokens or 0, 'cost': float(row.cost or 0)}
+                        for row in year_stats}
+
+    # По операциям (за текущий месяц)
+    operation_stats = await db.execute(
+        select(
+            APIUsage.operation,
+            func.sum(APIUsage.total_tokens).label('tokens'),
+            func.sum(APIUsage.cost_usd).label('cost')
+        ).where(
+            APIUsage.created_at >= current_month_start
+        ).group_by(APIUsage.operation)
+    )
+    by_operation = {row.operation: {'tokens': row.tokens or 0, 'cost': float(row.cost or 0)}
+                   for row in operation_stats}
+
+    # Последний запрос
+    last_api_call = (await db.execute(
+        select(APIUsage).order_by(APIUsage.created_at.desc()).limit(1)
+    )).scalar_one_or_none()
+
+    # Формируем статистику API
+    api_stats_text = ""
+
+    # Текущий месяц
+    month_total_cost = sum(p['cost'] for p in month_by_provider.values())
+    month_total_tokens = sum(p['tokens'] for p in month_by_provider.values())
+
+    if month_total_tokens > 0:
+        api_stats_text += f"\n\n💰 <b>API расходы (текущий месяц):</b>"
+        api_stats_text += f"\n├─ Всего токенов: {month_total_tokens:,}"
+        # Используем адаптивное форматирование для маленьких сумм
+        cost_fmt = f"${month_total_cost:.6f}" if month_total_cost < 0.01 else f"${month_total_cost:.4f}"
+        api_stats_text += f"\n├─ Общая стоимость: {cost_fmt}"
+
+        # Бюджет и процент использования
+        from app.modules.settings_manager import get_setting
+        budget_max = await get_setting("budget.max_per_month", db, default=0.6)
+        if budget_max > 0:
+            budget_pct = (month_total_cost / budget_max) * 100
+            budget_emoji = "🟢" if budget_pct < 50 else "🟡" if budget_pct < 80 else "🔴"
+            api_stats_text += f"\n├─ Бюджет: {budget_pct:.1f}% использовано {budget_emoji}"
+
+        if month_by_provider:
+            api_stats_text += "\n└─ <b>По провайдерам:</b>"
+            for provider, data in sorted(month_by_provider.items()):
+                provider_name = {"deepseek": "DeepSeek", "openai": "OpenAI", "perplexity": "Perplexity"}.get(provider, provider)
+                cost_fmt = f"${data['cost']:.6f}" if data['cost'] < 0.01 else f"${data['cost']:.4f}"
+                api_stats_text += f"\n   ├─ {provider_name}: {data['tokens']:,} токенов ({cost_fmt})"
+
+    # Текущий год
+    year_total_cost = sum(p['cost'] for p in year_by_provider.values())
+    year_total_tokens = sum(p['tokens'] for p in year_by_provider.values())
+
+    if year_total_tokens > 0:
+        api_stats_text += f"\n\n📈 <b>API расходы (текущий год):</b>"
+        api_stats_text += f"\n├─ Всего токенов: {year_total_tokens:,}"
+        cost_fmt = f"${year_total_cost:.6f}" if year_total_cost < 0.01 else f"${year_total_cost:.4f}"
+        api_stats_text += f"\n└─ Общая стоимость: {cost_fmt}"
+
+    # По операциям
+    if by_operation:
+        api_stats_text += f"\n\n⚙️ <b>По операциям (месяц):</b>"
+        for operation, data in sorted(by_operation.items(), key=lambda x: x[1]['cost'], reverse=True):
+            op_name = {"ranking": "Ранжирование", "draft_generation": "Генерация драфтов",
+                      "analysis": "Анализ", "editing": "Редактирование", "completion": "Общие"}.get(operation, operation)
+            cost_fmt = f"${data['cost']:.6f}" if data['cost'] < 0.01 else f"${data['cost']:.4f}"
+            api_stats_text += f"\n├─ {op_name}: {data['tokens']:,} токенов ({cost_fmt})"
+
+    # Последний запрос
+    if last_api_call:
+        provider_name = {"deepseek": "DeepSeek", "openai": "OpenAI", "perplexity": "Perplexity"}.get(last_api_call.provider, last_api_call.provider)
+        api_stats_text += f"\n\n🔄 <b>Последний API запрос:</b>"
+        api_stats_text += f"\n├─ Провайдер: {provider_name}"
+        api_stats_text += f"\n├─ Модель: {last_api_call.model}"
+        api_stats_text += f"\n├─ Операция: {last_api_call.operation or 'не указана'}"
+        api_stats_text += f"\n├─ Токены: {last_api_call.total_tokens:,}"
+        api_stats_text += f"\n└─ Стоимость: ${last_api_call.cost_usd:.6f}"
+
+    stats_text = f"""
+📊 <b>Статистика системы</b>
+
+📰 <b>Контент:</b>
+├─ Статей собрано: {articles_count}
+├─ Драфтов создано: {drafts_count}
+└─ Опубликовано: {pubs_count}{last_pub_text}
+
+✍️ <b>Драфты по статусам:</b>
+├─ На модерации: {pending_drafts}
+├─ Одобрено: {approved_drafts}
+└─ Отклонено: {rejected_drafts}{api_stats_text}
+"""
+
+    return stats_text.strip()
 
 
 @router.message(Command("stats"))
@@ -552,43 +706,23 @@ async def process_manual_edit(message: Message, state: FSMContext, db: AsyncSess
 @router.message(EditDraft.waiting_for_llm_edit, F.voice)
 async def process_voice_edit(message: Message, state: FSMContext, db: AsyncSession):
     """Обработка голосовых инструкций по редактированию."""
-    await message.answer("🎤 Обрабатываю голосовое сообщение...")
 
-    try:
-        # Скачиваем голосовое сообщение
-        voice_file = await get_bot().get_file(message.voice.file_id)
-        voice_path = f"/tmp/voice_{message.voice.file_id}.ogg"
-        await get_bot().download_file(voice_file.file_path, voice_path)
-
-        # Транскрибируем через Whisper API
-        from openai import AsyncOpenAI
-        from app.config import settings
-
-        client = AsyncOpenAI(api_key=settings.openai_api_key)
-
-        with open(voice_path, "rb") as audio_file:
-            transcript = await client.audio.transcriptions.create(
-                model="whisper-1",
-                file=audio_file,
-                language="ru"
-            )
-
-        edit_instructions = transcript.text
+    # Используем встроенное распознавание Telegram (БЕСПЛАТНО!)
+    if message.voice.transcription:
+        # Транскрипция доступна (Telegram Premium или бот запросил)
+        edit_instructions = message.voice.transcription
 
         await message.answer(
             f"✅ <b>Распознал:</b>\n<i>{edit_instructions}</i>\n\n⏳ Генерирую новый вариант...",
             parse_mode="HTML"
         )
-
-        # Удаляем временный файл
-        import os
-        if os.path.exists(voice_path):
-            os.remove(voice_path)
-
-    except Exception as e:
-        logger.error("voice_transcription_error", error=str(e))
+    else:
+        # Транскрипция недоступна - предлагаем отправить текстом
         await message.answer(
-            f"❌ Ошибка при распознавании голоса: {str(e)}\n\nПопробуйте отправить текстом"
+            "❌ <b>Голосовое распознавание недоступно</b>\n\n"
+            "Пожалуйста, отправьте инструкции по редактированию <b>текстом</b>.\n\n"
+            "<i>💡 Совет: Telegram Premium пользователи получают автоматическое распознавание голоса!</i>",
+            parse_mode="HTML"
         )
         return
 
@@ -3115,29 +3249,11 @@ async def callback_post_voice(callback: CallbackQuery, state: FSMContext):
 @router.message(PersonalPostStates.waiting_voice, F.voice)
 async def process_voice_post(message: Message, state: FSMContext, db: AsyncSession):
     """Обработать голосовое сообщение."""
-    from app.modules.personal_posts_manager import transcribe_voice
-    import os
-    import tempfile
 
-    # Скачиваем голосовое сообщение
-    voice = message.voice
-    file = await message.bot.get_file(voice.file_id)
-
-    # Сохраняем во временный файл
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".ogg") as temp_file:
-        await message.bot.download_file(file.file_path, temp_file.name)
-        audio_path = temp_file.name
-
-    processing_msg = await message.answer("🎧 Расшифровываю голосовое сообщение...")
-
-    try:
-        # Транскрибируем
-        transcribed_text = await transcribe_voice(audio_path)
-
-        # Удаляем временный файл
-        os.unlink(audio_path)
-
-        await processing_msg.delete()
+    # Используем встроенное распознавание Telegram (БЕСПЛАТНО!)
+    if message.voice.transcription:
+        # Транскрипция доступна (Telegram Premium или бот запросил)
+        transcribed_text = message.voice.transcription
 
         # Сохраняем транскрипт и предлагаем опции
         await state.update_data(transcribed_text=transcribed_text)
@@ -3156,13 +3272,13 @@ async def process_voice_post(message: Message, state: FSMContext, db: AsyncSessi
             parse_mode="HTML",
             reply_markup=keyboard
         )
-
-    except Exception as e:
-        logger.error("voice_transcription_failed", error=str(e))
-        os.unlink(audio_path)
-        await processing_msg.delete()
+    else:
+        # Транскрипция недоступна - предлагаем отправить текстом
         await message.answer(
-            "❌ Не удалось расшифровать голосовое сообщение. Попробуйте ещё раз или напишите текстом.",
+            "❌ <b>Голосовое распознавание недоступно</b>\n\n"
+            "Пожалуйста, отправьте ваш пост <b>текстом</b>.\n\n"
+            "<i>💡 Совет: Telegram Premium пользователи получают автоматическое распознавание голоса!</i>",
+            parse_mode="HTML",
             reply_markup=get_main_menu_keyboard()
         )
         await state.clear()

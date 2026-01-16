@@ -391,36 +391,6 @@ async def delete_post(post_id: int, user_id: int, db: AsyncSession) -> bool:
     return True
 
 
-async def transcribe_voice(audio_file_path: str) -> str:
-    """
-    Транскрибировать голосовое сообщение в текст (Whisper API).
-
-    Args:
-        audio_file_path: Путь к аудио файлу
-
-    Returns:
-        Транскрибированный текст
-    """
-    client = openai.AsyncOpenAI(api_key=settings.openai_api_key)
-
-    try:
-        with open(audio_file_path, "rb") as audio_file:
-            transcript = await client.audio.transcriptions.create(
-                model="whisper-1",
-                file=audio_file,
-                language="ru"  # Или определять автоматически
-            )
-
-        text = transcript.text
-
-        logger.info(
-            "voice_transcribed",
-            file_path=audio_file_path,
-            text_length=len(text)
-        )
-
-        return text
-
-    except Exception as e:
-        logger.error("transcription_error", error=str(e), file=audio_file_path)
-        raise
+# УДАЛЕНО: transcribe_voice() - теперь используем встроенное распознавание Telegram
+# Функция больше не нужна, так как Telegram предоставляет бесплатное распознавание
+# через message.voice.transcription для Premium пользователей

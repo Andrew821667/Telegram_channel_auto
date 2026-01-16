@@ -167,6 +167,7 @@ class AICore:
                     system_prompt=RANKING_SYSTEM_PROMPT,
                     user_prompt=user_prompt,
                     max_tokens=5,  # Уменьшено с 10 до 5 для экономии
+                    operation="ranking",
                     temperature=0.1  # Минимальная температура для консистентности
                 )
 
@@ -428,6 +429,7 @@ class AICore:
                 system_prompt=DRAFT_SYSTEM_PROMPT,
                 user_prompt=user_prompt,
                 max_tokens=settings.openai_max_tokens,
+                operation="draft_generation",
                 temperature=settings.openai_temperature
             )
 
@@ -555,7 +557,8 @@ class AICore:
         system_prompt: str,
         user_prompt: str,
         max_tokens: Optional[int] = None,
-        temperature: Optional[float] = None
+        temperature: Optional[float] = None,
+        operation: str = "completion"
     ) -> str:
         """
         Вызвать LLM API с retry механизмом.
@@ -565,6 +568,7 @@ class AICore:
             user_prompt: Пользовательский промпт
             max_tokens: Максимум токенов
             temperature: Температура
+            operation: Тип операции (ranking, draft_generation, analysis, etc)
 
         Returns:
             Ответ модели
@@ -577,6 +581,7 @@ class AICore:
                 ],
                 max_tokens=max_tokens,
                 temperature=temperature,
+                operation=operation,
                 db=self.db
             )
 

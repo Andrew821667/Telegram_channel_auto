@@ -16,6 +16,9 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime
+import structlog
+
+logger = structlog.get_logger()
 
 from app.services.reader_service import (
     get_user_profile,
@@ -1057,10 +1060,20 @@ async def handle_question(message: Message, state: FSMContext, db: AsyncSession)
     # Generate answer using AI
     try:
         from app.modules.llm_provider import get_llm_provider
-        llm = get_llm_provider()
-        ai_response = await llm.generate_response(
-            prompt=f"Ответь кратко и по делу на вопрос о LegalTech: {question}",
-            max_tokens=500
+        from app.config import settings
+
+        # Используем дефолтный LLM provider (может быть DeepSeek, OpenAI или Perplexity)
+        llm = get_llm_provider(settings.default_llm_provider)
+
+        ai_response = await llm.generate_completion(
+            messages=[
+                {"role": "system", "content": "Ты - эксперт по LegalTech и ИИ в юриспруденции. Отвечай кратко, по делу и профессионально."},
+                {"role": "user", "content": question}
+            ],
+            max_tokens=500,
+            temperature=0.7,
+            operation="question_answer",
+            db=db
         )
 
         questions_left = 3 - (lead_profile.questions_asked or 0)

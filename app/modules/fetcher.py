@@ -61,6 +61,66 @@ USER_AGENTS = [
 ]
 
 
+def is_content_valid(content: str, title: str = "") -> bool:
+    """
+    Валидация контента статьи для защиты от мусора.
+
+    Проверяет:
+    - Минимальную длину
+    - Отсутствие мусора (языковых меню, навигации)
+    - Качество текста
+
+    Args:
+        content: Контент статьи
+        title: Заголовок статьи (опционально)
+
+    Returns:
+        True если контент валидный, False если мусор
+    """
+    # Минимум 50 символов (RSS summary обычно короче полного контента)
+    if not content or len(content.strip()) < 50:
+        logger.warning("content_validation_failed", reason="too_short", length=len(content or ""))
+        return False
+
+    # Признаки мусора: языковые меню, навигация
+    garbage_patterns = [
+        'deutsch english español français',  # Меню языков Google
+        'united states united kingdom',       # Меню стран
+        'all languages afrikaans',            # Список всех языков
+        'select your language',               # Выбор языка
+        'choose language',                    # Выбор языка
+        'language menu',                      # Меню языка
+    ]
+
+    # Нормализуем контент: переносы строк -> пробелы, множественные пробелы -> одиночные
+    import re
+    content_normalized = re.sub(r'\s+', ' ', content.lower()[:500])
+
+    for pattern in garbage_patterns:
+        if pattern in content_normalized:
+            logger.warning(
+                "content_validation_failed",
+                reason="garbage_pattern",
+                pattern=pattern,
+                title=title[:80]
+            )
+            return False
+
+    # RSS summary могут быть короткими - это нормально
+    # Не проверяем минимальное количество слов для RSS feeds
+
+    # Проверка на чрезмерное количество коротких слов (признак мусора)
+    words = content.split()
+    if len(words) >= 20:  # Проверяем только если достаточно слов
+        short_words = [w for w in words[:100] if len(w) <= 3]
+        if len(short_words) > len(words[:100]) * 0.7:  # Больше 70% коротких слов = мусор
+            logger.warning("content_validation_failed", reason="too_many_short_words", ratio=len(short_words)/len(words[:100]))
+            return False
+
+    logger.debug("content_validation_passed", length=len(content), words=len(words))
+    return True
+
+
 def is_article_relevant(title: str, content: str = "") -> bool:
     """
     Проверяет, содержит ли статья релевантные ключевые слова.
@@ -253,10 +313,11 @@ class NewsFetcher:
                     "published_at": self._parse_date(entry.get("published")),
                 }
 
-                # Пытаемся получить полный текст статьи
-                full_content = await self._fetch_article_content(entry.link)
-                if full_content:
-                    article_data["content"] = full_content
+                # ОТКЛЮЧЕНО: Google News перенаправляет на consent.google.com
+                # Используем только краткое содержание из RSS вместо полного контента
+                # full_content = await self._fetch_article_content(entry.link)
+                # if full_content:
+                #     article_data["content"] = full_content
 
                 articles.append(article_data)
 
@@ -353,29 +414,32 @@ class NewsFetcher:
         # Объединяем title и content для поиска
         text = f"{title} {content}".lower()
 
-        # Ключевые слова AI (русские и английские)
+        # Ключевые слова AI (русские и английские) - разные падежи
         ai_keywords = [
-            # Русские
-            "искусственный интеллект", "ии", "нейросет", "машинное обучение",
-            "chatgpt", "gpt", "openai", "claude", "gemini", "llm", "нейронн",
+            # Русские - разные падежи
+            "искусственный интеллект", "искусственного интеллекта", "искусственным интеллектом",
+            "искусственному интеллекту", "искусственном интеллекте",
+            "ии", "нейросет", "нейронн", "машинное обучение", "машинного обучения",
+            "chatgpt", "gpt", "openai", "claude", "gemini", "llm",
             "автоматизац", "роботизац", "ml ", "ai ", "deep learning",
             # Английские
             "artificial intelligence", "machine learning", "neural network",
             "automation", "robotics", "nlp", "computer vision"
         ]
 
-        # Ключевые слова legal/business (русские и английские)
+        # Ключевые слова legal/business (русские и английские) - разные падежи
         legal_business_keywords = [
-            # Русские - юридические
-            "право", "суд", "юрист", "закон", "договор", "правов", "юридическ",
+            # Русские - юридические (разные падежи)
+            "прав", "суд", "юрист", "закон", "договор",  # "прав" найдет: право, права, правах
             "compliance", "комплаенс", "регулиров", "нормативн", "судебн",
+            "авторск",  # авторский, авторское, авторских
             # Русские - бизнес
             "бизнес", "компан", "корпорат", "управлен", "риск", "безопасност",
             "данных", "персональн", "gdpr", "конфиденциальн",
             # Английские
             "legal", "law", "court", "lawyer", "attorney", "contract",
             "regulation", "legaltech", "business", "corporate", "governance",
-            "compliance", "risk", "data protection", "privacy"
+            "compliance", "risk", "data protection", "privacy", "copyright"
         ]
 
         # Проверяем наличие хотя бы одного AI keyword
@@ -432,10 +496,11 @@ class NewsFetcher:
                     "published_at": self._parse_date(entry.get("published")),
                 }
 
-                # Пытаемся получить полный контент
-                full_content = await self._fetch_article_content(entry.link)
-                if full_content:
-                    article_data["content"] = full_content
+                # ОТКЛЮЧЕНО: Многие сайты используют consent страницы
+                # Используем только краткое содержание из RSS
+                # full_content = await self._fetch_article_content(entry.link)
+                # if full_content:
+                #     article_data["content"] = full_content
 
                 # 🔍 ФИЛЬТРАЦИЯ: Проверяем релевантность по AI + legal/business
                 if not self._is_relevant_article(article_data["title"], article_data["content"]):
@@ -554,7 +619,9 @@ Search only for recent news. Return maximum 10 articles."""
                     {"role": "user", "content": search_prompt}
                 ],
                 max_tokens=3000,
-                temperature=0.3
+                temperature=0.3,
+                operation="news_fetch",
+                db=self.db
             )
 
             # Парсим JSON ответ
@@ -653,6 +720,15 @@ Search only for recent news. Return maximum 10 articles."""
 
                 if not is_article_relevant(title, content):
                     logger.debug("article_filtered_out", title=title[:50])
+                    continue
+
+                # 🛡️ ВАЛИДАЦИЯ КОНТЕНТА: защита от мусора
+                if not is_content_valid(content, title):
+                    logger.info(
+                        "article_rejected_invalid_content",
+                        title=title[:80],
+                        content_length=len(content) if content else 0
+                    )
                     continue
 
                 # Проверяем, существует ли статья с таким URL ИЛИ таким заголовком

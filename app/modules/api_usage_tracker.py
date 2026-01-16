@@ -16,7 +16,7 @@ import structlog
 logger = structlog.get_logger()
 
 
-# Стоимость за 1M токенов в USD (актуально на декабрь 2024)
+# Стоимость за 1M токенов в USD (актуально на январь 2025)
 PRICING = {
     "openai": {
         "gpt-4o": {
@@ -44,6 +44,16 @@ PRICING = {
         "llama-3.1-sonar-large-128k-online": {
             "prompt": 1.00,
             "completion": 1.00
+        }
+    },
+    "deepseek": {
+        "deepseek-chat": {
+            "prompt": 0.27,      # $0.27 per 1M input tokens
+            "completion": 1.10   # $1.10 per 1M output tokens
+        },
+        "deepseek-reasoner": {
+            "prompt": 0.55,      # $0.55 per 1M input tokens
+            "completion": 2.19   # $2.19 per 1M output tokens
         }
     }
 }
