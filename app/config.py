@@ -112,7 +112,7 @@ class Settings(BaseSettings):
     perplexity_model: str = Field(default="pplx-70b-online")
     perplexity_max_tokens: int = Field(default=3500)
     perplexity_temperature: float = Field(default=0.7)
-    perplexity_search_enabled: bool = Field(default=True)  # Включить real-time поиск новостей через Perplexity
+    perplexity_search_enabled: bool = Field(default=False)  # ОТКЛЮЧЕНО: нет средств на балансе Perplexity
 
     # DeepSeek AI
     deepseek_api_key: str = Field(default="")
