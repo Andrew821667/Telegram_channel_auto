@@ -106,17 +106,16 @@ def is_content_valid(content: str, title: str = "") -> bool:
             )
             return False
 
-    # Проверка качества: соотношение уникальных слов к общему количеству
-    words = content.split()
-    if len(words) < 20:
-        logger.warning("content_validation_failed", reason="too_few_words", words=len(words))
-        return False
+    # RSS summary могут быть короткими - это нормально
+    # Не проверяем минимальное количество слов для RSS feeds
 
-    # Если слишком много повторений коротких слов - это мусор
-    short_words = [w for w in words[:100] if len(w) <= 3]  # Проверяем первые 100 слов
-    if len(short_words) > len(words[:100]) * 0.7:  # Больше 70% коротких слов = мусор
-        logger.warning("content_validation_failed", reason="too_many_short_words", ratio=len(short_words)/len(words[:100]))
-        return False
+    # Проверка на чрезмерное количество коротких слов (признак мусора)
+    words = content.split()
+    if len(words) >= 20:  # Проверяем только если достаточно слов
+        short_words = [w for w in words[:100] if len(w) <= 3]
+        if len(short_words) > len(words[:100]) * 0.7:  # Больше 70% коротких слов = мусор
+            logger.warning("content_validation_failed", reason="too_many_short_words", ratio=len(short_words)/len(words[:100]))
+            return False
 
     logger.debug("content_validation_passed", length=len(content), words=len(words))
     return True
