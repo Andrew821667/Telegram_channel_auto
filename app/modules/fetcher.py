@@ -61,6 +61,64 @@ USER_AGENTS = [
 ]
 
 
+def is_content_valid(content: str, title: str = "") -> bool:
+    """
+    Валидация контента статьи для защиты от мусора.
+
+    Проверяет:
+    - Минимальную длину
+    - Отсутствие мусора (языковых меню, навигации)
+    - Качество текста
+
+    Args:
+        content: Контент статьи
+        title: Заголовок статьи (опционально)
+
+    Returns:
+        True если контент валидный, False если мусор
+    """
+    if not content or len(content.strip()) < 100:
+        logger.warning("content_validation_failed", reason="too_short", length=len(content or ""))
+        return False
+
+    # Признаки мусора: языковые меню, навигация
+    garbage_patterns = [
+        'deutsch english español français',  # Меню языков Google
+        'united states united kingdom',       # Меню стран
+        'all languages afrikaans',            # Список всех языков
+        'select your language',               # Выбор языка
+        'choose language',                    # Выбор языка
+        'language menu',                      # Меню языка
+    ]
+
+    content_lower = content.lower()[:500]  # Проверяем только начало
+
+    for pattern in garbage_patterns:
+        if pattern in content_lower:
+            logger.warning(
+                "content_validation_failed",
+                reason="garbage_pattern",
+                pattern=pattern,
+                title=title[:80]
+            )
+            return False
+
+    # Проверка качества: соотношение уникальных слов к общему количеству
+    words = content.split()
+    if len(words) < 20:
+        logger.warning("content_validation_failed", reason="too_few_words", words=len(words))
+        return False
+
+    # Если слишком много повторений коротких слов - это мусор
+    short_words = [w for w in words[:100] if len(w) <= 3]  # Проверяем первые 100 слов
+    if len(short_words) > len(words[:100]) * 0.7:  # Больше 70% коротких слов = мусор
+        logger.warning("content_validation_failed", reason="too_many_short_words", ratio=len(short_words)/len(words[:100]))
+        return False
+
+    logger.debug("content_validation_passed", length=len(content), words=len(words))
+    return True
+
+
 def is_article_relevant(title: str, content: str = "") -> bool:
     """
     Проверяет, содержит ли статья релевантные ключевые слова.
@@ -655,6 +713,15 @@ Search only for recent news. Return maximum 10 articles."""
 
                 if not is_article_relevant(title, content):
                     logger.debug("article_filtered_out", title=title[:50])
+                    continue
+
+                # 🛡️ ВАЛИДАЦИЯ КОНТЕНТА: защита от мусора
+                if not is_content_valid(content, title):
+                    logger.info(
+                        "article_rejected_invalid_content",
+                        title=title[:80],
+                        content_length=len(content) if content else 0
+                    )
                     continue
 
                 # Проверяем, существует ли статья с таким URL ИЛИ таким заголовком
