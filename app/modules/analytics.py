@@ -63,11 +63,11 @@ class AnalyticsService:
                 AND (
                     COALESCE((reactions->>'useful')::int, 0) +
                     COALESCE((reactions->>'important')::int, 0) +
+                    COALESCE((reactions->>'interesting')::int, 0) +
                     COALESCE((reactions->>'controversial')::int, 0) +
                     COALESCE((reactions->>'banal')::int, 0) +
                     COALESCE((reactions->>'obvious')::int, 0) +
                     COALESCE((reactions->>'poor_quality')::int, 0) +
-                    COALESCE((reactions->>'low_content_quality')::int, 0) +
                     COALESCE((reactions->>'bad_source')::int, 0)
                 ) > 0
             """)
@@ -95,11 +95,11 @@ class AnalyticsService:
                 SELECT
                     SUM(COALESCE((reactions->>'useful')::int, 0)) as useful,
                     SUM(COALESCE((reactions->>'important')::int, 0)) as important,
+                    SUM(COALESCE((reactions->>'interesting')::int, 0)) as interesting,
                     SUM(COALESCE((reactions->>'controversial')::int, 0)) as controversial,
                     SUM(COALESCE((reactions->>'banal')::int, 0)) as banal,
                     SUM(COALESCE((reactions->>'obvious')::int, 0)) as obvious,
                     SUM(COALESCE((reactions->>'poor_quality')::int, 0)) as poor_quality,
-                    SUM(COALESCE((reactions->>'low_content_quality')::int, 0)) as low_content_quality,
                     SUM(COALESCE((reactions->>'bad_source')::int, 0)) as bad_source
                 FROM publications
                 WHERE published_at >= :date_from
@@ -110,11 +110,11 @@ class AnalyticsService:
             reactions = {
                 "useful": reactions_row.useful or 0,
                 "important": reactions_row.important or 0,
+                "interesting": reactions_row.interesting or 0,
                 "controversial": reactions_row.controversial or 0,
                 "banal": reactions_row.banal or 0,
                 "obvious": reactions_row.obvious or 0,
                 "poor_quality": reactions_row.poor_quality or 0,
-                "low_content_quality": reactions_row.low_content_quality or 0,
                 "bad_source": reactions_row.bad_source or 0
             }
 
@@ -126,19 +126,19 @@ class AnalyticsService:
                     SELECT AVG(
                         (
                             COALESCE((reactions->>'useful')::int, 0) +
-                            COALESCE((reactions->>'important')::int, 0) -
+                            COALESCE((reactions->>'important')::int, 0) +
+                            COALESCE((reactions->>'interesting')::int, 0) -
                             COALESCE((reactions->>'banal')::int, 0) -
                             COALESCE((reactions->>'obvious')::int, 0) -
                             COALESCE((reactions->>'poor_quality')::int, 0) -
-                            COALESCE((reactions->>'low_content_quality')::int, 0) -
                             COALESCE((reactions->>'bad_source')::int, 0)
                         )::float / NULLIF(
                             COALESCE((reactions->>'useful')::int, 0) +
                             COALESCE((reactions->>'important')::int, 0) +
+                            COALESCE((reactions->>'interesting')::int, 0) +
                             COALESCE((reactions->>'banal')::int, 0) +
                             COALESCE((reactions->>'obvious')::int, 0) +
                             COALESCE((reactions->>'poor_quality')::int, 0) +
-                            COALESCE((reactions->>'low_content_quality')::int, 0) +
                             COALESCE((reactions->>'bad_source')::int, 0) +
                             COALESCE((reactions->>'controversial')::int, 0),
                             0
@@ -149,10 +149,10 @@ class AnalyticsService:
                     AND (
                         COALESCE((reactions->>'useful')::int, 0) +
                         COALESCE((reactions->>'important')::int, 0) +
+                        COALESCE((reactions->>'interesting')::int, 0) +
                         COALESCE((reactions->>'banal')::int, 0) +
                         COALESCE((reactions->>'obvious')::int, 0) +
                         COALESCE((reactions->>'poor_quality')::int, 0) +
-                        COALESCE((reactions->>'low_content_quality')::int, 0) +
                         COALESCE((reactions->>'bad_source')::int, 0) +
                         COALESCE((reactions->>'controversial')::int, 0)
                     ) > 0
@@ -207,13 +207,15 @@ class AnalyticsService:
                     p.reactions,
                     (
                         COALESCE((p.reactions->>'useful')::int, 0) +
-                        COALESCE((p.reactions->>'important')::int, 0) -
+                        COALESCE((p.reactions->>'important')::int, 0) +
+                        COALESCE((p.reactions->>'interesting')::int, 0) -
                         COALESCE((p.reactions->>'banal')::int, 0) -
                         COALESCE((p.reactions->>'obvious')::int, 0) -
                         COALESCE((p.reactions->>'poor_quality')::int, 0)
                     )::float / NULLIF(
                         COALESCE((p.reactions->>'useful')::int, 0) +
                         COALESCE((p.reactions->>'important')::int, 0) +
+                        COALESCE((p.reactions->>'interesting')::int, 0) +
                         COALESCE((p.reactions->>'banal')::int, 0) +
                         COALESCE((p.reactions->>'obvious')::int, 0) +
                         COALESCE((p.reactions->>'poor_quality')::int, 0) +
@@ -223,6 +225,7 @@ class AnalyticsService:
                     (
                         COALESCE((p.reactions->>'useful')::int, 0) +
                         COALESCE((p.reactions->>'important')::int, 0) +
+                        COALESCE((p.reactions->>'interesting')::int, 0) +
                         COALESCE((p.reactions->>'banal')::int, 0) +
                         COALESCE((p.reactions->>'obvious')::int, 0) +
                         COALESCE((p.reactions->>'poor_quality')::int, 0) +
@@ -234,6 +237,7 @@ class AnalyticsService:
                 AND (
                     COALESCE((p.reactions->>'useful')::int, 0) +
                     COALESCE((p.reactions->>'important')::int, 0) +
+                    COALESCE((p.reactions->>'interesting')::int, 0) +
                     COALESCE((p.reactions->>'banal')::int, 0) +
                     COALESCE((p.reactions->>'obvious')::int, 0) +
                     COALESCE((p.reactions->>'poor_quality')::int, 0) +
@@ -291,13 +295,15 @@ class AnalyticsService:
                     p.reactions,
                     (
                         COALESCE((p.reactions->>'useful')::int, 0) +
-                        COALESCE((p.reactions->>'important')::int, 0) -
+                        COALESCE((p.reactions->>'important')::int, 0) +
+                        COALESCE((p.reactions->>'interesting')::int, 0) -
                         COALESCE((p.reactions->>'banal')::int, 0) -
                         COALESCE((p.reactions->>'obvious')::int, 0) -
                         COALESCE((p.reactions->>'poor_quality')::int, 0)
                     )::float / NULLIF(
                         COALESCE((p.reactions->>'useful')::int, 0) +
                         COALESCE((p.reactions->>'important')::int, 0) +
+                        COALESCE((p.reactions->>'interesting')::int, 0) +
                         COALESCE((p.reactions->>'banal')::int, 0) +
                         COALESCE((p.reactions->>'obvious')::int, 0) +
                         COALESCE((p.reactions->>'poor_quality')::int, 0) +
@@ -307,6 +313,7 @@ class AnalyticsService:
                     (
                         COALESCE((p.reactions->>'useful')::int, 0) +
                         COALESCE((p.reactions->>'important')::int, 0) +
+                        COALESCE((p.reactions->>'interesting')::int, 0) +
                         COALESCE((p.reactions->>'banal')::int, 0) +
                         COALESCE((p.reactions->>'obvious')::int, 0) +
                         COALESCE((p.reactions->>'poor_quality')::int, 0) +
@@ -385,13 +392,15 @@ class AnalyticsService:
                     AVG(
                         (
                             COALESCE((p.reactions->>'useful')::int, 0) +
-                            COALESCE((p.reactions->>'important')::int, 0) -
+                            COALESCE((p.reactions->>'important')::int, 0) +
+                            COALESCE((p.reactions->>'interesting')::int, 0) -
                             COALESCE((p.reactions->>'banal')::int, 0) -
                             COALESCE((p.reactions->>'obvious')::int, 0) -
                             COALESCE((p.reactions->>'poor_quality')::int, 0)
                         )::float / NULLIF(
                             COALESCE((p.reactions->>'useful')::int, 0) +
                             COALESCE((p.reactions->>'important')::int, 0) +
+                            COALESCE((p.reactions->>'interesting')::int, 0) +
                             COALESCE((p.reactions->>'banal')::int, 0) +
                             COALESCE((p.reactions->>'obvious')::int, 0) +
                             COALESCE((p.reactions->>'poor_quality')::int, 0) +
@@ -450,13 +459,15 @@ class AnalyticsService:
                     AVG(
                         (
                             COALESCE((reactions->>'useful')::int, 0) +
-                            COALESCE((reactions->>'important')::int, 0) -
+                            COALESCE((reactions->>'important')::int, 0) +
+                            COALESCE((reactions->>'interesting')::int, 0) -
                             COALESCE((reactions->>'banal')::int, 0) -
                             COALESCE((reactions->>'obvious')::int, 0) -
                             COALESCE((reactions->>'poor_quality')::int, 0)
                         )::float / NULLIF(
                             COALESCE((reactions->>'useful')::int, 0) +
                             COALESCE((reactions->>'important')::int, 0) +
+                            COALESCE((reactions->>'interesting')::int, 0) +
                             COALESCE((reactions->>'banal')::int, 0) +
                             COALESCE((reactions->>'obvious')::int, 0) +
                             COALESCE((reactions->>'poor_quality')::int, 0) +
@@ -592,26 +603,26 @@ class AnalyticsService:
                     AVG(
                         (
                             COALESCE((p.reactions->>'useful')::int, 0) +
-                            COALESCE((p.reactions->>'important')::int, 0) -
+                            COALESCE((p.reactions->>'important')::int, 0) +
+                            COALESCE((p.reactions->>'interesting')::int, 0) -
                             COALESCE((p.reactions->>'banal')::int, 0) -
                             COALESCE((p.reactions->>'obvious')::int, 0) -
                             COALESCE((p.reactions->>'poor_quality')::int, 0) -
-                            COALESCE((p.reactions->>'low_content_quality')::int, 0) -
                             COALESCE((p.reactions->>'bad_source')::int, 0)
                         )::float / NULLIF(
                             COALESCE((p.reactions->>'useful')::int, 0) +
                             COALESCE((p.reactions->>'important')::int, 0) +
+                            COALESCE((p.reactions->>'interesting')::int, 0) +
                             COALESCE((p.reactions->>'banal')::int, 0) +
                             COALESCE((p.reactions->>'obvious')::int, 0) +
                             COALESCE((p.reactions->>'poor_quality')::int, 0) +
-                            COALESCE((p.reactions->>'low_content_quality')::int, 0) +
                             COALESCE((p.reactions->>'bad_source')::int, 0) +
                             COALESCE((p.reactions->>'controversial')::int, 0),
                             0
                         )
                     ) as avg_quality_score,
                     SUM(COALESCE((p.reactions->>'bad_source')::int, 0)) as bad_source_reactions,
-                    SUM(COALESCE((p.reactions->>'low_content_quality')::int, 0)) as low_quality_reactions
+                    SUM(COALESCE((p.reactions->>'poor_quality')::int, 0)) as low_quality_reactions
                 FROM publications p
                 JOIN post_drafts pd ON p.draft_id = pd.id
                 JOIN raw_articles ra ON pd.article_id = ra.id
@@ -636,7 +647,7 @@ class AnalyticsService:
                 if avg_score < -0.4 and bad_source_count >= 2:
                     recommendation = "🚫 ОТКЛЮЧИТЬ: Ненадежный источник с низким качеством информации"
                     severity = "critical"
-                elif avg_score < -0.3 and (bad_source_count >= 1 or low_quality_count >= 2):
+                elif avg_score < -0.3 and (bad_source_count >= 1 or low_quality_count >= 3):
                     recommendation = "⚠️ ПРОВЕРИТЬ: Источник с проблемами качества"
                     severity = "warning"
                 elif avg_score < 0.0 and total_pubs >= 5:
@@ -687,12 +698,14 @@ class AnalyticsService:
                     AVG(
                         COALESCE((reactions->>'useful')::int, 0) +
                         COALESCE((reactions->>'important')::int, 0) +
+                        COALESCE((reactions->>'interesting')::int, 0) +
                         COALESCE((reactions->>'controversial')::int, 0)
                     ) as avg_positive_reactions,
                     AVG(
                         (
                             COALESCE((reactions->>'useful')::int, 0) +
                             COALESCE((reactions->>'important')::int, 0) +
+                            COALESCE((reactions->>'interesting')::int, 0) +
                             COALESCE((reactions->>'controversial')::int, 0)
                         )::float / NULLIF(views, 0)
                     ) as engagement_rate
@@ -771,7 +784,8 @@ class AnalyticsService:
                     p.views,
                     (
                         COALESCE((p.reactions->>'useful')::int, 0) +
-                        COALESCE((p.reactions->>'important')::int, 0)
+                        COALESCE((p.reactions->>'important')::int, 0) +
+                        COALESCE((p.reactions->>'interesting')::int, 0)
                     ) as positive_reactions
                 FROM publications p
                 JOIN post_drafts d ON p.draft_id = d.id

@@ -178,14 +178,13 @@ class VectorSearch:
             return 0.0
 
         # Позитивные реакции
-        positive = reactions.get("useful", 0) + reactions.get("important", 0)
+        positive = reactions.get("useful", 0) + reactions.get("important", 0) + reactions.get("interesting", 0)
 
         # Негативные реакции
         negative = (
             reactions.get("banal", 0) +
             reactions.get("obvious", 0) +
             reactions.get("poor_quality", 0) +
-            reactions.get("low_content_quality", 0) +
             reactions.get("bad_source", 0)
         )
 

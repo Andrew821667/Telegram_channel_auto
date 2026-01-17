@@ -1530,22 +1530,22 @@ async def callback_react(callback: CallbackQuery, db: AsyncSession):
         reaction_emoji = {
             "useful": "👍",
             "important": "🔥",
+            "interesting": "✨",
             "controversial": "🤔",
             "banal": "💤",
             "obvious": "🤷",
             "poor_quality": "👎",
-            "low_content_quality": "📉",
             "bad_source": "📰"
         }
-        
+
         reaction_text = {
             "useful": "Полезно",
             "important": "Важно",
+            "interesting": "Интересно",
             "controversial": "Спорно",
             "banal": "Банально",
             "obvious": "Очевидно",
             "poor_quality": "Плохое качество",
-            "low_content_quality": "Низкое качество контента",
             "bad_source": "Плохой источник"
         }
         
@@ -1735,11 +1735,11 @@ def format_analytics_report(
 <b>Реакции:</b>
 ├─ 👍 Полезно: {stats['reactions']['useful']} ({stats['reactions']['useful']/max(stats['total_reactions'],1)*100:.0f}%)
 ├─ 🔥 Важно: {stats['reactions']['important']} ({stats['reactions']['important']/max(stats['total_reactions'],1)*100:.0f}%)
+├─ ✨ Интересно: {stats['reactions']['interesting']} ({stats['reactions']['interesting']/max(stats['total_reactions'],1)*100:.0f}%)
 ├─ 🤔 Спорно: {stats['reactions']['controversial']} ({stats['reactions']['controversial']/max(stats['total_reactions'],1)*100:.0f}%)
 ├─ 💤 Банальщина: {stats['reactions']['banal']} ({stats['reactions']['banal']/max(stats['total_reactions'],1)*100:.0f}%)
 ├─ 🤷 Очевидно: {stats['reactions']['obvious']} ({stats['reactions']['obvious']/max(stats['total_reactions'],1)*100:.0f}%)
 ├─ 👎 Плохое: {stats['reactions']['poor_quality']} ({stats['reactions']['poor_quality']/max(stats['total_reactions'],1)*100:.0f}%)
-├─ 📉 Низкое качество: {stats['reactions']['low_content_quality']} ({stats['reactions']['low_content_quality']/max(stats['total_reactions'],1)*100:.0f}%)
 └─ 📰 Плохой источник: {stats['reactions']['bad_source']} ({stats['reactions']['bad_source']/max(stats['total_reactions'],1)*100:.0f}%)
 
 <b>Engagement:</b>
@@ -1791,8 +1791,6 @@ def format_analytics_report(
                 report += "   ⚠️ Проблема: Очевидные выводы\n"
             elif reactions.get('poor_quality', 0) > 0:
                 report += "   ⚠️ Проблема: Низкое качество контента\n"
-            elif reactions.get('low_content_quality', 0) > 0:
-                report += "   ⚠️ Проблема: Плохая подача материала\n"
             elif reactions.get('bad_source', 0) > 0:
                 report += "   ⚠️ Проблема: Ненадежный или некачественный источник\n"
 

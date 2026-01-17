@@ -252,6 +252,12 @@ def get_opinion_keyboard(post_id: int) -> InlineKeyboardMarkup:
     )
     builder.row(
         InlineKeyboardButton(
+            text="✨ Интересно",
+            callback_data=f"react:{post_id}:interesting"
+        )
+    )
+    builder.row(
+        InlineKeyboardButton(
             text="🤔 Спорно",
             callback_data=f"react:{post_id}:controversial"
         )
@@ -274,12 +280,6 @@ def get_opinion_keyboard(post_id: int) -> InlineKeyboardMarkup:
         InlineKeyboardButton(
             text="👎 Плохое качество",
             callback_data=f"react:{post_id}:poor_quality"
-        )
-    )
-    builder.row(
-        InlineKeyboardButton(
-            text="📉 Низкое качество контента",
-            callback_data=f"react:{post_id}:low_content_quality"
         )
     )
     builder.row(
